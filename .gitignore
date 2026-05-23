@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# clai-helpers (auto-managed by `clai-helpers init`)
+# staging directory for atomic writes
+.helpers/
