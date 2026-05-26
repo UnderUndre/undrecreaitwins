@@ -114,7 +114,7 @@
 
 ## Phase 6: User Story 4 — Telegram channel adapter (Priority: P2)
 
-**Goal**: Telegram adapter connects via Telegraf, routes messages through Redis pub/sub
+**Goal**: Telegram adapter connects via Telegraf, routes messages through Redis Streams
 **Independent Test**: Configure bot → send message → reply arrives within 5 seconds
 
 ### Implementation
@@ -125,7 +125,7 @@
 - [ ] T038 [BE] [US4] Create `packages/core/src/services/channel-orchestrator.ts` — Consume from `twin.stream.in` consumer group, invoke chat-service (with Redlock mutex per conversation_id), publish response to `twin.stream.out`. Idempotency via Redis `SETNX` with 5 min TTL on key `dedup:{channel_id}:{message_id}` — distributed across all API pods. ACK message only after successful processing
 - [ ] T039 [BE] [US4] Create `packages/channel-telegram/src/telegram-adapter.ts` — Implement `ChannelAdapter` interface. Telegraf-based: connect (long-polling or webhook), onIncoming → publish to `twin.message.in.{channel_id}`, subscribe to `twin.message.out.{channel_id}` → send to Telegram. Reconnection with exponential backoff
 - [ ] T040 [BE] [US4] Create `packages/channel-telegram/src/index.ts` — CLI entry point: parse `--channel-id`, `--api-url`, `--redis-url` flags, instantiate adapter, connect
-- [ ] T041 [E2E] [US4] Create `packages/channel-telegram/tests/integration/telegram-adapter.test.ts` — Test: adapter connects, receives message, publishes to pub/sub, receives outbound, sends reply
+- [ ] T041 [E2E] [US4] Create `packages/channel-telegram/tests/integration/telegram-adapter.test.ts` — Test: adapter connects, receives message, publishes to `twin.stream.in`, consumes from `twin.stream.out`, sends reply
 
 **Checkpoint**: Telegram channel fully functional end-to-end
 
@@ -133,7 +133,7 @@
 
 ## Phase 7: User Story 5 — WhatsApp channel adapter via Evolution API (Priority: P2)
 
-**Goal**: Same pub/sub pattern as Telegram but for WhatsApp via Evolution API
+**Goal**: Same Redis Streams pattern as Telegram but for WhatsApp via Evolution API
 **Independent Test**: Configure Evolution API → send WhatsApp message → receive response
 
 ### Implementation

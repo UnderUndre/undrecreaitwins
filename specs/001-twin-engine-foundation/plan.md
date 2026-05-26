@@ -5,12 +5,12 @@
 
 ## Summary
 
-Headless open-source AI-clone/digital-twin backend. Multi-tenant from day one: persona CRUD in Postgres via Drizzle ORM, conversation loop through OmniRoute LLM gateway + Letta memory + Qdrant RAG. Channel adapters (Telegram via Telegraf, WhatsApp via Evolution API) run as separate processes, communicate with core through Redis pub/sub — adapter crash ≠ API crash. Twin training ingests chat exports (Telegram JSON, WhatsApp TXT, JSONL) in streaming fashion to avoid OOM on large dumps. OpenAI-compatible `/v1/chat/completions` endpoint so every LangChain-wielding startup can plug in without reading docs. CLI tool `twin` for power users. Apache 2.0 license. Consumers: Dvoiniki SaaS shell, third-party self-hosters, CLI users.
+Headless open-source AI-clone/digital-twin backend. Multi-tenant from day one: persona CRUD in Postgres via Drizzle ORM, conversation loop through OmniRoute LLM gateway + Letta memory + Qdrant RAG. Channel adapters (Telegram via Telegraf, WhatsApp via Evolution API) run as separate processes, communicate with core through Redis Streams (durable consumer groups) — adapter crash ≠ API crash. Twin training ingests chat exports (Telegram JSON, WhatsApp TXT, JSONL) in streaming fashion to avoid OOM on large dumps. OpenAI-compatible `/v1/chat/completions` endpoint so every LangChain-wielding startup can plug in without reading docs. CLI tool `twin` for power users. Apache 2.0 license. Consumers: Dvoiniki SaaS shell, third-party self-hosters, CLI users.
 
 ## Technical Context
 
 **Language/Version**: TypeScript 5+ / Node 20+ (ESM)
-**Primary Dependencies**: Fastify (HTTP), Drizzle ORM (Postgres), ioredis (Redis pub/sub), Telegraf (Telegram), @undrestrator/infra-client (LLM/Vector/Queue), Letta client (memory)
+**Primary Dependencies**: Fastify (HTTP), Drizzle ORM (Postgres), ioredis (Redis Streams), Telegraf (Telegram), @undrestrator/infra-client (LLM/Vector/Queue), Letta client (memory)
 **Storage**: PostgreSQL ≥15 (JSONB, Drizzle ORM), Qdrant (vectors, per-tenant collections), Redis (pub/sub + BullMQ)
 **Testing**: Vitest + Supertest (API integration), testcontainers (Docker-based E2E)
 **Target Platform**: Linux server (Docker Compose), dev on macOS/Windows
@@ -111,6 +111,6 @@ package.json (root, private)
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
 |-----------|------------|-------------------------------------|
-| Channel-as-separate-process (Redis pub/sub) | Horizontal scaling, crash isolation, independent adapter worker scaling | In-process adapter: can't scale independently, adapter crash = API crash, different languages/runtimes for future adapters |
+| Channel-as-separate-process (Redis Streams) | Horizontal scaling, crash isolation, independent adapter worker scaling | In-process adapter: can't scale independently, adapter crash = API crash, different languages/runtimes for future adapters |
 | OpenAI-compat surface area (full /v1/chat/completions parity) | Distribution unlock — any tool that speaks OpenAI speaks to twin-engine | Custom API: requires custom SDK, Dvoiniki devs learn proprietary API, LangChain/LlamaIndex need OpenAI compat anyway |
 | Letta as external memory service | Best LongMemEval bench (83%), self-editing memory, OS-like agent model | In-context only: degrades over long conversations, no cross-session persistence. In-DB memory: no intelligent retrieval, no archival/recall distinction |

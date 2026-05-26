@@ -5,7 +5,7 @@
 **Feature Branch**: `001-twin-engine-foundation`
 **Created**: 2026-05-23
 **Status**: Draft (Clarified)
-**Input**: User description: "Open-source headless AI-clone (digital twin) backend. Multi-tenant primitives. Core conversation API with REST + SSE + OpenAI-compatible endpoint. Persona stored in Postgres, runtime CRUD. Memory via Letta. RAG via Qdrant. Real-time channel adapters (Telegram, WhatsApp/Evolution API) as opt-in packages communicating with core via Redis pub/sub. Twin training pipeline from chat logs (Telegram JSON/WhatsApp TXT) included in v1. Built on top of undrestrator orchestra (OmniRoute LLM gateway + Hermes runtime + Qdrant + Redis). Apache 2.0 license. Consumers: Dvoiniki SaaS shell, third-party self-hosters, CLI users."
+**Input**: User description: "Open-source headless AI-clone (digital twin) backend. Multi-tenant primitives. Core conversation API with REST + SSE + OpenAI-compatible endpoint. Persona stored in Postgres, runtime CRUD. Memory via Letta. RAG via Qdrant. Real-time channel adapters (Telegram, WhatsApp/Evolution API) as opt-in packages communicating with core via Redis Streams. Twin training pipeline from chat logs (Telegram JSON/WhatsApp TXT) included in v1. Built on top of undrestrator orchestra (OmniRoute LLM gateway + Hermes runtime + Qdrant + Redis). Apache 2.0 license. Consumers: Dvoiniki SaaS shell, third-party self-hosters, CLI users."
 
 ---
 
@@ -101,8 +101,8 @@ A tenant configures a Telegram bot token via the channel API. The Telegram adapt
 **Acceptance Scenarios**:
 
 1. **Given** a tenant has persona `support-bot`, **When** `POST /v1/channels` with `{type: telegram, persona_id, config: {bot_token}}`, **Then** ChannelInstance is created and a Telegram adapter worker is registered.
-2. **Given** adapter is running, **When** a real user sends `/start` to the bot, **Then** the adapter pushes an `incoming_message` event to Redis pub/sub channel `twin.message.in.<channel_id>`.
-3. **Given** core consumes the inbound event, **When** persona is invoked via OmniRoute, **Then** the response is published to `twin.message.out.<channel_id>`.
+2. **Given** adapter is running, **When** a real user sends `/start` to the bot, **Then** the adapter pushespublishes an inbound message to Redis Stream `twin.stream.in` (via XADD)
+3. **Given** core consumes the inbound event, **When** persona is invoked via OmniRoute, **Then** the response is published to `twin.stream.out` (consumer group).
 4. **Given** adapter receives the outbound event, **When** sent to Telegram, **Then** the user receives the message in the same chat within 5 seconds.
 5. **Given** adapter loses Telegram connection (network blip), **When** reconnection succeeds, **Then** message processing resumes; messages received during outage are recovered from Telegram's update offset.
 
