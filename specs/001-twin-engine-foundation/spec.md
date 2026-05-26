@@ -1,9 +1,11 @@
 # Feature Specification: Twin Engine Foundation
 
+> **Glossary**: **Training** (in twin-engine) — extraction of stylistic markers from chat logs into the persona's `traits` dict. No model weights are modified. Not to be confused with LLM fine-tuning.
+
 **Feature Branch**: `001-twin-engine-foundation`
 **Created**: 2026-05-23
 **Status**: Draft (Clarified)
-**Input**: User description: "Open-source headless AI-clone (digital twin) backend. Multi-tenant primitives. Core conversation API with REST + SSE + OpenAI-compatible endpoint. Persona stored in Postgres, runtime CRUD. Memory via Letta. RAG via Qdrant. Real-time channel adapters (Telegram, WhatsApp/Evolution API) as opt-in packages communicating with core via Redis pub/sub. Twin training pipeline from chat logs (Telegram JSON/WhatsApp TXT) included in v1. Built on top of undrestrator orchestra (OmniRoute LLM gateway + Hermes runtime + Qdrant + Redis). Apache 2.0 license. Consumers: Dvoiniki SaaS shell, third-party self-hosters, CLI users."
+**Input**: User description: "Open-source headless AI-clone (digital twin) backend. Multi-tenant primitives. Core conversation API with REST + SSE + OpenAI-compatible endpoint. Persona stored in Postgres, runtime CRUD. Memory via Letta. RAG via Qdrant. Real-time channel adapters (Telegram, WhatsApp/Evolution API) as opt-in packages communicating with core via Redis Streams. Twin training pipeline from chat logs (Telegram JSON/WhatsApp TXT) included in v1. Built on top of undrestrator orchestra (OmniRoute LLM gateway + Hermes runtime + Qdrant + Redis). Apache 2.0 license. Consumers: Dvoiniki SaaS shell, third-party self-hosters, CLI users."
 
 ---
 
@@ -99,8 +101,8 @@ A tenant configures a Telegram bot token via the channel API. The Telegram adapt
 **Acceptance Scenarios**:
 
 1. **Given** a tenant has persona `support-bot`, **When** `POST /v1/channels` with `{type: telegram, persona_id, config: {bot_token}}`, **Then** ChannelInstance is created and a Telegram adapter worker is registered.
-2. **Given** adapter is running, **When** a real user sends `/start` to the bot, **Then** the adapter pushes an `incoming_message` event to Redis pub/sub channel `twin.message.in.<channel_id>`.
-3. **Given** core consumes the inbound event, **When** persona is invoked via OmniRoute, **Then** the response is published to `twin.message.out.<channel_id>`.
+2. **Given** adapter is running, **When** a real user sends `/start` to the bot, **Then** the adapter pushespublishes an inbound message to Redis Stream `twin.stream.in` (via XADD)
+3. **Given** core consumes the inbound event, **When** persona is invoked via OmniRoute, **Then** the response is published to `twin.stream.out` (consumer group).
 4. **Given** adapter receives the outbound event, **When** sent to Telegram, **Then** the user receives the message in the same chat within 5 seconds.
 5. **Given** adapter loses Telegram connection (network blip), **When** reconnection succeeds, **Then** message processing resumes; messages received during outage are recovered from Telegram's update offset.
 
@@ -157,14 +159,15 @@ Operators use `twin` CLI for everything Dvoiniki UI doesn't expose: bulk persona
 
 - **No tenant context**: Any endpoint hit without `X-Tenant-ID` header AND without a JWT containing tenant claim → 401 Unauthorized. No fallback to "default" tenant ever.
 - **Persona context exceeds LLM window**: System prompt + persona traits + memory + last N messages > context_window → context compressor (delegated to Hermes compressor or built-in) drops oldest middle-turns first, keeps system + recent.
-- **Training file >100 MB**: Stream-parse, never load full file in memory. Progress reported in 10% increments via job status.
+- **Training file >50 MB**: Stream-parse, never load full file in memory. Progress reported in 10% increments via job status. Upload hard cap at 500 MB enforced at multipart layer.
 - **Two simultaneous conversations on same persona**: Per-conversation memory is isolated (Letta archival memory per conversation_id), persona-level traits are shared and read-only at chat time.
-- **LLM provider down**: OmniRoute circuit breaker activates. Twin-engine surfaces 503 with `Retry-After` header. SSE stream emits an error event and closes cleanly.
+- **LLM provider down**: OmniRoute circuit breaker activates (see plan.md §Operational Defaults for concrete timeout/retry/backoff/circuit-breaker thresholds — these are normative). Twin-engine surfaces 503 with `Retry-After` header. SSE stream emits an error event and closes cleanly.
 - **Channel adapter loses connection >5 min**: Status transitions to `degraded`; fallback to webhook-only mode if applicable; alert emitted to Redis pub/sub `twin.channel.health` for SaaS shell to display.
 - **Tenant deleted mid-conversation**: All in-flight requests for that tenant are cancelled, channel adapters for that tenant gracefully disconnect, data is soft-deleted (configurable retention before hard delete for GDPR).
 - **Conflicting persona slugs within tenant**: 409 Conflict on create. Slugs are unique per tenant.
+- **Rapid-fire messages on same conversation**: Redis-backed mutex (Redlock) per `conversation_id` ensures only one LLM completion runs per conversation at a time. Subsequent messages queued or rejected with 429. Prevents Letta state corruption and out-of-order replies.
 - **OpenAI client sends unknown params**: Forwarded silently or rejected, depending on `strict_openai_compat` config flag.
-- **Channel webhook delivers duplicate message**: Idempotency via `(channel_id, channel_message_id)` tuple — dupes silently dropped.
+- **Channel webhook delivers duplicate message**: Idempotency via Redis `SETNX` on key `dedup:{channel_id}:{message_id}` (5 min TTL) — dupes silently dropped.
 
 ## Requirements *(mandatory)*
 
@@ -174,39 +177,40 @@ Operators use `twin` CLI for everything Dvoiniki UI doesn't expose: bulk persona
 
 - **FR-001**: System MUST expose REST endpoints for Persona CRUD: `POST /v1/personas`, `GET /v1/personas`, `GET /v1/personas/{id}`, `PATCH /v1/personas/{id}`, `DELETE /v1/personas/{id}`. All scoped by tenant.
 - **FR-002**: System MUST expose `POST /v1/chat/completions` as **OpenAI-compatible** endpoint. Request and response shapes MUST match OpenAI Chat Completions spec verbatim, with `model` field accepting persona slug.
-- **FR-003**: System MUST support `stream: true` mode using Server-Sent Events (SSE) with OpenAI-compatible chunk format and `[DONE]` terminator.
+- **FR-003**: System MUST support `stream: true` mode using Server-Sent Events (SSE) with OpenAI-compatible chunk format and `[DONE]` terminator. If the LLM provider fails mid-stream, the server MUST emit a final SSE event `data: {"error":{"message":"<reason>","type":"server_error","code":"provider_failure"}}\n\n` followed by `data: [DONE]\n\n`, then close the connection cleanly.
 - **FR-004**: System MUST expose REST endpoints for Conversation history: `GET /v1/conversations`, `GET /v1/conversations/{id}/messages`. Tenant-scoped.
 - **FR-005**: System MUST accept tenant context via either `X-Tenant-ID` header OR `tenant` JWT claim. Missing tenant context → 401.
 
 #### Persona & Storage
 
-- **FR-006**: Persona entity MUST be stored in Postgres with fields: `id`, `tenant_id`, `name`, `slug`, `system_prompt`, `traits` (JSONB), `model_preferences` (JSONB), `rag_collection_name`, `created_at`, `updated_at`. Unique constraint on `(tenant_id, slug)`.
-- **FR-007**: System MUST auto-create per-persona Qdrant collection on first use, named `tenant_{tenant_id}_persona_{persona_id}`, using `@undrestrator/infra-client` SDK.
+- **FR-006**: Persona entity MUST be stored in Postgres with fields: `id`, `tenant_id`, `name`, `slug`, `system_prompt`, `traits` (JSONB), `model_preferences` (JSONB), `created_at`, `updated_at`. Unique constraint on `(tenant_id, slug)`.
+- **FR-007**: System MUST use a shared Qdrant collection (`twin_engine_rag`) with payload filtering on `tenant_id` and `persona_id` for multi-tenant RAG isolation. Collection created on first use via `@undrestrator/infra-client` SDK Vector client. Cross-tenant access prevented by Qdrant payload filter (not collection naming).
 - **FR-008**: System MUST integrate with Letta as memory layer. Each `conversation_id` gets a Letta agent instance; agent's archival memory is namespaced by `tenant_id/persona_id/conversation_id`.
 
 #### Twin Training Pipeline
 
 - **FR-009**: System MUST accept `POST /v1/personas/{id}/train` with multipart upload of: Telegram JSON export, WhatsApp TXT export, or generic JSONL (`{role, content, timestamp}` per line). Tenant-scoped.
-- **FR-010**: Training pipeline MUST extract stylistic traits: `avg_sentence_length`, `sentence_length_distribution`, `emoji_density`, `emoji_top_used`, `top_phrases` (n-gram), `formality_score` (heuristic), `response_latency_pattern` (if timestamps available), `lexicon_size`.
+- **FR-010**: Training pipeline MUST extract stylistic traits: `avg_sentence_length`, `sentence_length_distribution`, `emoji_density`, `emoji_top_used`, `top_phrases` (bigram/trigram frequency), `formality_score` (ratio of formal markers — capitalization, punctuation completeness, absence of slang — computed as 0–1 float), `response_latency_pattern` (if timestamps available), `lexicon_size` (unique word count divided by total words).
 - **FR-011**: Extracted traits MUST be merged into Persona's `traits` JSONB (preserving manual overrides via `traits.manual_lock: [keys]`).
+- **FR-011b**: Extracted trait values MUST be sanitized before storage: strip control characters, cap per-field length (top_phrases entries ≤ 80 chars), reject values containing obvious prompt-injection patterns. Trust model: system_prompt + traits are tenant-admin controlled; downstream SaaS shells MUST enforce role-based access if untrusted users can edit personas.
 - **FR-012**: Training MUST run as background job via BullMQ (from `@undrestrator/infra-client`). Job status queryable via `GET /v1/training-jobs/{id}` with states: `pending`, `running`, `completed`, `failed`.
-- **FR-013**: Training MUST stream-parse files >50 MB to avoid OOM. Progress reported in job status (`progress_percent`).
-- **FR-014**: Training pipeline MUST emit a sample-conversation dataset (last 50 representative exchanges) for downstream eval/fine-tuning steps (out of scope for v1, but data is ready).
+- **FR-013**: Training MUST stream-parse files to avoid OOM. Files >50 MB MUST be parsed in streaming mode (never fully buffered in memory). Uploads capped at 500 MB per T013 multipart config. Progress reported in job status (`progress_percent`) in 10% increments for files >50 MB.
+- **FR-014**: Training pipeline SHOULD emit a sample-conversation dataset (50 representative exchanges selected by: longest exchanges first, deduplicated by topic diversity, capped at 500 tokens per exchange) for downstream eval/fine-tuning steps. **Deferred to v1.1** — no v1 task implements this.
 
 #### Channel Adapters
 
 - **FR-015**: System MUST define a `ChannelAdapter` TypeScript interface: `connect()`, `disconnect()`, `onIncoming((msg) => void)`, `send(msg)`, `health()`.
 - **FR-016**: System MUST ship `@undrecreaitwins/channel-telegram` package (Telegraf-based) implementing `ChannelAdapter`. Connects via long-polling or webhook (configurable).
 - **FR-017**: System MUST ship `@undrecreaitwins/channel-whatsapp` package (Evolution API client) implementing `ChannelAdapter`. Connects via Evolution webhook + REST send.
-- **FR-018**: Channel adapters MUST publish inbound messages to Redis pub/sub topic `twin.message.in.{channel_id}`. Core orchestrator consumes, invokes LLM via OmniRoute, publishes reply to `twin.message.out.{channel_id}`. Adapter sends to channel.
-- **FR-019**: System MUST expose `POST /v1/channels`, `GET /v1/channels`, `DELETE /v1/channels/{id}` for ChannelInstance CRUD. Tenant-scoped.
+- **FR-018**: Channel adapters MUST publish inbound messages to Redis Stream `twin.stream.in` (using `XADD`). Core orchestrator consumes via consumer group (`XREADGROUP`), invokes LLM via OmniRoute, publishes reply to `twin.stream.out`. Adapter consumes reply stream and sends to channel. Messages are durable — redelivered on consumer crash.
+- **FR-019**: System MUST expose `POST /v1/channels`, `GET /v1/channels`, `GET /v1/channels/{id}`, `DELETE /v1/channels/{id}` for ChannelInstance CRUD. Tenant-scoped.
 - **FR-020**: Adapter processes MUST be supervised — restart on crash, exponential backoff on reconnect failures (max 5 min interval).
 - **FR-021**: Each ChannelInstance MUST have unique idempotency key on `(channel_type, external_channel_message_id)` — duplicate inbound messages within 5 min window are silently dropped.
 
 #### Multi-Tenant Primitives
 
 - **FR-022**: All DB queries MUST be filtered by `tenant_id` from request context. Enforced via repository layer — no raw SQL bypassing tenant filter.
-- **FR-023**: Qdrant collections MUST follow naming convention `tenant_{id}_persona_{id}` — cross-tenant access fails at Qdrant layer (not just app layer).
+- **FR-023**: Qdrant queries MUST filter by `tenant_id` and `persona_id` payload fields — cross-tenant access returns zero results at Qdrant layer (enforced by payload filter, not collection naming).
 - **FR-024**: Letta memory namespaces MUST include `tenant_id` prefix.
 - **FR-025**: System MUST provide an integration test suite that creates 2 tenants with overlapping data and asserts zero leakage across all endpoints.
 
@@ -218,12 +222,14 @@ Operators use `twin` CLI for everything Dvoiniki UI doesn't expose: bulk persona
 
 #### Integration with Orchestra
 
-- **FR-029**: Twin-engine MUST use `@undrestrator/infra-client` SDK for LLM (OmniRoute), Vector (Qdrant), Queue (BullMQ/Redis) clients — no duplicate client implementations.
+- **FR-029**: Twin-engine MUST use `@undrestrator/infra-client` SDK for LLM (OmniRoute), Vector (Qdrant), Queue (BullMQ/Redis) clients when running with orchestra. In standalone mode (no orchestra), twin-engine MAY call LLM providers directly via provider SDK (OpenAI, Anthropic, etc.) — configured via `LLM_ROUTING=direct` env var. The `@undrestrator/infra-client` remains the preferred path.
 - **FR-030**: Twin-engine MAY delegate complex reasoning to Hermes Agent (from orchestra) via Hermes API. Per-conversation Hermes session lifecycle is managed by twin-engine.
 - **FR-031**: Twin-engine MUST emit usage events (tokens consumed, model, tenant_id, persona_id, conversation_id) to OmniRoute's existing usage stream OR to a configurable OpenMeter endpoint — for billing in SaaS shell.
 
 #### Deployment & Licensing
 
+- **FR-031b**: System MUST enforce per-tenant rate limiting on `POST /v1/chat/completions`: configurable token-bucket (default 60 req/min, 100K tokens/min). Implemented via `@fastify/rate-limit`. Exceeding limits returns 429 with `Retry-After` header.
+- **FR-031c**: Standalone deployments MUST support API token auth via `Authorization: Bearer <token>` header. Tokens stored in `api_tokens` table (`id`, `tenant_id`, `token_hash`, `name`, `created_at`, `revoked_at`). Token maps to tenant_id — `X-Tenant-ID` header validated against token's tenant. SaaS deployments delegate auth to gateway (Keycloak/JWT).
 - **FR-032**: Repository MUST be licensed under **Apache 2.0** (permissive, allows closed-source consumers like Dvoiniki SaaS).
 - **FR-033**: System MUST ship `docker-compose.standalone.yml` (twin-engine + Postgres + Redis only — minimal dev setup) AND `docker-compose.with-orchestra.yml` (depends_on: orchestra services from undrestrator).
 - **FR-034**: System MUST provide `.env.example` with all required and optional configuration variables documented.
@@ -231,8 +237,8 @@ Operators use `twin` CLI for everything Dvoiniki UI doesn't expose: bulk persona
 
 ### Key Entities
 
-- **Tenant**: External primitive (twin-engine does not own tenant lifecycle — that's Dvoiniki SaaS or external). Stored as opaque `tenant_id` (UUID or string) propagated via request context. Twin-engine validates existence only via presence in `tenants` reference table (populated by SaaS shell or manually for OSS users).
-- **Persona**: Digital twin definition. Fields: `id`, `tenant_id`, `name`, `slug` (URL-safe, unique per tenant), `system_prompt`, `traits` (JSONB — extracted + manual), `model_preferences` (JSONB — preferred LLM provider/model, fallbacks, temperature), `rag_collection_name`, timestamps.
+- **Tenant**: External primitive (twin-engine does not own tenant lifecycle — that's Dvoiniki SaaS or external). Stored as `tenant_id` (UUID) propagated via request context. Twin-engine validates existence only via presence in `tenants` reference table (populated by SaaS shell or manually for OSS users).
+- **Persona**: Digital twin definition. Fields: `id`, `tenant_id`, `name`, `slug` (URL-safe, unique per tenant), `system_prompt`, `traits` (JSONB — extracted + manual), `model_preferences` (JSONB — preferred LLM provider/model, fallbacks, temperature), timestamps.
 - **Conversation**: A discrete chat session with a persona. Fields: `id`, `tenant_id`, `persona_id`, `channel_id` (nullable for API-only chats), `external_user_id` (channel user ID or API caller), `summary`, `started_at`, `ended_at`, `message_count`.
 - **Message**: A single turn in a conversation. Fields: `id`, `conversation_id`, `role` (`user`|`assistant`|`system`|`tool`), `content`, `metadata` (JSONB — provider, model, token counts, latency_ms), `created_at`.
 - **ChannelInstance**: A configured external channel for a persona. Fields: `id`, `tenant_id`, `persona_id`, `channel_type` (`telegram`|`whatsapp_evolution`|...), `config` (JSONB — bot tokens, instance IDs, webhooks), `status` (`active`|`degraded`|`disconnected`|`error`), `last_health_check_at`.
@@ -248,7 +254,7 @@ Operators use `twin` CLI for everything Dvoiniki UI doesn't expose: bulk persona
 - **SC-003**: Telegram channel end-to-end latency (user message → user receives reply): p95 < 5 seconds (excluding LLM provider time >2s).
 - **SC-004**: Twin training from a 10 MB Telegram JSON export completes in < 60 seconds on a 4 vCPU box.
 - **SC-005**: Multi-tenant isolation integration test (`isolation.test.ts`) passes — 0 cross-tenant leakage detected across all endpoints.
-- **SC-006**: OpenAI-compatible endpoint passes a compatibility test using stock `openai-python` and `openai-node` SDKs against ≥5 common request patterns (single-shot, streaming, system+user, multi-turn, tool-use stub).
+- **SC-006**: OpenAI-compatible endpoint passes a compatibility test using stock `openai-python` and `openai-node` SDKs against ≥5 common request patterns (single-shot, streaming, system+user, multi-turn, error shapes). v1 implements the **chat-completion subset** (no tools/function-calling, no JSON mode, no logprobs). `tools`, `tool_choice`, `response_format`, `n`, `logprobs` fields are accepted but ignored or rejected per `strict_openai_compat` config flag.
 - **SC-007**: API documentation (OpenAPI 3.1 spec) is generated and covers 100% of public endpoints.
 - **SC-008**: `twin` CLI installs via `npm i -g @undrecreaitwins/cli` and `twin --version` works on Linux/macOS/Windows.
 
@@ -272,5 +278,6 @@ Operators use `twin` CLI for everything Dvoiniki UI doesn't expose: bulk persona
 - Voice and avatar channels — v2.
 - Email inbound, Discord, Slack, Signal channels — Hermes from orchestra already covers these for SaaS shell consumers. Not duplicated here.
 - Fine-tuning of LLM weights — twin-engine uses prompt-based mimicry only.
+- **RAG document ingestion and retrieval at chat-time** — FR-007 defines the Qdrant collection strategy but the ingestion pipeline (`POST /v1/personas/{id}/rag/documents`), chat-time retrieval, and RAG-enhanced prompts are deferred to v1.1. v1 ships with the Qdrant collection auto-created and payload-filtered, but no document upload endpoint or retrieval step in chat-service.
 - CRM-specific adapters (AmoCRM, HubSpot, etc.) — SaaS shell territory (via n8n templates).
 - Hosted SaaS offering of twin-engine itself — this is a backend library/service, not a product.
