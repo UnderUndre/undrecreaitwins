@@ -1,0 +1,951 @@
+openapi: 3.1.0
+info:
+  title: Twin Engine API
+  description: >
+    REST API for the Twin Engine platform — persona management,
+    OpenAI-compatible chat completions, conversation history,
+    channel adapters, and training jobs.
+  version: 1.0.0
+  contact:
+    name: Twin Engine Team
+    url: https://github.com/undrecreaitwins
+
+servers:
+  - url: https://api.twinengine.dev
+    description: Production
+  - url: http://localhost:8090
+    description: Local development
+
+security:
+  - BearerAuth: []
+  - TenantContext: []
+
+tags:
+  - name: Personas
+    description: Persona CRUD and training
+  - name: Chat
+    description: OpenAI-compatible chat completions
+  - name: Conversations
+    description: Conversation history
+  - name: Channels
+    description: Channel adapter instances
+  - name: Training
+    description: Training job management
+  - name: Health
+    description: Service health
+
+paths:
+  /v1/health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /v1/personas:
+    post:
+      operationId: createPersona
+      summary: Create a persona
+      tags: [Personas]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePersonaRequest"
+      responses:
+        "201":
+          description: Persona created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Persona"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid tenant header
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      operationId: listPersonas
+      summary: List personas (tenant-scoped, paginated)
+      tags: [Personas]
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+      responses:
+        "200":
+          description: Paginated list of personas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonaList"
+        "401":
+          description: Missing or invalid tenant header
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/personas/{id}:
+    parameters:
+      - $ref: "#/components/parameters/PersonaIdParam"
+
+    get:
+      operationId: getPersona
+      summary: Get a persona by ID
+      tags: [Personas]
+      responses:
+        "200":
+          description: Persona details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Persona"
+        "404":
+          description: Persona not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    patch:
+      operationId: updatePersona
+      summary: Update a persona
+      tags: [Personas]
+      parameters:
+        - name: If-Match
+          in: header
+          description: Expected persona version for optimistic locking. If provided, server rejects update with 409 if version mismatch.
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePersonaRequest"
+      responses:
+        "200":
+          description: Updated persona
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Persona"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Persona not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Version conflict (stale version) or slug uniqueness conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      operationId: deletePersona
+      summary: Delete a persona
+      tags: [Personas]
+      responses:
+        "204":
+          description: Persona deleted
+        "404":
+          description: Persona not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/personas/{id}/train:
+    parameters:
+      - $ref: "#/components/parameters/PersonaIdParam"
+
+    post:
+      operationId: startTrainingJob
+      summary: Start a training job (multipart upload)
+      tags: [Training, Personas]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/TrainingUploadRequest"
+      responses:
+        "202":
+          description: Training job accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Persona not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/chat/completions:
+    post:
+      operationId: createChatCompletion
+      summary: >
+        OpenAI-compatible chat completion. The `model` field accepts a
+        persona slug to route the request to the correct persona.
+        Supports streaming via SSE when `stream: true`.
+      tags: [Chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatCompletionRequest"
+      responses:
+        "200":
+          description: >
+            Chat completion response. When streaming, returns
+            `text/event-stream` with chunked SSE data lines.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatCompletionResponse"
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ChatCompletionStreamChunk"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Persona slug not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/conversations:
+    get:
+      operationId: listConversations
+      summary: List conversations (tenant-scoped, paginated)
+      tags: [Conversations]
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+        - name: persona_id
+          in: query
+          description: Filter by persona ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Paginated list of conversations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationList"
+        "401":
+          description: Missing or invalid tenant header
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/conversations/{id}/messages:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Conversation ID
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      operationId: getConversationMessages
+      summary: Get messages for a conversation
+      tags: [Conversations]
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+      responses:
+        "200":
+          description: Paginated list of messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/conversations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Conversation ID
+        schema:
+          type: string
+          format: uuid
+
+    delete:
+      operationId: deleteConversation
+      summary: Delete a conversation and all its messages
+      tags: [Conversations]
+      responses:
+        "204":
+          description: Conversation deleted
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/channels:
+    post:
+      operationId: createChannel
+      summary: Create a channel instance
+      tags: [Channels]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+      responses:
+        "201":
+          description: Channel instance created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelInstance"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      operationId: listChannels
+      summary: List channel instances
+      tags: [Channels]
+      parameters:
+        - $ref: "#/components/parameters/LimitParam"
+        - $ref: "#/components/parameters/OffsetParam"
+      responses:
+        "200":
+          description: Paginated list of channel instances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelInstanceList"
+        "401":
+          description: Missing or invalid tenant header
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/channels/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Channel instance ID
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      operationId: getChannel
+      summary: Get a channel instance by ID
+      tags: [Channels]
+      responses:
+        "200":
+          description: Channel instance details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelInstance"
+        "404":
+          description: Channel instance not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      operationId: deleteChannel
+      summary: Delete a channel instance
+      tags: [Channels]
+      responses:
+        "204":
+          description: Channel instance deleted
+        "404":
+          description: Channel instance not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/training-jobs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Training job ID
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      operationId: getTrainingJob
+      summary: Get training job status
+      tags: [Training]
+      responses:
+        "200":
+          description: Training job details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingJob"
+        "404":
+          description: Training job not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        API token for standalone deployments, or JWT from upstream
+        gateway for SaaS deployments. Validated by auth middleware.
+    TenantContext:
+      type: apiKey
+      in: header
+      name: X-Tenant-ID
+      description: >
+        Tenant selection header. Used alongside BearerAuth to specify
+        which tenant the request targets. Required on all endpoints
+        except `GET /v1/health`. This is NOT authentication — it is
+        tenant context selection.
+
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      description: Maximum number of items to return
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    OffsetParam:
+      name: offset
+      in: query
+      description: Number of items to skip
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+    PersonaIdParam:
+      name: id
+      in: path
+      required: true
+      description: Persona ID
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Persona:
+      type: object
+      required: [id, tenant_id, name, slug, system_prompt, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        slug:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{1,62}[a-z0-9]$"
+        system_prompt:
+          type: string
+        traits:
+          type: object
+        model_preferences:
+          type: object
+          properties:
+            provider:
+              type: string
+            model:
+              type: string
+            temperature:
+              type: number
+              minimum: 0
+              maximum: 2
+            max_tokens:
+              type: integer
+              minimum: 1
+        rag_collection_name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          description: Optimistic locking version (CAS)
+
+    CreatePersonaRequest:
+      type: object
+      required: [name, slug, system_prompt]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        slug:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]{1,62}[a-z0-9]$"
+        system_prompt:
+          type: string
+          minLength: 1
+        traits:
+          type: object
+        model_preferences:
+          type: object
+        rag_collection_name:
+          type: string
+
+    UpdatePersonaRequest:
+      type: object
+      properties:
+        version:
+          type: integer
+          description: Expected current version for optimistic locking (alternative to If-Match header)
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        slug:
+          type: string
+        system_prompt:
+          type: string
+        traits:
+          type: object
+        model_preferences:
+          type: object
+
+    PersonaList:
+      type: object
+      required: [data, limit, offset, total]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Persona"
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    ChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+          description: Persona slug to route the request to
+        messages:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        stream:
+          type: boolean
+          default: false
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+        max_tokens:
+          type: integer
+          minimum: 1
+        top_p:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    ChatMessage:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+        name:
+          type: string
+
+    ChatCompletionResponse:
+      type: object
+      required: [id, object, created, model, choices, usage]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          enum: [chat.completion]
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ChatCompletionChoice"
+        usage:
+          $ref: "#/components/schemas/ChatCompletionUsage"
+
+    ChatCompletionChoice:
+      type: object
+      required: [index, message, finish_reason]
+      properties:
+        index:
+          type: integer
+        message:
+          $ref: "#/components/schemas/ChatMessage"
+        finish_reason:
+          type: string
+          enum: [stop, length, content_filter]
+
+    ChatCompletionUsage:
+      type: object
+      properties:
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+
+    ChatCompletionStreamChunk:
+      type: object
+      required: [id, object, created, model, choices]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          enum: [chat.completion.chunk]
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            required: [index, delta, finish_reason]
+            properties:
+              index:
+                type: integer
+              delta:
+                type: object
+                properties:
+                  role:
+                    type: string
+                    enum: [assistant]
+                  content:
+                    type: string
+              finish_reason:
+                type: string
+                enum: [stop, length, content_filter, null]
+
+    Conversation:
+      type: object
+      required: [id, tenant_id, persona_id, started_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        persona_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        external_user_id:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        message_count:
+          type: integer
+
+    ConversationList:
+      type: object
+      required: [data, limit, offset, total]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Conversation"
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    Message:
+      type: object
+      required: [id, conversation_id, role, content, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+        metadata:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+
+    MessageList:
+      type: object
+      required: [data, limit, offset, total]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    ChannelInstance:
+      type: object
+      required: [id, tenant_id, persona_id, channel_type, config, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        persona_id:
+          type: string
+          format: uuid
+        channel_type:
+          type: string
+          enum: [telegram, whatsapp_evolution]
+        config:
+          type: object
+        status:
+          type: string
+          enum: [active, degraded, disconnected, error]
+        last_health_check_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    CreateChannelRequest:
+      type: object
+      required: [persona_id, channel_type, config]
+      properties:
+        persona_id:
+          type: string
+          format: uuid
+        channel_type:
+          type: string
+          enum: [telegram, whatsapp_evolution]
+        config:
+          type: object
+          properties:
+            bot_token:
+              type: string
+            evolution_url:
+              type: string
+              format: uri
+            instance_id:
+              type: string
+
+    ChannelInstanceList:
+      type: object
+      required: [data, limit, offset, total]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChannelInstance"
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    TrainingUploadRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+        source_type:
+          type: string
+          enum: [telegram_json, whatsapp_txt, generic_jsonl]
+          description: Source format override. If omitted, auto-detected from file content and extension.
+
+    TrainingJob:
+      type: object
+      required: [id, persona_id, tenant_id, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        persona_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        source_type:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        progress_percent:
+          type: integer
+          minimum: 0
+          maximum: 100
+        extracted_traits:
+          type: object
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, unhealthy]
+        version:
+          type: string
+        checks:
+          type: object
+          properties:
+            database:
+              type: string
+              enum: [ok, error]
+            redis:
+              type: string
+              enum: [ok, error]
+            letta:
+              type: string
+              enum: [ok, error, unavailable]
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
