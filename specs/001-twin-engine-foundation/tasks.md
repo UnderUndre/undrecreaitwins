@@ -24,12 +24,12 @@
 
 **Purpose**: Monorepo initialization, pnpm workspaces, shared types
 
-- [ ] T001 [SETUP] Initialize pnpm monorepo with `pnpm-workspace.yaml`, root `package.json` (private), `tsconfig.json` base config, `.gitignore`, `LICENSE` (Apache 2.0)
-- [ ] T002 [SETUP] Create `packages/shared/` with TypeScript types: `Persona`, `Conversation`, `Message`, `ChannelInstance`, `TrainingJob`, `UsageEvent`, `ChannelMessage`, `ChannelAdapter`, `PersonaTraits`, `ModelPreferences`, `MessageMetadata` — aligned with data-model.md
-- [ ] T003 [SETUP] Create `packages/shared/src/errors.ts` — typed error classes: `AppError`, `NotFoundError`, `UnauthorizedError`, `ConflictError`, `ValidationError`, `ServiceUnavailableError`
-- [ ] T004 [SETUP] Create `packages/shared/src/constants.ts` — channel types, training source types, job statuses, RAG collection naming convention function
-- [ ] T005 [SETUP] Create `drizzle.config.ts` at repo root pointing to `packages/core/src/models/`
-- [ ] T006 [SETUP] Create `packages/core/package.json`, `packages/api/package.json`, `packages/training/package.json`, `packages/memory/package.json`, `packages/cli/package.json`, `packages/channel-telegram/package.json`, `packages/channel-whatsapp/package.json` — each with TypeScript ESM config, vitest, relevant deps
+- [x] T001 [SETUP] Initialize pnpm monorepo with `pnpm-workspace.yaml`, root `package.json` (private), `tsconfig.json` base config, `.gitignore`, `LICENSE` (Apache 2.0)
+- [x] T002 [SETUP] Create `packages/shared/` with TypeScript types: `Persona`, `Conversation`, `Message`, `ChannelInstance`, `TrainingJob`, `UsageEvent`, `ChannelMessage`, `ChannelAdapter`, `PersonaTraits`, `ModelPreferences`, `MessageMetadata` — aligned with data-model.md
+- [x] T003 [SETUP] Create `packages/shared/src/errors.ts` — typed error classes: `AppError`, `NotFoundError`, `UnauthorizedError`, `ConflictError`, `ValidationError`, `ServiceUnavailableError`
+- [x] T004 [SETUP] Create `packages/shared/src/constants.ts` — channel types, training source types, job statuses, RAG collection naming convention function
+- [x] T005 [SETUP] Create `drizzle.config.ts` at repo root pointing to `packages/core/src/models/`
+- [x] T006 [SETUP] Create `packages/core/package.json`, `packages/api/package.json`, `packages/training/package.json`, `packages/memory/package.json`, `packages/cli/package.json`, `packages/channel-telegram/package.json`, `packages/channel-whatsapp/package.json` — each with TypeScript ESM config, vitest, relevant deps
 
 ---
 
@@ -39,21 +39,21 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 [DB] Create Drizzle schema files in `packages/core/src/models/` — `tenants.ts`, `personas.ts`, `conversations.ts`, `messages.ts`, `channel-instances.ts`, `training-jobs.ts`, `usage-events.ts`, `relations.ts` — per data-model.md
-- [ ] T008 [DB] Create initial migration via `drizzle-kit generate` — SQL files in `drizzle/` directory
-- [ ] T009 [DB] Create RLS policy SQL files in `drizzle/rls/` — tenant_isolation for all tenant-scoped tables, tenant_isolation_messages for messages via EXISTS join
-- [ ] T009b [DB] Create `packages/core/src/models/api-tokens.ts` — Drizzle schema for `api_tokens` table: `id` (uuid PK), `tenant_id` (uuid FK), `name` (text), `token_hash` (text), `created_at`, `revoked_at` (nullable). Index on `token_hash`
-- [ ] T010 [BE] Create `packages/core/src/db.ts` — Drizzle + postgres connection pool. Tenant context via `withTenantContext<T>(tenantId: string, fn: (tx) => Promise<T>): Promise<T>` helper that wraps operations in `db.transaction()` and issues `SET LOCAL app.current_tenant = '<id>'` inside the transaction. `SET LOCAL` auto-resets on commit/rollback — prevents cross-tenant leakage in pooled connections. All repository methods MUST use this helper.
-- [ ] T011 [BE] Create `packages/core/src/middleware/tenant.ts` — Fastify plugin that extracts tenant context from: (1) `X-Tenant-ID` header, OR (2) JWT `tenant` claim (decoded by upstream gateway, passed as `X-Tenant-Claim` header). Validates tenant exists in reference table, sets `request.tenantId`. Missing both sources → 401
-- [ ] T011b [BE] Create `packages/core/src/middleware/auth.ts` — Bearer token authentication for standalone mode. Validates `Authorization: Bearer <token>` against `api_tokens` table (hash comparison). Maps token → `tenant_id`. If token present, `X-Tenant-ID` header must match token's tenant (or is auto-set). SaaS mode: this middleware is disabled, auth delegated to gateway. Controlled by `TWIN_AUTH_MODE=standalone|gateway` env var
-- [ ] T011c [BE] Create `packages/api/src/routes/tokens.ts` — `POST /v1/tokens` (create API token for tenant, return token in response body — shown once), `DELETE /v1/tokens/:id` (revoke token). Tenant-scoped. Token value: `crypto.randomBytes(32).toString('hex')`, stored as SHA-256 hash
-- [ ] T012 [BE] Create `packages/core/src/middleware/error-handler.ts` — Fastify error handler that maps `AppError` subclasses to HTTP status codes and OpenAI-shaped error bodies
-- [ ] T013 [BE] Create `packages/api/src/server.ts` — Fastify server factory: register CORS, tenant middleware, error handler, health route (`GET /v1/health`), multipart support (max file size 500MB, configurable via `TWIN_MAX_UPLOAD_BYTES`), pino logger with redact config (strip `req.body.messages[*].content`, `req.body.config.bot_token`, `res.body.choices[*].message.content`), per-tenant rate limiting via `@fastify/rate-limit` on `/v1/chat/completions` (default 60 req/min)
-- [ ] T014 [BE] Create `packages/core/src/services/persona-repository.ts` — Drizzle-based CRUD with `WHERE tenant_id = :id` on every query. Methods: `create`, `getById`, `getBySlug`, `list`, `update`, `delete`. `update` uses optimistic locking: `WHERE id = :id AND version = :expectedVersion`, increments version on success, throws `ConflictError(409)` on stale version. Slug uniqueness conflict → 409. All methods wrapped in `withTenantContext()` from T010
-- [ ] T015 [BE] Create `packages/memory/src/letta-client.ts` — Letta API client wrapper. Methods: `createAgent`, `getAgent`, `addMessage`, `getMemory`, `searchMemory`. Namespace: `tenant_{id}/persona_{id}/conv_{id}`. Graceful fallback when Letta unreachable
-- [ ] T016 [OPS] Create `infra/docker-compose.standalone.yml` — twin-engine-api (port 8090), postgres (5432), redis (6379). API depends_on postgres + redis
-- [ ] T017 [OPS] Create `infra/docker-compose.with-orchestra.yml` — twin-engine-api + postgres only. External redis/qdrant from orchestra
-- [ ] T018 [OPS] Create `infra/.env.example` with all required + optional config vars documented
+- [x] T007 [DB] Create Drizzle schema files in `packages/core/src/models/` — `tenants.ts`, `personas.ts`, `conversations.ts`, `messages.ts`, `channel-instances.ts`, `training-jobs.ts`, `usage-events.ts`, `relations.ts` — per data-model.md
+- [x] T008 [DB] Create initial migration via `drizzle-kit generate` — SQL files in `drizzle/` directory
+- [x] T009 [DB] Create RLS policy SQL files in `drizzle/rls/` — tenant_isolation for all tenant-scoped tables, tenant_isolation_messages for messages via EXISTS join
+- [x] T009b [DB] Create `packages/core/src/models/api-tokens.ts` — Drizzle schema for `api_tokens` table: `id` (uuid PK), `tenant_id` (uuid FK), `name` (text), `token_hash` (text), `created_at`, `revoked_at` (nullable). Index on `token_hash`
+- [x] T010 [BE] Create `packages/core/src/db.ts` — Drizzle + postgres connection pool. Tenant context via `withTenantContext<T>(tenantId: string, fn: (tx) => Promise<T>): Promise<T>` helper that wraps operations in `db.transaction()` and issues `SET LOCAL app.current_tenant = '<id>'` inside the transaction. `SET LOCAL` auto-resets on commit/rollback — prevents cross-tenant leakage in pooled connections. All repository methods MUST use this helper.
+- [x] T011 [BE] Create `packages/core/src/middleware/tenant.ts` — Fastify plugin that extracts tenant context from: (1) `X-Tenant-ID` header, OR (2) JWT `tenant` claim (decoded by upstream gateway, passed as `X-Tenant-Claim` header). Validates tenant exists in reference table, sets `request.tenantId`. Missing both sources → 401
+- [x] T011b [BE] Create `packages/core/src/middleware/auth.ts` — Bearer token authentication for standalone mode. Validates `Authorization: Bearer <token>` against `api_tokens` table (hash comparison). Maps token → `tenant_id`. If token present, `X-Tenant-ID` header must match token's tenant (or is auto-set). SaaS mode: this middleware is disabled, auth delegated to gateway. Controlled by `TWIN_AUTH_MODE=standalone|gateway` env var
+- [x] T011c [BE] Create `packages/api/src/routes/tokens.ts` — `POST /v1/tokens` (create API token for tenant, return token in response body — shown once), `DELETE /v1/tokens/:id` (revoke token). Tenant-scoped. Token value: `crypto.randomBytes(32).toString('hex')`, stored as SHA-256 hash
+- [x] T012 [BE] Create `packages/core/src/middleware/error-handler.ts` — Fastify error handler that maps `AppError` subclasses to HTTP status codes and OpenAI-shaped error bodies
+- [x] T013 [BE] Create `packages/api/src/server.ts` — Fastify server factory: register CORS, tenant middleware, error handler, health route (`GET /v1/health`), multipart support (max file size 500MB, configurable via `TWIN_MAX_UPLOAD_BYTES`), pino logger with redact config (strip `req.body.messages[*].content`, `req.body.config.bot_token`, `res.body.choices[*].message.content`), per-tenant rate limiting via `@fastify/rate-limit` on `/v1/chat/completions` (default 60 req/min)
+- [x] T014 [BE] Create `packages/core/src/services/persona-repository.ts` — Drizzle-based CRUD with `WHERE tenant_id = :id` on every query. Methods: `create`, `getById`, `getBySlug`, `list`, `update`, `delete`. `update` uses optimistic locking: `WHERE id = :id AND version = :expectedVersion`, increments version on success, throws `ConflictError(409)` on stale version. Slug uniqueness conflict → 409. All methods wrapped in `withTenantContext()` from T010
+- [x] T015 [BE] Create `packages/memory/src/letta-client.ts` — Letta API client wrapper. Methods: `createAgent`, `getAgent`, `addMessage`, `getMemory`, `searchMemory`. Namespace: `tenant_{id}/persona_{id}/conv_{id}`. Graceful fallback when Letta unreachable
+- [x] T016 [OPS] Create `infra/docker-compose.standalone.yml` — twin-engine-api (port 8090), postgres (5432), redis (6379). API depends_on postgres + redis
+- [x] T017 [OPS] Create `infra/docker-compose.with-orchestra.yml` — twin-engine-api + postgres only. External redis/qdrant from orchestra
+- [x] T018 [OPS] Create `infra/.env.example` with all required + optional config vars documented
 
 **Checkpoint**: Foundation ready — user story implementation can begin
 
@@ -66,13 +66,13 @@
 
 ### Implementation
 
-- [ ] T019 [BE] [US1] Create `packages/api/src/routes/personas.ts` — Fastify route handlers: `POST /v1/personas`, `GET /v1/personas`, `GET /v1/personas/:id`, `PATCH /v1/personas/:id`, `DELETE /v1/personas/:id`. Zod validation for create/update. Tenant-scoped via middleware
-- [ ] T020 [BE] [US1] Create `packages/core/src/services/chat-service.ts` — Core conversation logic: resolve persona by slug, build system prompt + traits context, call LLM via OmniRoute (or direct), integrate Letta memory (create/retrieve per conversation_id agent via letta-client), persist messages, create/update conversation record, emit usage event. Include Letta graceful fallback: if Letta unreachable, use in-context window only and flag degraded mode
-- [ ] T021 [BE] [US1] Create `packages/api/src/routes/chat-completions.ts` — `POST /v1/chat/completions` route: parse OpenAI-shaped request, resolve `model` → persona slug, delegate to chat-service. Support `stream: true` with SSE response (`text/event-stream`). Error: persona not found → OpenAI-shaped 404
-- [ ] T022 [BE] [US1] Create `packages/api/src/routes/conversations.ts` — `GET /v1/conversations` (list, tenant-scoped, paginated), `GET /v1/conversations/:id/messages` (paginated). Tenant isolation enforced
-- [ ] T023 [BE] [US1] Create `packages/core/src/services/usage-service.ts` — Record usage events to `usage_events` table. If `USAGE_EMISSION_ENDPOINT` is configured (OpenMeter or OmniRoute URL), POST usage payload to endpoint. Include acceptance test verifying both local persistence and HTTP emission (mocked)
-- [ ] T024 [E2E] [US1] Create `packages/api/tests/integration/personas.test.ts` — Integration tests: create persona, get persona, list personas, update persona, delete persona, tenant isolation (404 for wrong tenant)
-- [ ] T025 [E2E] [US1] Create `packages/api/tests/integration/chat-completions.test.ts` — Integration tests: non-streaming chat, streaming chat (SSE format), persona not found (404), missing tenant (401), multi-turn conversation memory
+- [x] T019 [BE] [US1] Create `packages/api/src/routes/personas.ts` — Fastify route handlers: `POST /v1/personas`, `GET /v1/personas`, `GET /v1/personas/:id`, `PATCH /v1/personas/:id`, `DELETE /v1/personas/:id`. Zod validation for create/update. Tenant-scoped via middleware
+- [x] T020 [BE] [US1] Create `packages/core/src/services/chat-service.ts` — Core conversation logic: resolve persona by slug, build system prompt + traits context, call LLM via OmniRoute (or direct), integrate Letta memory (create/retrieve per conversation_id agent via letta-client), persist messages, create/update conversation record, emit usage event. Include Letta graceful fallback: if Letta unreachable, use in-context window only and flag degraded mode
+- [x] T021 [BE] [US1] Create `packages/api/src/routes/chat-completions.ts` — `POST /v1/chat/completions` route: parse OpenAI-shaped request, resolve `model` → persona slug, delegate to chat-service. Support `stream: true` with SSE response (`text/event-stream`). Error: persona not found → OpenAI-shaped 404
+- [x] T022 [BE] [US1] Create `packages/api/src/routes/conversations.ts` — `GET /v1/conversations` (list, tenant-scoped, paginated), `GET /v1/conversations/:id/messages` (paginated). Tenant isolation enforced
+- [x] T023 [BE] [US1] Create `packages/core/src/services/usage-service.ts` — Record usage events to `usage_events` table. If `USAGE_EMISSION_ENDPOINT` is configured (OpenMeter or OmniRoute URL), POST usage payload to endpoint. Include acceptance test verifying both local persistence and HTTP emission (mocked)
+- [x] T024 [E2E] [US1] Create `packages/api/tests/integration/personas.test.ts` — Integration tests: create persona, get persona, list personas, update persona, delete persona, tenant isolation (404 for wrong tenant)
+- [x] T025 [E2E] [US1] Create `packages/api/tests/integration/chat-completions.test.ts` — Integration tests: non-streaming chat, streaming chat (SSE format), persona not found (404), missing tenant (401), multi-turn conversation memory
 
 **Checkpoint**: User Story 1 fully functional — create persona and chat via OpenAI-compatible API
 
@@ -85,14 +85,14 @@
 
 ### Implementation
 
-- [ ] T026 [BE] [US2] Create `packages/training/src/parsers/telegram-json.ts` — Stream-parse Telegram JSON export. Yield `{role, content, timestamp}` tuples. Handle >100MB files without OOM
-- [ ] T027 [BE] [US2] Create `packages/training/src/parsers/whatsapp-txt.ts` — Parse WhatsApp TXT export format. Same output schema as telegram parser
-- [ ] T028 [BE] [US2] Create `packages/training/src/parsers/generic-jsonl.ts` — Parse generic JSONL `{role, content, timestamp}` per line
-- [ ] T029 [BE] [US2] Create `packages/training/src/extractors/trait-extractor.ts` — Extract: `avg_sentence_length`, `sentence_length_distribution`, `emoji_density`, `emoji_top_used`, `top_phrases` (n-gram), `formality_score`, `response_latency_pattern`, `lexicon_size`. Respect `traits.manual_lock` keys
-- [ ] T030 [BE] [US2] Create `packages/training/src/jobs/training-job.ts` — BullMQ job processor: parse file → extract traits → read persona (with version) → merge traits → update WHERE version = :read_version; on conflict (no rows updated), re-read and retry up to 3 times; on persistent conflict, log warning + skip merge → update job status. Progress reporting via `twin.stream.training` stream
-- [ ] T030b [BE] [US2] Create `packages/shared/src/storage.ts` — File storage abstraction with backends: `local-fs` (single-container dev, writes to `/tmp/twin-uploads/`), `shared-volume` (Docker Compose, mounted volume), `s3` (production). BullMQ job payload carries storage ref (not bytes). Cleanup policy: delete file after job completes or fails. Max file size: 500MB enforced at multipart layer
-- [ ] T031 [BE] [US2] Create `packages/api/src/routes/training.ts` — `POST /v1/personas/:id/train` (multipart upload with 500MB hard cap, save file via storage abstraction from T030b, create BullMQ job with storage ref, return 202 with job ID), `GET /v1/training-jobs/:id` (status query, tenant-scoped)
-- [ ] T032 [E2E] [US2] Create `packages/training/tests/integration/training.test.ts` — Integration test: upload Telegram JSON sample → job completes → persona traits populated. Test corrupt file → job fails gracefully
+- [x] T026 [BE] [US2] Create `packages/training/src/parsers/telegram-json.ts` — Stream-parse Telegram JSON export. Yield `{role, content, timestamp}` tuples. Handle >100MB files without OOM
+- [x] T027 [BE] [US2] Create `packages/training/src/parsers/whatsapp-txt.ts` — Parse WhatsApp TXT export format. Same output schema as telegram parser
+- [x] T028 [BE] [US2] Create `packages/training/src/parsers/generic-jsonl.ts` — Parse generic JSONL `{role, content, timestamp}` per line
+- [x] T029 [BE] [US2] Create `packages/training/src/extractors/trait-extractor.ts` — Extract: `avg_sentence_length`, `sentence_length_distribution`, `emoji_density`, `emoji_top_used`, `top_phrases` (n-gram), `formality_score`, `response_latency_pattern`, `lexicon_size`. Respect `traits.manual_lock` keys
+- [x] T030 [BE] [US2] Create `packages/training/src/jobs/training-job.ts` — BullMQ job processor: parse file → extract traits → read persona (with version) → merge traits → update WHERE version = :read_version; on conflict (no rows updated), re-read and retry up to 3 times; on persistent conflict, log warning + skip merge → update job status. Progress reporting via `twin.stream.training` stream
+- [x] T030b [BE] [US2] Create `packages/shared/src/storage.ts` — File storage abstraction with backends: `local-fs` (single-container dev, writes to `/tmp/twin-uploads/`), `shared-volume` (Docker Compose, mounted volume), `s3` (production). BullMQ job payload carries storage ref (not bytes). Cleanup policy: delete file after job completes or fails. Max file size: 500MB enforced at multipart layer
+- [x] T031 [BE] [US2] Create `packages/api/src/routes/training.ts` — `POST /v1/personas/:id/train` (multipart upload with 500MB hard cap, save file via storage abstraction from T030b, create BullMQ job with storage ref, return 202 with job ID), `GET /v1/training-jobs/:id` (status query, tenant-scoped)
+- [x] T032 [E2E] [US2] Create `packages/training/tests/integration/training.test.ts` — Integration test: upload Telegram JSON sample → job completes → persona traits populated. Test corrupt file → job fails gracefully
 
 **Checkpoint**: User Stories 1 AND 2 both work independently
 
@@ -105,8 +105,8 @@
 
 ### Implementation
 
-- [ ] T033 [E2E] [US3] Create `packages/api/tests/integration/isolation.test.ts` — Create personas with same slug for t1/t2, conversations, channels. Assert: each tenant sees only own data. Missing tenant → 401. Qdrant collection naming verified. Letta namespace verified
-- [ ] T034 [SEC] [US3] Audit tenant middleware — verify `X-Tenant-ID` header extraction, JWT claim fallback, no bypass paths. Verify RLS policies are enabled on all tenant-scoped tables
+- [x] T033 [E2E] [US3] Create `packages/api/tests/integration/isolation.test.ts` — Create personas with same slug for t1/t2, conversations, channels. Assert: each tenant sees only own data. Missing tenant → 401. Qdrant collection naming verified. Letta namespace verified
+- [x] T034 [SEC] [US3] Audit tenant middleware — verify `X-Tenant-ID` header extraction, JWT claim fallback, no bypass paths. Verify RLS policies are enabled on all tenant-scoped tables
 
 **Checkpoint**: Multi-tenant isolation proven by integration test
 
@@ -119,13 +119,13 @@
 
 ### Implementation
 
-- [ ] T035 [BE] [US4] Create `packages/core/src/services/channel-repository.ts` — CRUD for `channel_instances` table. Methods: `create`, `list`, `delete`, `updateStatus`
-- [ ] T036 [BE] [US4] Create `packages/api/src/routes/channels.ts` — `POST /v1/channels`, `GET /v1/channels`, `DELETE /v1/channels/:id`. Tenant-scoped
-- [ ] T037 [BE] [US4] Create `packages/core/src/services/channel-transport.ts` — Redis Streams + consumer groups wrapper: `publish(stream, payload)`, `consume(stream, group, handler)`. Inbound: `twin.stream.in`, outbound: `twin.stream.out`. Uses `XADD` for publish, `XREADGROUP` for consume with manual ACK after processing. Consumer group auto-created. Messages durable — redelivered on consumer crash
-- [ ] T038 [BE] [US4] Create `packages/core/src/services/channel-orchestrator.ts` — Consume from `twin.stream.in` consumer group, invoke chat-service (with Redlock mutex per conversation_id), publish response to `twin.stream.out`. Idempotency via Redis `SETNX` with 5 min TTL on key `dedup:{channel_id}:{message_id}` — distributed across all API pods. ACK message only after successful processing
-- [ ] T039 [BE] [US4] Create `packages/channel-telegram/src/telegram-adapter.ts` — Implement `ChannelAdapter` interface. Telegraf-based: connect (long-polling or webhook), onIncoming → publish to `twin.message.in.{channel_id}`, subscribe to `twin.message.out.{channel_id}` → send to Telegram. Reconnection with exponential backoff
-- [ ] T040 [BE] [US4] Create `packages/channel-telegram/src/index.ts` — CLI entry point: parse `--channel-id`, `--api-url`, `--redis-url` flags, instantiate adapter, connect
-- [ ] T041 [E2E] [US4] Create `packages/channel-telegram/tests/integration/telegram-adapter.test.ts` — Test: adapter connects, receives message, publishes to `twin.stream.in`, consumes from `twin.stream.out`, sends reply
+- [x] T035 [BE] [US4] Create `packages/core/src/services/channel-repository.ts` — CRUD for `channel_instances` table. Methods: `create`, `list`, `delete`, `updateStatus`
+- [x] T036 [BE] [US4] Create `packages/api/src/routes/channels.ts` — `POST /v1/channels`, `GET /v1/channels`, `DELETE /v1/channels/:id`. Tenant-scoped
+- [x] T037 [BE] [US4] Create `packages/core/src/services/channel-transport.ts` — Redis Streams + consumer groups wrapper: `publish(stream, payload)`, `consume(stream, group, handler)`. Inbound: `twin.stream.in`, outbound: `twin.stream.out`. Uses `XADD` for publish, `XREADGROUP` for consume with manual ACK after processing. Consumer group auto-created. Messages durable — redelivered on consumer crash
+- [x] T038 [BE] [US4] Create `packages/core/src/services/channel-orchestrator.ts` — Consume from `twin.stream.in` consumer group, invoke chat-service (with Redlock mutex per conversation_id), publish response to `twin.stream.out`. Idempotency via Redis `SETNX` with 5 min TTL on key `dedup:{channel_id}:{message_id}` — distributed across all API pods. ACK message only after successful processing
+- [x] T039 [BE] [US4] Create `packages/channel-telegram/src/telegram-adapter.ts` — Implement `ChannelAdapter` interface. Telegraf-based: connect (long-polling or webhook), onIncoming → publish to `twin.message.in.{channel_id}`, subscribe to `twin.message.out.{channel_id}` → send to Telegram. Reconnection with exponential backoff
+- [x] T040 [BE] [US4] Create `packages/channel-telegram/src/index.ts` — CLI entry point: parse `--channel-id`, `--api-url`, `--redis-url` flags, instantiate adapter, connect
+- [x] T041 [E2E] [US4] Create `packages/channel-telegram/tests/integration/telegram-adapter.test.ts` — Test: adapter connects, receives message, publishes to `twin.stream.in`, consumes from `twin.stream.out`, sends reply
 
 **Checkpoint**: Telegram channel fully functional end-to-end
 
@@ -138,9 +138,9 @@
 
 ### Implementation
 
-- [ ] T042 [BE] [US5] Create `packages/channel-whatsapp/src/whatsapp-adapter.ts` — Implement `ChannelAdapter`. Evolution API client: connect (subscribe to webhook), validate webhook signature against stored `evolution_webhook_secret` (reject mismatched with 401), onIncoming → publish to `twin.stream.in`, consume from `twin.stream.out` consumer group → send via Evolution REST. Retry with exponential backoff (max 5 attempts). Depends on T034b for config encryption
-- [ ] T043 [BE] [US5] Create `packages/channel-whatsapp/src/index.ts` — CLI entry point: same pattern as telegram
-- [ ] T044 [E2E] [US5] Create `packages/channel-whatsapp/tests/integration/whatsapp-adapter.test.ts` — Test: adapter lifecycle, webhook handling, outbound delivery, retry on 5xx
+- [x] T042 [BE] [US5] Create `packages/channel-whatsapp/src/whatsapp-adapter.ts` — Implement `ChannelAdapter`. Evolution API client: connect (subscribe to webhook), validate webhook signature against stored `evolution_webhook_secret` (reject mismatched with 401), onIncoming → publish to `twin.stream.in`, consume from `twin.stream.out` consumer group → send via Evolution REST. Retry with exponential backoff (max 5 attempts). Depends on T034b for config encryption
+- [x] T043 [BE] [US5] Create `packages/channel-whatsapp/src/index.ts` — CLI entry point: same pattern as telegram
+- [x] T044 [E2E] [US5] Create `packages/channel-whatsapp/tests/integration/whatsapp-adapter.test.ts` — Test: adapter lifecycle, webhook handling, outbound delivery, retry on 5xx
 
 **Checkpoint**: Both Telegram and WhatsApp channels operational
 
@@ -153,7 +153,7 @@
 
 ### Implementation
 
-- [ ] T045 [E2E] [US6] Create `packages/api/tests/integration/openai-compat.test.ts` — Test with openai-node SDK: single-shot, streaming, system+user, multi-turn, model-not-found error shape. Verify response shape matches OpenAI spec exactly
+- [x] T045 [E2E] [US6] Create `packages/api/tests/integration/openai-compat.test.ts` — Test with openai-node SDK: single-shot, streaming, system+user, multi-turn, model-not-found error shape. Verify response shape matches OpenAI spec exactly
 
 **Checkpoint**: OpenAI compatibility verified by SDK test
 
@@ -166,13 +166,13 @@
 
 ### Implementation
 
-- [ ] T046 [BE] [US7] Create `packages/cli/src/index.ts` — CLI entry point with subcommand parser. Global flags: `--tenant-id`, `--api-url`, `--output`, `--quiet`
-- [ ] T047 [BE] [US7] Create `packages/cli/src/commands/persona.ts` — Subcommands: list, create, get, update, delete, import. Per cli-commands.md contract
-- [ ] T048 [BE] [US7] Create `packages/cli/src/commands/conversation.ts` — Subcommands: list, get, export. Output formats: json, table, markdown
-- [ ] T049 [BE] [US7] Create `packages/cli/src/commands/train.ts` — Subcommands: start, status, cancel. `--watch` flag for live polling
-- [ ] T050 [BE] [US7] Create `packages/cli/src/commands/channel.ts` — Subcommands: list, create, start, stop, restart, delete
-- [ ] T051 [BE] [US7] Create `packages/cli/src/commands/health.ts` — Health check command
-- [ ] T052 [E2E] [US7] Create `packages/cli/tests/integration/cli.test.ts` — Test: persona create + list + train start + health
+- [x] T046 [BE] [US7] Create `packages/cli/src/index.ts` — CLI entry point with subcommand parser. Global flags: `--tenant-id`, `--api-url`, `--output`, `--quiet`
+- [x] T047 [BE] [US7] Create `packages/cli/src/commands/persona.ts` — Subcommands: list, create, get, update, delete, import. Per cli-commands.md contract
+- [x] T048 [BE] [US7] Create `packages/cli/src/commands/conversation.ts` — Subcommands: list, get, export. Output formats: json, table, markdown
+- [x] T049 [BE] [US7] Create `packages/cli/src/commands/train.ts` — Subcommands: start, status, cancel. `--watch` flag for live polling
+- [x] T050 [BE] [US7] Create `packages/cli/src/commands/channel.ts` — Subcommands: list, create, start, stop, restart, delete
+- [x] T051 [BE] [US7] Create `packages/cli/src/commands/health.ts` — Health check command
+- [x] T052 [E2E] [US7] Create `packages/cli/tests/integration/cli.test.ts` — Test: persona create + list + train start + health
 
 **Checkpoint**: CLI fully functional
 
@@ -180,11 +180,11 @@
 
 ## Phase 10: Polish & Cross-Cutting
 
-- [ ] T053 [OPS] Create Dockerfile for `packages/api` — multi-stage build, ESM entrypoint
-- [ ] T054 [OPS] Create Dockerfile for `packages/channel-telegram` — standalone adapter image
-- [ ] T055 [OPS] Create Dockerfile for `packages/channel-whatsapp` — standalone adapter image
-- [ ] T056 [OPS] Create `packages/training/Dockerfile` — BullMQ worker image
-- [ ] T057 [SEC] Security audit: verify no secrets in config JSONB (encrypt bot tokens), verify RLS enabled on all tables, verify tenant middleware covers all routes, verify no raw SQL bypasses tenant filter
+- [x] T053 [OPS] Create Dockerfile for `packages/api` — multi-stage build, ESM entrypoint
+- [x] T054 [OPS] Create Dockerfile for `packages/channel-telegram` — standalone adapter image
+- [x] T055 [OPS] Create Dockerfile for `packages/channel-whatsapp` — standalone adapter image
+- [x] T056 [OPS] Create `packages/training/Dockerfile` — BullMQ worker image
+- [x] T057 [SEC] Security audit: verify no secrets in config JSONB (encrypt bot tokens), verify RLS enabled on all tables, verify tenant middleware covers all routes, verify no raw SQL bypasses tenant filter
 - [ ] T058 [OPS] Validate quickstart.md — run standalone path end-to-end in clean Docker environment
 
 ---

@@ -1,0 +1,43 @@
+{
+  "name": "@undrecreaitwins/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./services/channel-transport.js": {
+      "types": "./dist/services/channel-transport.d.ts",
+      "import": "./dist/services/channel-transport.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "validate": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@undrecreaitwins/shared": "workspace:*",
+    "@undrecreaitwins/memory": "workspace:*",
+    "drizzle-orm": "^0.38.0",
+    "postgres": "^3.4.0",
+    "ioredis": "^5.4.0",
+    "fastify": "^5.2.0",
+    "zod": "^3.24.0",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "drizzle-kit": "^0.30.0",
+    "@types/node": "^22.0.0"
+  }
+}

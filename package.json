@@ -1,15 +1,20 @@
 {
-  "dependencies": {
-    "@underundre/undev": "^0.1.0"
-  },
+  "name": "undrecreaitwins",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Open-source headless AI-clone (digital twin) backend",
+  "license": "Apache-2.0",
   "scripts": {
-    "deploy": "bash scripts/deploy/deploy.sh",
-    "deploy:fast": "bash scripts/deploy/deploy.sh --fast",
-    "deploy:setup": "bash scripts/deploy/deploy.sh --setup-only",
-    "env:setup": "bash scripts/deploy/env-setup.sh",
-    "env:diff": "bash scripts/deploy/env-setup.sh --diff",
-    "logs:deploy": "bash scripts/deploy/logs.sh",
-    "lint": "echo 'No source to lint'",
-    "test": "echo 'No tests yet'"
-  }
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "test:unit": "pnpm -r run test:unit",
+    "test:integration": "pnpm -r run test:integration",
+    "validate": "pnpm -r run validate",
+    "lint": "pnpm -r run lint"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.4"
 }
