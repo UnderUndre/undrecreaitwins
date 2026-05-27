@@ -8,11 +8,16 @@ import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { enqueueTrainingJob } from '@undrecreaitwins/training/jobs/queue.js';
 
+function sanitizeFilename(name: string): string {
+  return name.replace(/\.\./g, '').replace(/[/\\]/g, '_');
+}
+
 function detectSourceType(filename?: string): TrainingSourceType {
   if (!filename) return 'generic_jsonl';
-  if (filename.endsWith('.json')) return 'telegram_json';
-  if (filename.endsWith('.txt')) return 'whatsapp_txt';
-  if (filename.endsWith('.jsonl')) return 'generic_jsonl';
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.json')) return 'telegram_json';
+  if (lower.endsWith('.txt')) return 'whatsapp_txt';
+  if (lower.endsWith('.jsonl')) return 'generic_jsonl';
   return 'generic_jsonl';
 }
 
@@ -45,7 +50,7 @@ export const trainingRoutes: FastifyPluginAsync = async (fastify) => {
       ? sourceTypeField.value as string
       : undefined;
     const sourceType = (sourceTypeValue as TrainingSourceType | undefined) ?? detectSourceType(data.filename);
-    const storageKey = `${request.tenantId}/${personaId}/${randomUUID()}-${data.filename}`;
+    const storageKey = `${request.tenantId}/${personaId}/${randomUUID()}-${sanitizeFilename(data.filename)}`;
     const storage = createStorageBackend();
     const fileRef = await storage.saveStream(storageKey, data.file);
 

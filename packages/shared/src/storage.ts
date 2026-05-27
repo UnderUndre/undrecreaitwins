@@ -45,7 +45,12 @@ async function saveStreamToDir(
   }
   const ref = join(baseDir, key);
   const target = createWriteStream(ref);
-  await pipeline(stream, target);
+  try {
+    await pipeline(stream, target);
+  } catch (err) {
+    try { await unlink(ref); } catch {}
+    throw err;
+  }
   return ref;
 }
 

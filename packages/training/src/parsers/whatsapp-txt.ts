@@ -3,12 +3,12 @@ import { createInterface } from 'node:readline';
 import type { ParsedMessage } from './telegram-json.js';
 
 const WHATSAPP_LINE_REGEX =
-  /^(\d{1,2}\/\d{1,2}\/\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)\s*-\s*([^:]+):\s([\s\S]*)$/;
+  /^(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}),?\s+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)\s*-\s*([^:]+):\s([\s\S]*)$/;
 
 const TIME_REGEX = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?$/i;
 
 function parseWhatsappDate(dateStr: string, timeStr: string): Date {
-  const parts = dateStr.split('/').map(Number);
+  const parts = dateStr.split(/[/.-]/).map(Number);
   const month = parts[0] ?? 1;
   const day = parts[1] ?? 1;
   const year = parts[2] ?? 2000;

@@ -28,29 +28,39 @@ export class ChannelTransport {
     handler: (message: StreamMessage) => Promise<void>,
     count = 10,
     blockMs = 5000,
+    maxRetries = 5,
   ): Promise<void> {
     await this.ensureGroup(stream, group);
 
+    let consecutiveErrors = 0;
     while (true) {
-      const results = await this.redis.xreadgroup(
-        'GROUP', group, consumer,
-        'COUNT', count,
-        'BLOCK', blockMs,
-        'STREAMS', stream,
-        '>',
-      );
+      try {
+        const results = await this.redis.xreadgroup(
+          'GROUP', group, consumer,
+          'COUNT', count,
+          'BLOCK', blockMs,
+          'STREAMS', stream,
+          '>',
+        );
 
-      if (!results) continue;
+        if (!results) continue;
 
-      for (const [, messages] of results as [string, [string, Record<string, string>][]][]) {
-        for (const [id, data] of messages) {
-          try {
-            await handler({ id, data });
-            await this.redis.xack(stream, group, id);
-          } catch {
-            // not acked → redelivered
+        for (const [, messages] of results as [string, [string, Record<string, string>][]][]) {
+          for (const [id, data] of messages) {
+            try {
+              await handler({ id, data });
+              await this.redis.xack(stream, group, id);
+            } catch {
+              // not acked → redelivered
+            }
           }
         }
+        consecutiveErrors = 0;
+      } catch {
+        consecutiveErrors++;
+        if (consecutiveErrors >= maxRetries) throw new Error(`Consumer exited after ${maxRetries} consecutive errors`);
+        const delay = Math.min(consecutiveErrors * 2000, 30_000);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
   }

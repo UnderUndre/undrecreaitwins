@@ -53,14 +53,9 @@ async function handleStream(
   reply: FastifyReply,
   body: z.infer<typeof chatCompletionSchema>,
 ): Promise<void> {
-  reply.raw.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-  });
-
+  let response;
   try {
-    const response = await chatService.complete({
+    response = await chatService.complete({
       tenantId: request.tenantId,
       personaSlug: body.model,
       messages: body.messages.map((m) => ({
@@ -70,44 +65,56 @@ async function handleStream(
       temperature: body.temperature,
       maxTokens: body.max_tokens,
     });
-
-    const content = response.choices[0]?.message?.content || '';
-    const chunkId = response.id;
-    const created = response.created;
-    const model = response.model;
-
-    const contentChunk = {
-      id: chunkId,
-      object: 'chat.completion.chunk',
-      created,
-      model,
-      choices: [{
-        index: 0,
-        delta: { role: 'assistant' as const, content },
-        finish_reason: null,
-      }],
-    };
-    reply.raw.write(`data: ${JSON.stringify(contentChunk)}\n\n`);
-
-    const doneChunk = {
-      id: chunkId,
-      object: 'chat.completion.chunk',
-      created,
-      model,
-      choices: [{
-        index: 0,
-        delta: {},
-        finish_reason: 'stop' as const,
-      }],
-    };
-    reply.raw.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
-    reply.raw.write('data: [DONE]\n\n');
   } catch (error) {
     const errorPayload = error instanceof NotFoundError
       ? { error: { code: 'model_not_found', message: error.message } }
       : { error: { code: 'internal_error', message: 'Internal server error' } };
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
     reply.raw.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+    reply.raw.end();
+    return;
   }
 
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  const content = response.choices[0]?.message?.content || '';
+  const chunkId = response.id;
+  const created = response.created;
+  const model = response.model;
+
+  const contentChunk = {
+    id: chunkId,
+    object: 'chat.completion.chunk',
+    created,
+    model,
+    choices: [{
+      index: 0,
+      delta: { role: 'assistant' as const, content },
+      finish_reason: null,
+    }],
+  };
+  reply.raw.write(`data: ${JSON.stringify(contentChunk)}\n\n`);
+
+  const doneChunk = {
+    id: chunkId,
+    object: 'chat.completion.chunk',
+    created,
+    model,
+    choices: [{
+      index: 0,
+      delta: {},
+      finish_reason: 'stop' as const,
+    }],
+  };
+  reply.raw.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
+  reply.raw.write('data: [DONE]\n\n');
   reply.raw.end();
 }
