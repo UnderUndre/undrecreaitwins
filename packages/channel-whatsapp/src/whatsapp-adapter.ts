@@ -119,13 +119,17 @@ export class WhatsAppAdapter implements ChannelAdapter {
       `whatsapp-${this.channelId}`,
       async (msg) => {
         if (msg.data.channel_id !== this.channelId) return;
-        await this.sendWithRetry({
-          id: msg.data.message_id ?? '',
-          channelId: this.channelId,
-          externalUserId: msg.data.external_user_id ?? '',
-          content: msg.data.content ?? '',
-          timestamp: new Date(),
-        });
+        try {
+          await this.sendWithRetry({
+            id: msg.data.message_id ?? '',
+            channelId: this.channelId,
+            externalUserId: msg.data.external_user_id ?? '',
+            content: msg.data.content ?? '',
+            timestamp: new Date(),
+          });
+        } catch {
+          // discard poison pill — prevents infinite redelivery loop
+        }
       },
     );
   }

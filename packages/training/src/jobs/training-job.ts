@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { parseTelegramJson } from '../parsers/telegram-json.js';
 import { parseWhatsappTxt } from '../parsers/whatsapp-txt.js';
 import { parseGenericJsonl } from '../parsers/generic-jsonl.js';
@@ -46,7 +46,10 @@ export async function processTrainingJob(job: Job<TrainingJobData>): Promise<voi
         .from(personas)
         .where(eq(personas.id, personaId))
         .limit(1);
-      const existing = (persona?.traits ?? {}) as Record<string, unknown>;
+      if (!persona) {
+        throw new Error(`Persona not found: ${personaId}`);
+      }
+      const existing = (persona.traits ?? {}) as Record<string, unknown>;
       const manualLock = Array.isArray(existing.manual_lock) ? (existing.manual_lock as string[]) : [];
       const merged: Record<string, unknown> = { ...traits };
       for (const key of manualLock) {
@@ -54,13 +57,18 @@ export async function processTrainingJob(job: Job<TrainingJobData>): Promise<voi
       }
       merged.manual_lock = manualLock;
 
-      await tx
+      const [updated] = await tx
         .update(personas)
         .set({
           traits: merged,
           updatedAt: new Date(),
+          version: sql`${personas.version} + 1`,
         })
-        .where(eq(personas.id, personaId));
+        .where(and(eq(personas.id, personaId), eq(personas.version, persona.version)));
+
+      if (!updated) {
+        throw new Error('Optimistic locking conflict during traits merge');
+      }
 
       await tx
         .update(trainingJobs)

@@ -29,8 +29,8 @@ export class ChannelOrchestrator {
         const external_user_id = d['external_user_id'] ?? '';
 
         const dedupKey = `dedup:${channel_id}:${message_id}`;
-        const isDuplicate = await this.dedupRedis.set(dedupKey, '1', 'EX', DEDUP_TTL_SECONDS, 'NX');
-        if (!isDuplicate) return;
+        const acquiredLock = await this.dedupRedis.set(dedupKey, '1', 'EX', DEDUP_TTL_SECONDS, 'NX');
+        if (!acquiredLock) return;
 
         try {
           const response = await chatService.complete({

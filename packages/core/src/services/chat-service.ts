@@ -55,6 +55,10 @@ const letta = new LettaClient();
 
 export class ChatService {
   async complete(request: ChatRequest): Promise<ChatResponse> {
+    if (request.messages.length === 0) {
+      throw new ServiceUnavailableError('Chat', 'No messages provided');
+    }
+
     const persona = await personaRepo.getBySlug(request.tenantId, request.personaSlug) as unknown as PersonaRow;
 
     const conversationId = await this.findOrCreateConversation(
@@ -96,9 +100,6 @@ export class ChatService {
     });
     const latencyMs = Date.now() - startTime;
 
-    if (request.messages.length === 0) {
-      throw new ServiceUnavailableError('Chat', 'No messages provided');
-    }
     await this.persistMessages(
       request.tenantId,
       conversationId,

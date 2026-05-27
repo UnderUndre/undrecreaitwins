@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { withTenantContext } from '@undrecreaitwins/core/db.js';
 import { conversations, messages } from '@undrecreaitwins/core/models/index.js';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 import { NotFoundError } from '@undrecreaitwins/shared';
 
 function toApiConversation(row: Record<string, unknown>) {
@@ -52,14 +52,19 @@ export const conversationRoutes: FastifyPluginAsync = async (fastify) => {
         .limit(limit)
         .offset(offset);
 
-      return data;
+      const [countRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(conversations)
+        .where(and(...conditions));
+
+      return { data, total: countRow?.count ?? 0 };
     });
 
     return {
-      data: result.map((r) => toApiConversation(r as Record<string, unknown>)),
+      data: result.data.map((r) => toApiConversation(r as Record<string, unknown>)),
       limit,
       offset,
-      total: result.length,
+      total: result.total,
     };
   });
 
