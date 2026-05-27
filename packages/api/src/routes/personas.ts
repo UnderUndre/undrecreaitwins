@@ -65,8 +65,10 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get('/v1/personas', async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-    const offset = Math.max(Number(query.offset) || 0, 0);
+    const parsedLimit = Number(query.limit);
+    const limit = !Number.isFinite(parsedLimit) ? 20 : Math.min(Math.max(parsedLimit, 1), 100);
+    const parsedOffset = Number(query.offset);
+    const offset = !Number.isFinite(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
     const result = await repo.list(request.tenantId, limit, offset);
     return {
       data: result.data.map((p: Record<string, unknown>) => toApiPersona(p)),

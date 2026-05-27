@@ -69,7 +69,7 @@ export class ChatService {
       ...request.messages,
     ];
 
-    const lettaNamespace = `tenant_${request.tenantId}/persona_${persona.id}/conv_${conversationId}`;
+    const lettaNamespace = `tenant_${request.tenantId}_persona_${persona.id}_conv_${conversationId}`;
     let lettaContext = '';
     let degradedMode = false;
     if (letta.isAvailable()) {

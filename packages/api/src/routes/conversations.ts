@@ -32,8 +32,10 @@ function toApiMessage(row: Record<string, unknown>) {
 export const conversationRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/v1/conversations', async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-    const offset = Math.max(Number(query.offset) || 0, 0);
+    const parsedLimit = Number(query.limit);
+    const limit = !Number.isFinite(parsedLimit) ? 20 : Math.min(Math.max(parsedLimit, 1), 100);
+    const parsedOffset = Number(query.offset);
+    const offset = !Number.isFinite(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
     const personaId = query.persona_id;
 
     const result = await withTenantContext(request.tenantId, async (tx) => {
@@ -64,8 +66,10 @@ export const conversationRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/v1/conversations/:id/messages', async (request) => {
     const { id } = request.params as { id: string };
     const query = request.query as Record<string, string | undefined>;
-    const limit = Math.min(Math.max(Number(query.limit) || 20, 1), 100);
-    const offset = Math.max(Number(query.offset) || 0, 0);
+    const parsedLimit = Number(query.limit);
+    const limit = !Number.isFinite(parsedLimit) ? 20 : Math.min(Math.max(parsedLimit, 1), 100);
+    const parsedOffset = Number(query.offset);
+    const offset = !Number.isFinite(parsedOffset) ? 0 : Math.max(parsedOffset, 0);
 
     const result = await withTenantContext(request.tenantId, async (tx) => {
       const [conv] = await tx

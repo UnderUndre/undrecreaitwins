@@ -35,7 +35,9 @@ export class WhatsAppAdapter implements ChannelAdapter {
   }
 
   async connect(): Promise<void> {
-    await this.startOutboundConsumer();
+    this.startOutboundConsumer().catch(() => {
+      this._status = 'error';
+    });
     await this.registerWebhook();
     this._status = 'active';
   }
