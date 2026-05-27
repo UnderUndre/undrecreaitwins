@@ -1,0 +1,40 @@
+{
+  "name": "@undrecreaitwins/training",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./jobs/queue.js": {
+      "types": "./dist/jobs/queue.d.ts",
+      "import": "./dist/jobs/queue.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "validate": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@undrecreaitwins/shared": "workspace:*",
+    "@undrecreaitwins/core": "workspace:*",
+    "bullmq": "^5.34.0",
+    "ioredis": "^5.4.0",
+    "drizzle-orm": "^0.38.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@types/node": "^22.0.0"
+  }
+}
