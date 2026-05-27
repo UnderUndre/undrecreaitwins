@@ -69,11 +69,12 @@ export class ChatService {
       ...request.messages,
     ];
 
+    const lettaNamespace = `tenant_${request.tenantId}/persona_${persona.id}/conv_${conversationId}`;
     let lettaContext = '';
     let degradedMode = false;
     if (letta.isAvailable()) {
       try {
-        const memory = await letta.getMemory(`tenant_${request.tenantId}_persona_${persona.id}`);
+        const memory = await letta.getMemory(lettaNamespace);
         lettaContext = memory.map((m: { content: string }) => m.content).join('\n');
       } catch {
         degradedMode = true;
@@ -95,11 +96,15 @@ export class ChatService {
     });
     const latencyMs = Date.now() - startTime;
 
-    const userMessage = request.messages[request.messages.length - 1];
-    if (!userMessage) {
+    if (request.messages.length === 0) {
       throw new ServiceUnavailableError('Chat', 'No messages provided');
     }
-    await this.persistMessages(request.tenantId, conversationId, userMessage.content, llmResponse.content);
+    await this.persistMessages(
+      request.tenantId,
+      conversationId,
+      request.messages,
+      llmResponse.content,
+    );
 
     await this.emitUsageEvent(
       request.tenantId,
@@ -162,27 +167,28 @@ export class ChatService {
   private async persistMessages(
     tenantId: string,
     conversationId: string,
-    userContent: string,
+    inboundMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     assistantContent: string,
   ): Promise<void> {
     return withTenantContext(tenantId, async (tx) => {
-      await tx.insert(messages).values([
+      const rows = [
+        ...inboundMessages.map((m) => ({
+          conversationId,
+          role: m.role,
+          content: m.content,
+        })),
         {
           conversationId,
-          role: 'user',
-          content: userContent,
-        },
-        {
-          conversationId,
-          role: 'assistant',
+          role: 'assistant' as const,
           content: assistantContent,
         },
-      ]);
+      ];
+      await tx.insert(messages).values(rows);
 
       await tx
         .update(conversations)
         .set({
-          messageCount: sql`${conversations.messageCount} + 2`,
+          messageCount: sql`${conversations.messageCount} + ${rows.length}`,
         })
         .where(eq(conversations.id, conversationId));
     });

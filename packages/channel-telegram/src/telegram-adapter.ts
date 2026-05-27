@@ -96,7 +96,7 @@ export class TelegramAdapter implements ChannelAdapter {
   async send(message: ChannelMessage): Promise<void> {
     try {
       await this.bot.telegram.sendMessage(
-        Number(message.externalUserId),
+        message.externalUserId,
         message.content,
       );
     } catch (error) {

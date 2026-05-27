@@ -2,7 +2,7 @@ import type { ChannelAdapter, ChannelMessage, ChannelHealth, ChannelStatus } fro
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { REDIS_STREAMS } from '@undrecreaitwins/shared';
 import { ChannelTransport } from '@undrecreaitwins/core/services/channel-transport.js';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 export class WhatsAppAdapter implements ChannelAdapter {
   private transport: ChannelTransport;
@@ -44,9 +44,24 @@ export class WhatsAppAdapter implements ChannelAdapter {
     const Fastify = (await import('fastify')).default;
     this.webhookServer = Fastify({ logger: false });
 
+    this.webhookServer.addContentTypeParser(
+      'application/json',
+      { parseAs: 'buffer' },
+      (req: FastifyRequest, body: Buffer, done: (err: Error | null, body?: unknown) => void) => {
+        (req as FastifyRequest & { rawBody?: Buffer }).rawBody = body;
+        try {
+          const parsed = body.length > 0 ? JSON.parse(body.toString('utf-8')) : {};
+          done(null, parsed);
+        } catch (err) {
+          done(err as Error, undefined);
+        }
+      },
+    );
+
     this.webhookServer.post('/webhook', async (request: FastifyRequest, reply: FastifyReply) => {
       const signature = request.headers['x-signature'] as string | undefined;
-      if (!this.validateSignature(JSON.stringify(request.body), signature)) {
+      const rawBody = (request as FastifyRequest & { rawBody?: Buffer }).rawBody;
+      if (!rawBody || !this.validateSignature(rawBody, signature)) {
         reply.status(401);
         return { error: 'Invalid signature' };
       }
@@ -87,10 +102,12 @@ export class WhatsAppAdapter implements ChannelAdapter {
     await this.webhookServer.listen({ port, host: '0.0.0.0' });
   }
 
-  private validateSignature(payload: string, signature?: string): boolean {
+  private validateSignature(payload: Buffer, signature?: string): boolean {
     if (!signature || !this.webhookSecret) return false;
-    const expected = createHmac('sha256', this.webhookSecret).update(payload).digest('hex');
-    return signature === expected;
+    const expected = createHmac('sha256', this.webhookSecret).update(payload).digest();
+    const provided = Buffer.from(signature, 'hex');
+    if (provided.length !== expected.length) return false;
+    return timingSafeEqual(provided, expected);
   }
 
   private async startOutboundConsumer(): Promise<void> {

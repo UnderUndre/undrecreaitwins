@@ -98,7 +98,17 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
     const ifMatch = request.headers['if-match'];
     let expectedVersion: bigint | undefined;
     if (ifMatch) {
-      expectedVersion = BigInt(ifMatch as string);
+      const cleanIfMatch = (ifMatch as string)
+        .replace(/^W\//, '')
+        .replace(/^"|"$/g, '')
+        .trim();
+      try {
+        expectedVersion = BigInt(cleanIfMatch);
+      } catch {
+        throw new ValidationError([
+          { field: 'If-Match', message: `Invalid If-Match header value: ${ifMatch}` },
+        ]);
+      }
     } else if (body.version !== undefined) {
       expectedVersion = BigInt(body.version);
     }

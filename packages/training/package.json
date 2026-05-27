@@ -5,6 +5,16 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./jobs/queue.js": {
+      "types": "./dist/jobs/queue.d.ts",
+      "import": "./dist/jobs/queue.js"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -19,6 +29,7 @@
     "@undrecreaitwins/core": "workspace:*",
     "bullmq": "^5.34.0",
     "ioredis": "^5.4.0",
+    "drizzle-orm": "^0.38.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {

@@ -26,7 +26,7 @@ type PersonaRow = typeof personas.$inferSelect;
 export class PersonaRepository {
   async create(tenantId: string, data: NewPersona): Promise<PersonaRow> {
     return withTenantContext(tenantId, async (tx) => {
-      const [persona] = await tx
+      const rows = await tx
         .insert(personas)
         .values({
           tenantId,
@@ -37,6 +37,10 @@ export class PersonaRepository {
           modelPreferences: data.modelPreferences || {},
         })
         .returning();
+      const persona = rows[0];
+      if (!persona) {
+        throw new Error('Insert returned no rows');
+      }
       return persona;
     });
   }
@@ -80,7 +84,10 @@ export class PersonaRepository {
         .from(personas)
         .limit(limit)
         .offset(offset);
-      return { data, total: data.length };
+      const [countRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(personas);
+      return { data, total: countRow?.count ?? 0 };
     });
   }
 

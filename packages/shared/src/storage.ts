@@ -1,9 +1,12 @@
 import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
 import { join } from 'path';
 import { existsSync } from 'fs';
 
 export interface StorageBackend {
   save(key: string, data: Buffer): Promise<string>;
+  saveStream(key: string, stream: NodeJS.ReadableStream): Promise<string>;
   read(ref: string): Promise<Buffer>;
   remove(ref: string): Promise<void>;
 }
@@ -23,16 +26,38 @@ export function createStorageBackend(): StorageBackend {
   }
 }
 
+async function saveBufferToDir(baseDir: string, key: string, data: Buffer): Promise<string> {
+  if (!existsSync(baseDir)) {
+    await mkdir(baseDir, { recursive: true });
+  }
+  const ref = join(baseDir, key);
+  await writeFile(ref, data);
+  return ref;
+}
+
+async function saveStreamToDir(
+  baseDir: string,
+  key: string,
+  stream: NodeJS.ReadableStream,
+): Promise<string> {
+  if (!existsSync(baseDir)) {
+    await mkdir(baseDir, { recursive: true });
+  }
+  const ref = join(baseDir, key);
+  const target = createWriteStream(ref);
+  await pipeline(stream, target);
+  return ref;
+}
+
 class LocalFsStorage implements StorageBackend {
   private baseDir = process.env.TWIN_UPLOAD_DIR || '/tmp/twin-uploads';
 
-  async save(key: string, data: Buffer): Promise<string> {
-    if (!existsSync(this.baseDir)) {
-      await mkdir(this.baseDir, { recursive: true });
-    }
-    const ref = join(this.baseDir, key);
-    await writeFile(ref, data);
-    return ref;
+  save(key: string, data: Buffer): Promise<string> {
+    return saveBufferToDir(this.baseDir, key, data);
+  }
+
+  saveStream(key: string, stream: NodeJS.ReadableStream): Promise<string> {
+    return saveStreamToDir(this.baseDir, key, stream);
   }
 
   async read(ref: string): Promise<Buffer> {
@@ -49,13 +74,12 @@ class LocalFsStorage implements StorageBackend {
 class SharedVolumeStorage implements StorageBackend {
   private baseDir = process.env.TWIN_SHARED_VOLUME_PATH || '/data/twin-uploads';
 
-  async save(key: string, data: Buffer): Promise<string> {
-    if (!existsSync(this.baseDir)) {
-      await mkdir(this.baseDir, { recursive: true });
-    }
-    const ref = join(this.baseDir, key);
-    await writeFile(ref, data);
-    return ref;
+  save(key: string, data: Buffer): Promise<string> {
+    return saveBufferToDir(this.baseDir, key, data);
+  }
+
+  saveStream(key: string, stream: NodeJS.ReadableStream): Promise<string> {
+    return saveStreamToDir(this.baseDir, key, stream);
   }
 
   async read(ref: string): Promise<Buffer> {
@@ -71,6 +95,10 @@ class SharedVolumeStorage implements StorageBackend {
 
 class S3Storage implements StorageBackend {
   async save(_key: string, _data: Buffer): Promise<string> {
+    throw new Error('S3 storage backend requires @aws-sdk/client-s3. Install and configure TWIN_S3_* env vars.');
+  }
+
+  async saveStream(_key: string, _stream: NodeJS.ReadableStream): Promise<string> {
     throw new Error('S3 storage backend requires @aws-sdk/client-s3. Install and configure TWIN_S3_* env vars.');
   }
 

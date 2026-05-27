@@ -10,9 +10,49 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./db.js": {
+      "types": "./dist/db.d.ts",
+      "import": "./dist/db.js"
+    },
+    "./models/index.js": {
+      "types": "./dist/models/index.d.ts",
+      "import": "./dist/models/index.js"
+    },
+    "./services/persona-repository.js": {
+      "types": "./dist/services/persona-repository.d.ts",
+      "import": "./dist/services/persona-repository.js"
+    },
+    "./services/chat-service.js": {
+      "types": "./dist/services/chat-service.d.ts",
+      "import": "./dist/services/chat-service.js"
+    },
+    "./services/channel-repository.js": {
+      "types": "./dist/services/channel-repository.d.ts",
+      "import": "./dist/services/channel-repository.js"
+    },
     "./services/channel-transport.js": {
       "types": "./dist/services/channel-transport.d.ts",
       "import": "./dist/services/channel-transport.js"
+    },
+    "./services/channel-orchestrator.js": {
+      "types": "./dist/services/channel-orchestrator.d.ts",
+      "import": "./dist/services/channel-orchestrator.js"
+    },
+    "./services/usage-service.js": {
+      "types": "./dist/services/usage-service.d.ts",
+      "import": "./dist/services/usage-service.js"
+    },
+    "./middleware/tenant.js": {
+      "types": "./dist/middleware/tenant.d.ts",
+      "import": "./dist/middleware/tenant.js"
+    },
+    "./middleware/auth.js": {
+      "types": "./dist/middleware/auth.d.ts",
+      "import": "./dist/middleware/auth.js"
+    },
+    "./middleware/error-handler.js": {
+      "types": "./dist/middleware/error-handler.d.ts",
+      "import": "./dist/middleware/error-handler.js"
     }
   },
   "scripts": {

@@ -2,46 +2,11 @@ import type { FastifyPluginAsync } from 'fastify';
 import { createStorageBackend } from '@undrecreaitwins/shared/storage.js';
 import { withTenantContext } from '@undrecreaitwins/core/db.js';
 import { trainingJobs } from '@undrecreaitwins/core/models/index.js';
-import { NotFoundError } from '@undrecreaitwins/shared';
+import { NotFoundError, ValidationError } from '@undrecreaitwins/shared';
 import type { TrainingSourceType, PersonaTraits } from '@undrecreaitwins/shared';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import { parseTelegramJson } from '@undrecreaitwins/training/parsers/telegram-json.js';
-import { parseWhatsappTxt } from '@undrecreaitwins/training/parsers/whatsapp-txt.js';
-import { parseGenericJsonl } from '@undrecreaitwins/training/parsers/generic-jsonl.js';
-import { extractTraits } from '@undrecreaitwins/training/extractors/trait-extractor.js';
-import type { ParsedMessage } from '@undrecreaitwins/training/parsers/telegram-json.js';
-
-function getParser(sourceType: TrainingSourceType): (path: string) => AsyncGenerator<ParsedMessage> {
-  switch (sourceType) {
-    case 'telegram_json':
-      return parseTelegramJson;
-    case 'whatsapp_txt':
-      return parseWhatsappTxt;
-    case 'generic_jsonl':
-      return parseGenericJsonl;
-    default:
-      throw new Error(`Unknown source type: ${sourceType}`);
-  }
-}
-
-async function runTrainingPipeline(params: {
-  sourceType: TrainingSourceType;
-  sourceFileRef: string;
-}): Promise<{ traits: PersonaTraits; messageCount: number }> {
-  const messages: ParsedMessage[] = [];
-  const parser = getParser(params.sourceType);
-  for await (const msg of parser(params.sourceFileRef)) {
-    messages.push(msg);
-  }
-
-  if (messages.length === 0) {
-    throw new Error('No messages found in training file');
-  }
-
-  const traits = extractTraits(messages);
-  return { traits, messageCount: messages.length };
-}
+import { enqueueTrainingJob } from '@undrecreaitwins/training/jobs/queue.js';
 
 function detectSourceType(filename?: string): TrainingSourceType {
   if (!filename) return 'generic_jsonl';
@@ -80,10 +45,19 @@ export const trainingRoutes: FastifyPluginAsync = async (fastify) => {
       ? sourceTypeField.value as string
       : undefined;
     const sourceType = (sourceTypeValue as TrainingSourceType | undefined) ?? detectSourceType(data.filename);
-    const buffer = await data.toBuffer();
     const storageKey = `${request.tenantId}/${personaId}/${randomUUID()}-${data.filename}`;
     const storage = createStorageBackend();
-    const fileRef = await storage.save(storageKey, buffer);
+    const fileRef = await storage.saveStream(storageKey, data.file);
+
+    if (data.file.truncated) {
+      await storage.remove(fileRef).catch(() => {});
+      throw new ValidationError([
+        {
+          field: 'file',
+          message: `Upload exceeds size limit of ${process.env.TWIN_MAX_UPLOAD_BYTES || '524288000'} bytes`,
+        },
+      ]);
+    }
 
     const jobId = randomUUID();
     await withTenantContext(request.tenantId, async (tx) => {
@@ -93,43 +67,35 @@ export const trainingRoutes: FastifyPluginAsync = async (fastify) => {
         personaId,
         sourceType,
         sourceFileRef: fileRef,
-        status: 'running',
-        startedAt: new Date(),
+        status: 'pending',
       });
     });
 
-    runTrainingPipeline({ sourceType, sourceFileRef: fileRef })
-      .then(async (result) => {
-        await withTenantContext(request.tenantId, async (tx) => {
-          await tx
-            .update(trainingJobs)
-            .set({
-              status: 'completed',
-              progressPercent: 100,
-              extractedTraits: result.traits,
-              completedAt: new Date(),
-            })
-            .where(eq(trainingJobs.id, jobId));
-        });
-      })
-      .catch(async (err) => {
-        await withTenantContext(request.tenantId, async (tx) => {
-          await tx
-            .update(trainingJobs)
-            .set({
-              status: 'failed',
-              errorMessage: err instanceof Error ? err.message : 'Unknown error',
-              completedAt: new Date(),
-            })
-            .where(eq(trainingJobs.id, jobId));
-        });
-      })
-      .finally(async () => {
-        await storage.remove(fileRef).catch(() => {});
+    try {
+      await enqueueTrainingJob({
+        jobId,
+        tenantId: request.tenantId,
+        personaId,
+        sourceType,
+        sourceFileRef: fileRef,
       });
+    } catch (err) {
+      await withTenantContext(request.tenantId, async (tx) => {
+        await tx
+          .update(trainingJobs)
+          .set({
+            status: 'failed',
+            errorMessage: err instanceof Error ? err.message : 'Failed to enqueue training job',
+            completedAt: new Date(),
+          })
+          .where(eq(trainingJobs.id, jobId));
+      });
+      await storage.remove(fileRef).catch(() => {});
+      throw err;
+    }
 
     reply.status(202);
-    return { id: jobId, status: 'running', persona_id: personaId, tenant_id: request.tenantId };
+    return { id: jobId, status: 'pending', persona_id: personaId, tenant_id: request.tenantId };
   });
 
   fastify.get('/v1/training-jobs/:id', async (request) => {
