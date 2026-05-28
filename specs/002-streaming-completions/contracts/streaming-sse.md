@@ -89,6 +89,35 @@ interface StreamChunk {
 }
 ```
 
+## Error handling
+
+### Early errors (before `writeHead(200)`)
+
+If an error occurs before the SSE stream starts (e.g., LLM provider returns 5xx immediately, auth failure, invalid request):
+
+```
+HTTP/1.1 503 Service Unavailable
+Content-Type: application/json
+
+{"error":{"code":"provider_error","message":"LLM provider returned 503"}}
+```
+
+- Return standard JSON error with appropriate HTTP status code (400, 401, 503, etc.)
+- No SSE headers sent, no `data: [DONE]`
+
+### Mid-stream errors (after `writeHead(200)`)
+
+If an error occurs after the SSE stream has started:
+
+```
+data: {"error":{"code":"provider_error","message":"LLM provider connection lost"}}
+
+```
+
+- Send SSE error event as defined in §Error event above
+- Terminate with `reply.raw.end()`
+- HTTP status is already committed as `200 OK` — cannot change it
+
 ## Abort behavior
 
 - Client disconnect → `request.raw` emits `'close'` → `AbortController.abort()` → LLM fetch cancelled

@@ -19,8 +19,8 @@
 **⚠️ CRITICAL**: No route work can begin until this phase is complete.
 
 - [ ] T003 [BE] [US1] Implement `callLLMStream()` private method in `packages/core/src/services/chat-service.ts` — accept `{messages, temperature, maxTokens, model, signal, streamOptions}`, `fetch` with `stream: true`, parse SSE response body via `TextDecoderStream` + line parser, yield `StreamChunk` per token (NFR-001: AsyncGenerator yields per chunk, inherently non-blocking), handle `stream_options.include_usage`, respect `AbortController.signal`, timeout via `TWIN_STREAM_TIMEOUT_MS`, streaming buffer MUST NOT exceed 64KB per request (NFR-002)
-- [ ] T004 [BE] [US1+US2] Implement `completeStream()` public method in `packages/core/src/services/chat-service.ts` — validate messages, create conversation (findOrCreateConversation), fetch Letta memory, build system prompt, accumulate `delta.content` from `callLLMStream()` yields, after generator done: persist messages + emit usage event, return `AsyncGenerator<StreamChunk>` + expose accumulated content/usage via return value
-- [ ] T005 [BE] [US3] Add `AbortController` propagation in `completeStream()` — accept `signal` param, pass to `callLLMStream()`, on abort: stop yielding, skip persistence, clean up
+- [ ] T004 [BE] [US1+US2] Implement `completeStream()` public method in `packages/core/src/services/chat-service.ts` — validate messages, create conversation (findOrCreateConversation), fetch Letta memory, build system prompt, accumulate `delta.content` from `callLLMStream()` yields, return `AsyncGenerator<StreamChunk>` that yields `{ completed: boolean, content: string, usage: UsageStats }` as its return value. Route layer owns persistence decision based on `completed` flag — do NOT persist inside the service layer
+- [ ] T005 [BE] [US3] Add `AbortController` propagation in `completeStream()` — accept `signal` param, pass to `callLLMStream()`, on abort: stop yielding, set `completed: false` in return value, clean up
 
 **Checkpoint**: Core streaming engine ready — `completeStream()` yields tokens in real-time.
 
@@ -30,8 +30,8 @@
 
 **Purpose**: Rewrite `handleStream()` to use real streaming with abort + error handling.
 
-- [ ] T006 [BE] [US1] Rewrite `handleStream()` in `packages/api/src/routes/chat-completions.ts` — create `AbortController`, listen `request.raw.on('close')` → abort, iterate `chatService.completeStream()` with `for await`, format each `StreamChunk` to SSE (`data: ${JSON.stringify(chunk)}\n\n`), ensure each `reply.raw.write()` call is ≤16KB (NFR-003), handle backpressure via `reply.raw.write()` return value (NFR-002), write `data: [DONE]\n\n` at end
-- [ ] T007 [BE] [US3+US4] Add error handling in `handleStream()` — catch errors from generator (provider error, timeout, parse error), send structured SSE error event before closing stream, on abort: skip persistence, clean up `reply.raw.end()`
+- [ ] T006 [BE] [US1] Rewrite `handleStream()` in `packages/api/src/routes/chat-completions.ts` — create `AbortController`, listen `request.raw.on('close')` → abort, iterate `chatService.completeStream()` with `for await`, format each `StreamChunk` to SSE (`data: ${JSON.stringify(chunk)}\n\n`), ensure each `reply.raw.write()` call is ≤16KB (NFR-003), handle backpressure: when `reply.raw.write()` returns `false`, pause iteration and wait for `'drain'` event on `reply.raw` before resuming (NFR-002), after generator completes: check `{ completed }` flag → if `true`, call `persistMessages()` and `emitUsageEvent()`, write `data: [DONE]\n\n` at end
+- [ ] T007 [BE] [US3+US4] Add error handling in `handleStream()` — catch errors from generator (provider error, timeout, parse error), distinguish early errors (before `writeHead(200)`) → return JSON error with HTTP status, vs mid-stream errors → send structured SSE error event then `reply.raw.end()`. On abort: skip persistence, clean up `reply.raw.end()`
 - [ ] T008 [BE] [US1] Update `chatCompletionSchema` to accept `stream_options` field — `z.object({ include_usage: z.boolean().optional() }).optional()`, pass through to `completeStream()`
 
 **Checkpoint**: Route layer pipes real tokens. Stream=true works end-to-end.

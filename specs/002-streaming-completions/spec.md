@@ -142,7 +142,7 @@ If the LLM provider returns an error mid-stream (5xx, network timeout, malformed
 ## Non-Functional Requirements
 
 - **NFR-001**: Streaming MUST NOT block the Node.js event loop. Token processing must yield to the event loop between chunks. Satisfied by design: `AsyncGenerator` yields per chunk, inherently non-blocking.
-- **NFR-002**: Memory usage during streaming MUST be bounded — streaming buffer MUST NOT exceed 64KB per request. No buffering the entire response. Backpressure via `reply.raw.write()` return value handling. Accumulated content for persistence grows at 1:1 with response tokens (no intermediate copies).
+- **NFR-002**: Memory usage during streaming MUST be bounded. The 64KB limit applies to the **active network/stream processing buffer** (unflushed SSE chunks in flight). When `reply.raw.write()` returns `false`, iteration MUST pause until the `'drain'` event fires. The **accumulated persistence string** (full response text for DB write) grows at 1:1 with response tokens and is exempt from the 64KB stream buffer limit — its ceiling is the model's `max_tokens` output limit (e.g., 128k tokens ≈ 512KB). No intermediate copies or full-response buffering before the generator yields.
 - **NFR-003**: SSE chunk size SHOULD be ≤16KB per `reply.raw.write()` call to avoid TCP send buffer issues. Large token deltas MUST be split or concatenated only up to this limit before flushing.
 - **NFR-004**: The implementation MUST work with any OpenAI-compatible provider (OmniRoute, LiteLLM, vLLM, etc.) that supports `stream: true`.
 
