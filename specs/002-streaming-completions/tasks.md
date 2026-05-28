@@ -7,8 +7,8 @@
 
 **Purpose**: Shared types that both core and api packages depend on.
 
-- [ ] T001 [SETUP] Create `packages/shared/src/types/streaming.ts` — export `StreamChunk`, `StreamDelta`, `StreamUsage` types per `contracts/streaming-sse.md` §StreamChunk Type
-- [ ] T002 [SETUP] Re-export streaming types from `packages/shared/src/index.ts`
+- [x] T001 [SETUP] Create `packages/shared/src/types/streaming.ts` — export `StreamChunk`, `StreamDelta`, `StreamUsage` types per `contracts/streaming-sse.md` §StreamChunk Type
+- [x] T002 [SETUP] Re-export streaming types from `packages/shared/src/index.ts`
 
 ---
 
@@ -18,9 +18,25 @@
 
 **⚠️ CRITICAL**: No route work can begin until this phase is complete.
 
-- [ ] T003 [BE] [US1] Implement `callLLMStream()` private method in `packages/core/src/services/chat-service.ts` — accept `{messages, temperature, maxTokens, model, signal, streamOptions}`, `fetch` with `stream: true`, parse SSE response body via `TextDecoderStream` + line parser, yield `StreamChunk` per token (NFR-001: AsyncGenerator yields per chunk, inherently non-blocking), handle `stream_options.include_usage`, respect `AbortController.signal`, timeout via `TWIN_STREAM_TIMEOUT_MS`, streaming buffer MUST NOT exceed 64KB per request (NFR-002)
-- [ ] T004 [BE] [US1+US2] Implement `completeStream()` public method in `packages/core/src/services/chat-service.ts` — validate messages, create conversation (findOrCreateConversation), fetch Letta memory, build system prompt, accumulate `delta.content` from `callLLMStream()` yields, return `AsyncGenerator<StreamChunk>` that yields `{ completed: boolean, content: string, usage: UsageStats }` as its return value. Route layer owns persistence decision based on `completed` flag — do NOT persist inside the service layer
-- [ ] T005 [BE] [US3] Add `AbortController` propagation in `completeStream()` — accept `signal` param, pass to `callLLMStream()`, on abort: stop yielding, set `completed: false` in return value, clean up
+- [x] T003 [BE] [US1] Implement `callLLMStream()` private method in `packages/core/src/services/chat-service.ts`:
+  - Accept `{messages, temperature, maxTokens, model, signal, streamOptions}`.
+  - Execute `fetch` to LLM provider with `stream: true`.
+  - Parse SSE response body safely via `TextDecoderStream` (to prevent splitting multi-byte UTF-8 chars on chunk boundaries) + line parser.
+  - Yield `StreamChunk` per token (NFR-001: AsyncGenerator yields per chunk, inherently non-blocking).
+  - Handle `stream_options.include_usage` yielding usage stats in final chunk.
+  - Support `finish_reason: "length"` along with `"stop"`, passing them through transparently (M1).
+  - Handle empty provider response streams (0 tokens) gracefully by yielding role chunk, finish_reason: "stop", and completion_tokens: 0 (M2).
+  - Respect `AbortController.signal` and trigger connection abort immediately.
+  - Use `TWIN_STREAM_TIMEOUT_MS` for timeouts.
+  - Active stream buffer (unflushed network buffer) MUST NOT exceed 64KB per request (NFR-002). Note: The accumulated persistence string is exempt from this limit (L3).
+- [x] T004 [BE] [US1+US2] Implement `completeStream()` public method in `packages/core/src/services/chat-service.ts`:
+  - Validate request messages.
+  - Check `signal.aborted` before performing any tasks to handle early abort (L2).
+  - Create or fetch conversation (findOrCreateConversation) and Letta memory context.
+  - Build system prompt including memory context.
+  - Return `AsyncGenerator<StreamChunk>` yielding token deltas and returning `{ completed: boolean, content: string, usage?: UsageStats }` as its final completion value (C1).
+  - Concurrently accumulate string content inside the generator, but do NOT persist inside the service layer (route layer owns this decision based on `completed` flag).
+- [x] T005 [BE] [US3] Add `AbortController` propagation in `completeStream()` — accept `signal` param, pass to `callLLMStream()`. On abort, stop yielding, return `{ completed: false, content: accumulated }` to avoid partial data/usage persistence.
 
 **Checkpoint**: Core streaming engine ready — `completeStream()` yields tokens in real-time.
 
@@ -30,9 +46,21 @@
 
 **Purpose**: Rewrite `handleStream()` to use real streaming with abort + error handling.
 
-- [ ] T006 [BE] [US1] Rewrite `handleStream()` in `packages/api/src/routes/chat-completions.ts` — create `AbortController`, listen `request.raw.on('close')` → abort, iterate `chatService.completeStream()` with `for await`, format each `StreamChunk` to SSE (`data: ${JSON.stringify(chunk)}\n\n`), ensure each `reply.raw.write()` call is ≤16KB (NFR-003), handle backpressure: when `reply.raw.write()` returns `false`, pause iteration and wait for `'drain'` event on `reply.raw` before resuming (NFR-002), after generator completes: check `{ completed }` flag → if `true`, call `persistMessages()` and `emitUsageEvent()`, write `data: [DONE]\n\n` at end
-- [ ] T007 [BE] [US3+US4] Add error handling in `handleStream()` — catch errors from generator (provider error, timeout, parse error), distinguish early errors (before `writeHead(200)`) → return JSON error with HTTP status, vs mid-stream errors → send structured SSE error event then `reply.raw.end()`. On abort: skip persistence, clean up `reply.raw.end()`
-- [ ] T008 [BE] [US1] Update `chatCompletionSchema` to accept `stream_options` field — `z.object({ include_usage: z.boolean().optional() }).optional()`, pass through to `completeStream()`
+- [x] T006 [BE] [US1] Rewrite `handleStream()` in `packages/api/src/routes/chat-completions.ts`:
+  - Create `AbortController`, listen `request.raw.on('close')` → trigger `abort()`.
+  - Set SSE headers: `writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' })` (M5).
+  - Iterate `chatService.completeStream()` using `for await`.
+  - Format each `StreamChunk` to SSE (`data: ${JSON.stringify(chunk)}\n\n`).
+  - **Split Strategy**: Ensure each `reply.raw.write()` payload is ≤16KB (NFR-003). If a single token delta JSON-encoded payload exceeds 16KB, split the text content into multiple smaller SSE chunks preserving the same `chunk.id` and metadata, flushing each immediately (H3).
+  - **Backpressure Handling**: If `reply.raw.write()` returns `false`, pause iteration, register a `reply.raw.once('drain')` listener, and wait for the event before resuming.
+  - **Backpressure Leak Cleanup**: On client disconnect or abort, explicitly unsubscribe any active `'drain'` listener using `reply.raw.off('drain', ...)` to prevent memory leaks (L1).
+  - After generator completes cleanly (and returns `{ completed: true }`): call `persistMessages()` and `emitUsageEvent()`, write `data: [DONE]\n\n`, and close reply.
+  - **Conversation Life Cycle Wording**: Newly created conversations remain in DB with `messageCount: 0` if aborted early before any message lands (M4).
+- [x] T007 [BE] [US3+US4] Add error handling in `handleStream()` — catch errors from generator (provider error, timeout, parse error):
+  - Early errors (before headers sent) → respond with standard JSON payload and correct HTTP error code (e.g. 503 Service Unavailable) (C2).
+  - Mid-stream errors (after headers sent) → send structured SSE error event (`data: {"error":{"code":"...","message":"..."}}\n\n`) and call `reply.raw.end()` (C2).
+  - On abort: skip persistence, clean up socket with `reply.raw.end()`, and unsubscribe any remaining listeners.
+- [x] T008 [BE] [US1] Update `chatCompletionSchema` to accept `stream_options` field — `z.object({ include_usage: z.boolean().optional() }).optional()`, pass through to `completeStream()`.
 
 **Checkpoint**: Route layer pipes real tokens. Stream=true works end-to-end.
 
@@ -42,10 +70,16 @@
 
 **Purpose**: Validate non-streaming regression + streaming correctness.
 
-- [ ] T009 [BE] Verify non-streaming path unchanged — run existing tests, confirm `stream: false` returns identical `ChatResponse` shape
-- [ ] T010 [BE] Manual streaming test per `quickstart.md` — curl with `stream: true`, verify incremental chunks, usage in final chunk, `[DONE]` sentinel
-- [ ] T011 [BE] Verify abort behavior — start stream, close client mid-response, confirm no lingering fetch, no partial usage_events row
-- [ ] T012 [BE] `pnpm run validate` — tsc --noEmit passes across all packages
+- [x] T009 [BE] Verify non-streaming path unchanged — run existing tests, confirm `stream: false` returns identical `ChatResponse` shape.
+- [x] T010 [BE] Manual streaming test per `quickstart.md` — curl with `stream: true` and `stream_options: { include_usage: true }`, verify incremental chunks, cyrillic/emojis, usage in final chunk, `[DONE]` sentinel.
+- [x] T011 [BE] Verify abort behavior — start stream, close client mid-response, confirm no lingering fetch, no partial usage_events row.
+- [x] T012 [BE] `pnpm run validate` — tsc --noEmit passes across all packages.
+- [x] T013 [BE] [E2E] Create automated integration tests for real streaming in `packages/api/tests/routes/chat-completions.test.ts` (M3):
+  - Mock LLM provider sending incremental SSE stream.
+  - Verify first chunk arrival latency/structure and subsequent deltas.
+  - Verify correct parsing and streaming until `[DONE]`.
+  - Assert inclusion of `usage` block on success.
+  - Test abort flow, verifying that disconnect cancels upstream fetch and skips DB updates.
 
 ---
 
@@ -61,8 +95,8 @@ T004 → T005
 T005 → T006
 T006 → T007
 T007 → T008
-T008 → T009, T010, T011
-T009 + T010 + T011 → T012
+T008 → T009, T010, T011, T013
+T009 + T010 + T011 + T013 → T012
 ```
 
 ### Self-Validation Checklist
@@ -89,7 +123,8 @@ graph LR
     T008 --> T009
     T008 --> T010
     T008 --> T011
-    T009 & T010 & T011 --> T012
+    T008 --> T013
+    T009 & T010 & T011 & T013 --> T012
 ```
 
 ---
@@ -101,9 +136,9 @@ graph LR
 | 1 | [SETUP] | T001 → T002 | — |
 | 2 | [BE] core | T003 → T004 → T005 | T002 |
 | 3 | [BE] route | T006 → T007 → T008 | T005 |
-| 4 | [BE] verify | T009, T010, T011 → T012 | T008 |
+| 4 | [BE] verify | T009, T010, T011, T013 → T012 | T008 |
 
-**Note**: This is a linear feature — limited parallelism. Lanes 2 and 3 are sequential because route depends on core. Verification (lane 4) has 3 independent checks that can run in parallel.
+**Note**: This is a linear feature — limited parallelism. Lanes 2 and 3 are sequential because route depends on core. Verification (lane 4) has 4 independent checks that can run in parallel.
 
 ---
 
@@ -112,11 +147,11 @@ graph LR
 | Agent | Task Count | Can Start After |
 |-------|-----------|-----------------|
 | [SETUP] | 2 | immediately |
-| [BE] | 10 | T002 (sequential within BE) |
+| [BE] | 11 | T002 (sequential within BE) |
 
-**Critical Path**: T001 → T002 → T003 → T004 → T005 → T006 → T007 → T008 → T012
+**Critical Path**: T001 → T002 → T003 → T004 → T005 → T006 → T007 → T008 → T013 → T012
 
-**Estimated effort**: ~200 LOC across 4 files. Single BE agent can execute sequentially.
+**Estimated effort**: ~250 LOC across 5 files. Single BE agent can execute sequentially.
 
 ---
 
@@ -125,25 +160,4 @@ graph LR
 | Agent | Subagent | Skills | Input Context | Tasks | Files |
 |-------|----------|--------|---------------|-------|-------|
 | `[SETUP]` | — (orchestrator) | — | contracts/streaming-sse.md §StreamChunk Type | T001, T002 | `packages/shared/src/types/streaming.ts`, `packages/shared/src/index.ts` |
-| `[BE]` | `backend-specialist` | `api-patterns`, `nodejs-best-practices` | plan.md §Data Flow + §Design Decisions, contracts/streaming-sse.md, spec.md §FR-001..FR-010 | T003–T012 | `packages/core/src/services/chat-service.ts`, `packages/api/src/routes/chat-completions.ts` |
-
----
-
-## Implementation Strategy
-
-### MVP First (US1 Only)
-
-1. T001–T002: Shared types
-2. T003–T005: Core streaming (completeStream + callLLMStream + abort)
-3. T006 + T008: Route rewrite (handleStream + schema)
-4. T009–T012: Verify
-5. **STOP** — US1 (real streaming) + US3 (abort) delivered
-
-### Incremental Delivery
-
-- US1 (P1): T001–T006, T008–T010, T012 → Real streaming works
-- US2 (P1): Included in T004 (usage accounting is part of completeStream)
-- US3 (P2): Included in T005 + T007 (abort + error handling)
-- US4 (P2): Included in T007 (error propagation)
-
-**Note**: All 4 user stories are tightly coupled — they share the same code paths. Delivering them together is more efficient than splitting.
+| `[BE]` | `backend-specialist` | `api-patterns`, `nodejs-best-practices`, `testing-patterns` | plan.md §Data Flow + §Design Decisions, contracts/streaming-sse.md, spec.md §FR-001..FR-010 | T003–T013 | `packages/core/src/services/chat-service.ts`, `packages/api/src/routes/chat-completions.ts`, `packages/api/tests/routes/chat-completions.test.ts` |
