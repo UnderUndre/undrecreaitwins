@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { ChatResponse } from '@undrecreaitwins/core/services/chat-service.js';
 
+import type { StreamChunk } from '@undrecreaitwins/shared';
+
 const mockChatResponse: ChatResponse = {
   id: 'chatcmpl-test',
   object: 'chat.completion',
@@ -16,8 +18,52 @@ const mockChatResponse: ChatResponse = {
   metadata: { conversation_id: 'conv-123' },
 };
 
+const mockStreamChunk1: StreamChunk = {
+  id: 'chatcmpl-test',
+  object: 'chat.completion.chunk',
+  created: Math.floor(Date.now() / 1000),
+  model: 'test-persona',
+  choices: [{
+    index: 0,
+    delta: { role: 'assistant', content: 'Hello!' },
+    finish_reason: null,
+  }],
+};
+
+const mockStreamChunk2: StreamChunk = {
+  id: 'chatcmpl-test',
+  object: 'chat.completion.chunk',
+  created: Math.floor(Date.now() / 1000),
+  model: 'test-persona',
+  choices: [{
+    index: 0,
+    delta: {},
+    finish_reason: 'stop',
+  }],
+  usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+};
+
 const chatServiceMocks = {
   complete: vi.fn().mockResolvedValue(mockChatResponse),
+  completeStream: vi.fn().mockImplementation(async function* (request: { streamOptions?: { include_usage?: boolean } }, _signal: unknown) {
+    yield mockStreamChunk1;
+    const includeUsage = request.streamOptions?.include_usage === true;
+    if (includeUsage) {
+      yield mockStreamChunk2;
+    } else {
+      const { usage: _u, ...chunkWithoutUsage } = mockStreamChunk2;
+      yield chunkWithoutUsage as StreamChunk;
+    }
+    return {
+      completed: true,
+      content: 'Hello!',
+      conversationId: 'conv-123',
+      personaId: 'persona-001',
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    };
+  }),
+  persistMessages: vi.fn().mockResolvedValue(undefined),
+  emitUsageEvent: vi.fn().mockResolvedValue(undefined),
 };
 
 vi.mock('@undrecreaitwins/core/db.js', () => ({
@@ -160,7 +206,92 @@ describe('POST /v1/chat/completions (streaming)', () => {
     server = await setupTestServer();
   });
 
-  it('returns SSE stream with data lines and [DONE]', async () => {
+  it('returns SSE stream with correct headers, data lines, and [DONE] sentinel', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'test-persona',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toBe('text/event-stream');
+    expect(response.headers['cache-control']).toBe('no-cache');
+    expect(response.headers['connection']).toBe('keep-alive');
+    expect(response.headers['x-accel-buffering']).toBe('no');
+
+    const body = response.body;
+    const lines = body.split('\n\n').filter((line: string) => line.length > 0);
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+
+    const firstLine = lines[0]!;
+    expect(firstLine.startsWith('data: ')).toBe(true);
+    const contentPayload = JSON.parse(firstLine.slice(6));
+    expect(contentPayload.object).toBe('chat.completion.chunk');
+    expect(contentPayload.choices[0].delta.role).toBe('assistant');
+    expect(contentPayload.choices[0].delta.content).toBe('Hello!');
+
+    const secondLine = lines[1]!;
+    expect(secondLine.startsWith('data: ')).toBe(true);
+    const endPayload = JSON.parse(secondLine.slice(6));
+    expect(endPayload.choices[0].finish_reason).toBe('stop');
+
+    const doneLine = lines[lines.length - 1]!;
+    expect(doneLine).toBe('data: [DONE]');
+  });
+
+  it('includes usage block when stream_options.include_usage is true', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'test-persona',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+        stream_options: { include_usage: true },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.body;
+    const lines = body.split('\n\n').filter((line: string) => line.length > 0);
+
+    const secondLine = lines[1]!;
+    const endPayload = JSON.parse(secondLine.slice(6));
+    expect(endPayload.usage).toEqual({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
+  });
+
+  it('omits usage from SSE when stream_options.include_usage is false but still persists usage_events', async () => {
+    chatServiceMocks.persistMessages.mockClear();
+    chatServiceMocks.emitUsageEvent.mockClear();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'test-persona',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+        stream_options: { include_usage: false },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.body;
+    const lines = body.split('\n\n').filter((line: string) => line.length > 0);
+
+    const secondLine = lines[1]!;
+    const endPayload = JSON.parse(secondLine.slice(6));
+    expect(endPayload.usage).toBeUndefined();
+
+    expect(chatServiceMocks.persistMessages).toHaveBeenCalledTimes(1);
+    expect(chatServiceMocks.emitUsageEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits usage from SSE when stream_options is omitted (OpenAI default)', async () => {
     const response = await server.inject({
       method: 'POST',
       url: '/v1/chat/completions',
@@ -173,19 +304,53 @@ describe('POST /v1/chat/completions (streaming)', () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.body;
-
     const lines = body.split('\n\n').filter((line: string) => line.length > 0);
-    expect(lines.length).toBeGreaterThanOrEqual(3);
 
-    const contentLine = lines[0]!;
-    expect(contentLine.startsWith('data: ')).toBe(true);
-    const contentPayload = JSON.parse(contentLine.slice(6));
-    expect(contentPayload.object).toBe('chat.completion.chunk');
-    expect(contentPayload.choices[0].delta.role).toBe('assistant');
-    expect(contentPayload.choices[0].delta.content).toBe('Hello!');
+    const secondLine = lines[1]!;
+    const endPayload = JSON.parse(secondLine.slice(6));
+    expect(endPayload.usage).toBeUndefined();
+  });
 
-    const doneLine = lines[lines.length - 1]!;
-    expect(doneLine).toBe('data: [DONE]');
+  it('persists message and usage events on clean stream completion', async () => {
+    chatServiceMocks.persistMessages.mockClear();
+    chatServiceMocks.emitUsageEvent.mockClear();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'test-persona',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(chatServiceMocks.persistMessages).toHaveBeenCalledTimes(1);
+    expect(chatServiceMocks.emitUsageEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles early provider errors gracefully by returning JSON', async () => {
+    const { ServiceUnavailableError } = await import('@undrecreaitwins/shared');
+    chatServiceMocks.completeStream.mockImplementationOnce(async function* () {
+      throw new ServiceUnavailableError('LLM provider', 'Provider returned 503');
+    });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'test-persona',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.headers['content-type']).toContain('application/json');
+    const body = response.json();
+    expect(body.error.code).toBe('service_unavailable');
+    expect(body.error.message).toContain('Provider returned 503');
   });
 });
 
