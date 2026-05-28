@@ -12,6 +12,7 @@ interface ChatRequest {
   personaSlug: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   stream?: boolean;
+  streamOptions?: { include_usage?: boolean };
   temperature?: number;
   maxTokens?: number;
 }
@@ -182,6 +183,7 @@ export class ChatService {
     let accumulatedContent = '';
     let finalUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
     let modelName = persona.modelPreferences?.model || 'gpt-4o';
+    const includeUsage = request.streamOptions?.include_usage === true;
 
     try {
       const generator = this.callLLMStream({
@@ -207,7 +209,12 @@ export class ChatService {
           modelName = chunk.model;
         }
 
-        yield chunk;
+        if (chunk.usage && !includeUsage) {
+          const { usage: _u, ...chunkWithoutUsage } = chunk;
+          yield chunkWithoutUsage as StreamChunk;
+        } else {
+          yield chunk;
+        }
       }
     } catch (err) {
       if (signal?.aborted) {

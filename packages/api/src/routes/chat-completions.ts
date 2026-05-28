@@ -125,6 +125,7 @@ async function handleStream(
         })),
         temperature: body.temperature,
         maxTokens: body.max_tokens,
+        streamOptions: body.stream_options,
       },
       signal,
     );

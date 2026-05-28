@@ -45,9 +45,15 @@ const mockStreamChunk2: StreamChunk = {
 
 const chatServiceMocks = {
   complete: vi.fn().mockResolvedValue(mockChatResponse),
-  completeStream: vi.fn().mockImplementation(async function* (_request, _signal) {
+  completeStream: vi.fn().mockImplementation(async function* (request: { streamOptions?: { include_usage?: boolean } }, _signal: unknown) {
     yield mockStreamChunk1;
-    yield mockStreamChunk2;
+    const includeUsage = request.streamOptions?.include_usage === true;
+    if (includeUsage) {
+      yield mockStreamChunk2;
+    } else {
+      const { usage: _u, ...chunkWithoutUsage } = mockStreamChunk2;
+      yield chunkWithoutUsage as StreamChunk;
+    }
     return {
       completed: true,
       content: 'Hello!',
@@ -256,6 +262,53 @@ describe('POST /v1/chat/completions (streaming)', () => {
     const secondLine = lines[1]!;
     const endPayload = JSON.parse(secondLine.slice(6));
     expect(endPayload.usage).toEqual({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 });
+  });
+
+  it('omits usage from SSE when stream_options.include_usage is false but still persists usage_events', async () => {
+    chatServiceMocks.persistMessages.mockClear();
+    chatServiceMocks.emitUsageEvent.mockClear();
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'test-persona',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+        stream_options: { include_usage: false },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.body;
+    const lines = body.split('\n\n').filter((line: string) => line.length > 0);
+
+    const secondLine = lines[1]!;
+    const endPayload = JSON.parse(secondLine.slice(6));
+    expect(endPayload.usage).toBeUndefined();
+
+    expect(chatServiceMocks.persistMessages).toHaveBeenCalledTimes(1);
+    expect(chatServiceMocks.emitUsageEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits usage from SSE when stream_options is omitted (OpenAI default)', async () => {
+    const response = await server.inject({
+      method: 'POST',
+      url: '/v1/chat/completions',
+      payload: {
+        model: 'test-persona',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.body;
+    const lines = body.split('\n\n').filter((line: string) => line.length > 0);
+
+    const secondLine = lines[1]!;
+    const endPayload = JSON.parse(secondLine.slice(6));
+    expect(endPayload.usage).toBeUndefined();
   });
 
   it('persists message and usage events on clean stream completion', async () => {
