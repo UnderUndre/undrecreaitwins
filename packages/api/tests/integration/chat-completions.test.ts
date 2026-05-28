@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { ChatResponse } from '@undrecreaitwins/core/services/chat-service.js';
 
+import type { StreamChunk } from '@undrecreaitwins/shared';
+
 const mockChatResponse: ChatResponse = {
   id: 'chatcmpl-test',
   object: 'chat.completion',
@@ -16,27 +18,27 @@ const mockChatResponse: ChatResponse = {
   metadata: { conversation_id: 'conv-123' },
 };
 
-const mockStreamChunk1 = {
+const mockStreamChunk1: StreamChunk = {
   id: 'chatcmpl-test',
-  object: 'chat.completion.chunk' as const,
+  object: 'chat.completion.chunk',
   created: Math.floor(Date.now() / 1000),
   model: 'test-persona',
   choices: [{
     index: 0,
-    delta: { role: 'assistant' as const, content: 'Hello!' },
-    finish_reason: null as any,
+    delta: { role: 'assistant', content: 'Hello!' },
+    finish_reason: null,
   }],
 };
 
-const mockStreamChunk2 = {
+const mockStreamChunk2: StreamChunk = {
   id: 'chatcmpl-test',
-  object: 'chat.completion.chunk' as const,
+  object: 'chat.completion.chunk',
   created: Math.floor(Date.now() / 1000),
   model: 'test-persona',
   choices: [{
     index: 0,
     delta: {},
-    finish_reason: 'stop' as const,
+    finish_reason: 'stop',
   }],
   usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
 };

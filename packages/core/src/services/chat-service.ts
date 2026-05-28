@@ -4,7 +4,7 @@ import { PersonaRepository } from './persona-repository.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { withTenantContext } from '../db.js';
 import { conversations, messages, usageEvents } from '../models/index.js';
-import { ServiceUnavailableError, AppError } from '@undrecreaitwins/shared';
+import { ServiceUnavailableError, AppError, NotFoundError } from '@undrecreaitwins/shared';
 import type { PersonaTraits, ModelPreferences, StreamChunk } from '@undrecreaitwins/shared';
 
 interface ChatRequest {
@@ -147,6 +147,9 @@ export class ChatService {
     }
 
     const persona = await personaRepo.getBySlug(request.tenantId, request.personaSlug) as unknown as PersonaRow;
+    if (!persona) {
+      throw new NotFoundError('Persona', request.personaSlug);
+    }
 
     const conversationId = await this.findOrCreateConversation(
       request.tenantId,
@@ -257,7 +260,7 @@ export class ChatService {
       params.signal.addEventListener('abort', () => {
         if (timeoutId) clearTimeout(timeoutId);
         internalAbort.abort(params.signal!.reason);
-      });
+      }, { once: true });
     }
 
     resetTimeout();
@@ -314,6 +317,9 @@ export class ChatService {
         resetTimeout();
 
         buffer += value;
+        if (Buffer.byteLength(buffer, 'utf8') > 65536) {
+          throw new AppError('SSE buffer overflow from provider', 502, 'buffer_overflow');
+        }
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 

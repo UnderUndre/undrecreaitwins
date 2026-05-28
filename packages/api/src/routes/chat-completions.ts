@@ -70,18 +70,20 @@ function writePayloadWithBackpressure(
     }
 
     const onDrain = () => {
+      signal.removeEventListener('abort', onAbort);
+      setActiveDrainListener(null);
+      resolve();
+    };
+
+    const onAbort = () => {
+      reply.raw.off('drain', onDrain);
       setActiveDrainListener(null);
       resolve();
     };
 
     setActiveDrainListener(onDrain);
     reply.raw.once('drain', onDrain);
-
-    signal.addEventListener('abort', () => {
-      reply.raw.off('drain', onDrain);
-      setActiveDrainListener(null);
-      resolve();
-    });
+    signal.addEventListener('abort', onAbort);
   });
 }
 
@@ -186,10 +188,29 @@ async function handleStream(
           const index = choices[0].index;
           const finishReason = choices[0].finish_reason;
 
-          const segmentSize = 8192;
-          for (let i = 0; i < originalContent.length; i += segmentSize) {
-            const part = originalContent.slice(i, i + segmentSize);
-            const isLast = (i + segmentSize) >= originalContent.length;
+          const maxContentBytes = 12000;
+          const parts: string[] = [];
+          let currentPart = '';
+          let currentBytes = 0;
+
+          for (const char of originalContent) {
+            const charBytes = Buffer.byteLength(char, 'utf8');
+            if (currentBytes + charBytes > maxContentBytes) {
+              parts.push(currentPart);
+              currentPart = char;
+              currentBytes = charBytes;
+            } else {
+              currentPart += char;
+              currentBytes += charBytes;
+            }
+          }
+          if (currentPart) {
+            parts.push(currentPart);
+          }
+
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i]!;
+            const isLast = i === parts.length - 1;
             const subChunk = {
               id: chunkId,
               object: 'chat.completion.chunk' as const,
@@ -226,6 +247,15 @@ async function handleStream(
       cleanupListeners();
       reply.raw.end();
       return;
+    }
+
+    if (!headersSent) {
+      reply.raw.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
     }
 
     reply.raw.write('data: [DONE]\n\n');
