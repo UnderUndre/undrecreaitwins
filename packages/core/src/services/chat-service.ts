@@ -264,10 +264,15 @@ export class ChatService {
     };
 
     if (params.signal) {
-      params.signal.addEventListener('abort', () => {
+      if (params.signal.aborted) {
         if (timeoutId) clearTimeout(timeoutId);
-        internalAbort.abort(params.signal!.reason);
-      }, { once: true });
+        internalAbort.abort(params.signal.reason);
+      } else {
+        params.signal.addEventListener('abort', () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          internalAbort.abort(params.signal!.reason);
+        }, { once: true });
+      }
     }
 
     resetTimeout();
@@ -296,7 +301,7 @@ export class ChatService {
         return;
       }
       if (internalAbort.signal.aborted && !params.signal?.aborted) {
-        throw new AppError('LLM provider connection timeout', 503, 'stream_timeout');
+        throw internalAbort.signal.reason || new AppError('LLM provider connection timeout', 503, 'stream_timeout');
       }
       throw err;
     }
@@ -373,11 +378,12 @@ export class ChatService {
         return;
       }
       if (internalAbort.signal.aborted && !params.signal?.aborted) {
-        throw new AppError('LLM provider stream timeout', 503, 'stream_timeout');
+        throw internalAbort.signal.reason || new AppError('LLM provider stream timeout', 503, 'stream_timeout');
       }
       throw err;
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
+      reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   }

@@ -183,10 +183,6 @@ async function handleStream(
         const choices = chunk.choices || [];
         if (choices.length > 0 && choices[0]?.delta?.content) {
           const originalContent = choices[0].delta.content;
-          const chunkId = chunk.id;
-          const created = chunk.created;
-          const modelName = chunk.model;
-          const index = choices[0].index;
           const finishReason = choices[0].finish_reason;
 
           const maxContentBytes = 12000;
@@ -212,19 +208,18 @@ async function handleStream(
           for (let i = 0; i < parts.length; i++) {
             const part = parts[i]!;
             const isLast = i === parts.length - 1;
+            const { usage: _u, ...chunkBase } = chunk;
+            const { content: _c, ...deltaBase } = choices[0].delta;
             const subChunk = {
-              id: chunkId,
-              object: 'chat.completion.chunk' as const,
-              created,
-              model: modelName,
-              choices: [{
-                index,
-                delta: {
-                  ...(choices[0].delta.role && { role: choices[0].delta.role }),
-                  content: part,
+              ...chunkBase,
+              choices: [
+                {
+                  ...choices[0],
+                  delta: { ...deltaBase, content: part },
+                  finish_reason: isLast ? finishReason : null,
                 },
-                finish_reason: isLast ? finishReason : null,
-              }],
+                ...choices.slice(1),
+              ],
               ...(isLast && chunk.usage && { usage: chunk.usage }),
             };
             const subPayload = `data: ${JSON.stringify(subChunk)}\n\n`;
