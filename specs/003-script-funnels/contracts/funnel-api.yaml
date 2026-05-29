@@ -225,6 +225,10 @@ components:
       type: object
       required: [name, order, fragments, resolution_criteria]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional client-generated UUID for cross-referencing within the payload.
         name:
           type: string
           maxLength: 200
@@ -271,6 +275,10 @@ components:
       type: object
       required: [type, content, triggers]
       properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional client-generated UUID for cross-referencing within the payload.
         type:
           type: string
           enum: [normal, objection]

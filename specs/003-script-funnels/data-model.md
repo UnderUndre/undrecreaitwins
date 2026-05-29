@@ -30,7 +30,7 @@ Immutable snapshot of a funnel at a specific version. Child tables (stages, frag
 | `created_at` | Timestamp | NOT NULL | |
 
 **Unique constraint**: `(definition_id, version_number)`.
-**Index**: `(definition_id, is_active)` filtered on `is_active = true`.
+**Unique Index**: `(definition_id)` filtered on `is_active = true` (enforces at most one active version per funnel).
 
 ### Config Schema
 

@@ -15,6 +15,9 @@ curl -X POST http://localhost:3000/v1/funnels \
         "name": "Greeting",
         "order": 0,
         "objective": "Say hello and ask for interest",
+        "resolution_criteria": {
+          "type": "all_slots_filled"
+        },
         "fragments": [
           {
             "type": "normal",

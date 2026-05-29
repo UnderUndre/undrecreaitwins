@@ -66,7 +66,7 @@ Config: `SLOT_VERIFICATION_TRANSPORT=emitter|redis` (default: `emitter`).
 - **Per-attempt timeout**: 15 seconds (LLM call + context assembly)
 - **Max retries**: 2 (total 3 attempts per slot per turn)
 - **Backoff**: exponential (1s, 2s)
-- **Circuit breaker**: If 5 consecutive verification attempts fail across any slots, disable slot verification for 60 seconds and log `logger.error({ err }, 'Slot verification circuit breaker tripped')`. Resume automatically after cooldown.
+- **Circuit breaker**: If 5 consecutive verification attempts fail for a specific tenant or funnel, disable slot verification for that tenant/funnel for 60 seconds and log `logger.error({ err, tenantId }, 'Slot verification circuit breaker tripped')`. Resume automatically after cooldown. This prevents failures in one tenant from causing a denial of service (DoS) for other tenants.
 - **Dead letter**: After max retries, log the failed extraction context to a dead-letter table (`slot_verification_failures`) for operator review. The slot is left unfilled/flagged with `{ verified: false, error: 'verification_timeout' }`.
 - **Operator notification**: Persistent failures (circuit breaker tripped) should surface in operational monitoring. Out of scope for this feature — raw diagnostics only (per spec Out of Scope).
 
