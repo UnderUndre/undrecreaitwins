@@ -1,0 +1,329 @@
+openapi: 3.0.3
+info:
+  title: Script Funnels Ingestion API
+  version: 1.0.0
+
+security:
+  - BearerAuth: []
+
+paths:
+  /v1/funnels:
+    post:
+      summary: Ingest a new funnel version
+      tags: [Funnels]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FunnelDefinition'
+      responses:
+        '201':
+          description: Funnel version ingested
+        '400':
+          description: Malformed funnel definition — validation error with actionable reason (FR-017)
+        '401':
+          description: Unauthorized — missing or invalid Bearer token
+        '403':
+          description: Forbidden — tenant mismatch or insufficient permissions
+    get:
+      summary: List funnels for the authenticated tenant
+      tags: [Funnels]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: List of funnel definitions (excludes soft-deleted)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /v1/funnels/{id}:
+    get:
+      summary: Get funnel definition by ID
+      tags: [Funnels]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/FunnelId'
+      responses:
+        '200':
+          description: Funnel definition with active version details
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Funnel not found or soft-deleted
+    patch:
+      summary: Update funnel metadata (name only)
+      tags: [Funnels]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/FunnelId'
+        - name: If-Match
+          in: header
+          schema: { type: string }
+          description: Optimistic lock version for concurrency control
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 200 }
+      responses:
+        '200':
+          description: Funnel metadata updated
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Funnel not found
+        '409':
+          description: Conflict — version mismatch (optimistic lock)
+    delete:
+      summary: Soft-delete a funnel (FR-023)
+      description: >
+        Sets deleted_at on the funnel definition. In-flight conversations
+        continue on their pinned version; new conversations treat the funnel
+        as non-existent. Excluded from list responses.
+      tags: [Funnels]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/FunnelId'
+      responses:
+        '204':
+          description: Funnel soft-deleted
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Funnel not found
+
+  /v1/conversations/{conversationId}/funnel/reset:
+    post:
+      summary: Reset conversation funnel state to current active version (FR-018)
+      tags: [Conversations]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: conversationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Conversation funnel state reset to current active version
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Conversation not found
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    TenantId:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      schema: { type: string, format: uuid }
+      description: Tenant identifier — validated against JWT claims by tenantPlugin
+    FunnelId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    FunnelDefinition:
+      type: object
+      required: [name, persona_id, stages]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        persona_id:
+          type: string
+          format: uuid
+        config:
+          $ref: '#/components/schemas/FunnelConfig'
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/StageDefinition'
+          minItems: 1
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlotDefinition'
+
+    FunnelConfig:
+      type: object
+      properties:
+        relevance_threshold:
+          type: number
+          default: 0.5
+          minimum: 0
+          maximum: 1
+        off_script_behavior:
+          type: string
+          enum: [steer, abstain, catch_all]
+          default: steer
+        catch_all_fragment_id:
+          type: string
+          format: uuid
+          description: >
+            Required when off_script_behavior = catch_all.
+            Must reference a fragment ID within this funnel.
+        stuck_threshold:
+          type: integer
+          default: 3
+          minimum: 1
+        stuck_action:
+          type: string
+          enum: [yield_generation, handoff, exit_stage]
+          default: yield_generation
+        scoring_weights:
+          $ref: '#/components/schemas/ScoringWeights'
+
+    ScoringWeights:
+      type: object
+      description: Legacy defaults ported from the original Script Funnels engine
+      properties:
+        exact_match:
+          type: number
+          default: 10
+        stemmed_match:
+          type: number
+          default: 7
+        synonym_match:
+          type: number
+          default: 5
+        stage_boost:
+          type: number
+          default: 3
+        next_stage_bonus:
+          type: number
+          default: 1.5
+        objection_boost:
+          type: number
+          default: 2
+
+    StageDefinition:
+      type: object
+      required: [name, order, fragments, resolution_criteria]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional client-generated UUID for cross-referencing within the payload.
+        name:
+          type: string
+          maxLength: 200
+        order:
+          type: integer
+          minimum: 0
+        objective:
+          type: string
+        resolution_criteria:
+          $ref: '#/components/schemas/ResolutionCriteria'
+        stuck_action:
+          type: string
+          enum: [yield_generation, handoff, exit_stage]
+          description: Per-stage override of funnel-level stuck_action
+        exit_stage_id:
+          type: string
+          format: uuid
+          description: >
+            Target stage for exit_stage stuck action.
+            Required when stuck_action = exit_stage.
+        fragments:
+          type: array
+          items:
+            $ref: '#/components/schemas/FragmentDefinition'
+          minItems: 1
+
+    ResolutionCriteria:
+      type: object
+      required: [type]
+      description: Machine-readable trigger for stage advancement (FR-025)
+      properties:
+        type:
+          type: string
+          enum: [fragment_selected, slot_filled, all_slots_filled]
+        fragment_id:
+          type: string
+          format: uuid
+          description: Required when type = fragment_selected
+        slot_name:
+          type: string
+          description: Required when type = slot_filled
+
+    FragmentDefinition:
+      type: object
+      required: [type, content, triggers]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional client-generated UUID for cross-referencing within the payload.
+        type:
+          type: string
+          enum: [normal, objection]
+        content:
+          type: string
+          maxLength: 5000
+        triggers:
+          $ref: '#/components/schemas/TriggerDefinition'
+        score_weight:
+          type: number
+          default: 1.0
+          minimum: 0
+
+    TriggerDefinition:
+      type: object
+      properties:
+        phrases:
+          type: array
+          items:
+            type: string
+            maxLength: 500
+          maxItems: 50
+        synonyms:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+              maxLength: 200
+            maxItems: 20
+          maxProperties: 100
+
+    SlotDefinition:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        stage_id:
+          type: string
+          format: uuid
+          description: Optional stage-scoping. Omit for funnel-global slot.
+        description:
+          type: string
+          description: Context provided to LLM during slot verification
+        validation_rules:
+          type: object
+          description: Regex or range checks for slot value validation
