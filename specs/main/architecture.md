@@ -29,3 +29,4 @@
 - [001-twin-engine-foundation]: Persona CRUD, chat completions, isolation.
 - [002-streaming-completions]: SSE streaming for chat.
 - [003-script-funnels]: Scripted dialog runtime (Deterministic matching, stages, slots).
+- [004-validators]: Response and input validators (false-promise, format-injection) via synchronous pipeline.
