@@ -2,9 +2,11 @@
 
 ## 1. Needs Clarification Resolutions
 
-**[NEEDS CLARIFICATION: identity-guard mechanism + remediation — awaiting recon R-identity]**
-- **Resolution**: `identity-and-provider-guard` is parked until the `R-identity` recon report is submitted. It is excluded from the technical design (Phase 1) and tasks (Phase 2).
-- **Impact**: We will focus entirely on `false-promise`, `format-injection`, and the Validator Pipeline & Config infrastructure.
+**[RESOLVED: identity-guard mechanism + remediation — R-identity recon complete 2026-05-29]**
+- **Resolution**: `identity-and-provider-guard` is confirmed as a **deterministic regex-based** validator. It inspects `rawUserMessage` and `responseText` using hardcoded regex patterns.
+- **Remediation**: It performs a total **rewrite** (replacement) of the response using a persona-customizable `fallbackMessage`.
+- **Policy Source**: System-managed regexes for detection; DB-managed (customizable) template for remediation.
+- **Impact**: Added to Phase 1 scope for planning and implementation. Requires the validator row to store an optional `fallbackMessage` override.
 
 ## 2. Technical Context & Investigation
 

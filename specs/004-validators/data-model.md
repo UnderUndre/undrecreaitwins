@@ -11,7 +11,7 @@ Stores configuration for validators per tenant and persona.
 - `id`: uuid, primary key
 - `tenant_id`: varchar, foreign key, indexed
 - `persona_id`: uuid, foreign key, indexed
-- `validators`: jsonb (Stores the list of active/dry-run validators, e.g., `{ "false-promise": { "mode": "active", "min_confidence": 0.7, "timeout_ms": 1500, "remediation": "append_disclaimer" }, "format-injection": { "mode": "active" } }`)
+- `validators`: jsonb (Stores the list of active/dry-run validators, e.g., `{ "false-promise": { "mode": "active", "min_confidence": 0.7, "timeout_ms": 1500, "remediation": "append_disclaimer" }, "format-injection": { "mode": "active" }, "identity-and-provider-guard": { "mode": "active", "fallback_message": "Да, я ИИ-ассистент..." } }`)
 - `created_at`: timestamp
 - `updated_at`: timestamp
 - **Constraints**: Unique constraint on `(tenant_id, persona_id)`.

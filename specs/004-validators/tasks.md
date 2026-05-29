@@ -65,15 +65,32 @@ description: "Task list for Response & Input Validators (Phase 1)"
 
 ---
 
-## Phase 5: Operator configuration & dry-run rollout (Priority: P2)
+## Phase 5: User Story 2 - Identity & provider guard (Priority: P2)
+
+**Goal**: Detect identity-denial / provider-name leakage in assistant output.
+
+**Independent Test**: Send replies that violate a persona's identity/provider policy; confirm each is remediated.
+
+### Tests for User Story 2 ⚠️
+
+- [ ] T014 [BE] [US2] Unit tests for `identity-and-provider-guard.ts` regex behavior
+
+### Implementation for User Story 2
+
+- [ ] T015 [BE] [US2] Implement `identity-and-provider-guard.ts` validator logic
+- [ ] T016 [BE] [US2] Integrate US2 into the pipeline orchestrator in `pipeline.ts`
+
+---
+
+## Phase 6: Operator configuration & dry-run rollout (Priority: P2)
 
 **Goal**: Enable gradual rollout and per-validator mode (`active` vs `dry-run`)
 
-### Tests for Phase 5 ⚠️
+### Tests for Phase 6 ⚠️
 
 - [ ] T012 [BE] [US4] Integration test for pipeline honoring `dry-run` vs `active` mode configuration overrides from DB
 
-### Implementation for Phase 5
+### Implementation for Phase 6
 
 - [ ] T013 [BE] [US4] Update `pipeline.ts` to fetch and cache tenant/persona configuration from `validator_configs` (with FR-015 defaults fallback) and honor `dry-run` behavior
 
@@ -91,7 +108,10 @@ T007 → T008
 T005 → T010
 T010 → T009
 T010 → T011
-T005 + T008 + T011 → T013
+T005 → T015
+T015 → T014
+T015 → T016
+T005 + T008 + T011 + T016 → T013
 T013 → T012
 
 ---
@@ -106,7 +126,8 @@ T013 → T012
 | 4 | [BE] (LLM) | T003 | T001 |
 | 5 | [BE] (US1) | T007 → T006, T008 | T003 + T005 |
 | 6 | [BE] (US3) | T010 → T009, T011 | T005 |
-| 7 | [BE] (Config)| T013 → T012 | T005 + T008 + T011 |
+| 7 | [BE] (US2) | T015 → T014, T016 | T005 |
+| 8 | [BE] (Config)| T013 → T012 | T005 + T008 + T011 + T016 |
 
 ---
 
@@ -116,7 +137,7 @@ T013 → T012
 |-------|-----------|-----------------|
 | [SETUP] | 1 | immediately |
 | [DB] | 1 | T001 |
-| [BE] | 11 | T001 |
+| [BE] | 14 | T001 |
 
 **Critical Path**: T001 → T004 → T005 → T007 → T008 → T013 → T012
 
@@ -128,7 +149,7 @@ T013 → T012
 |-------|----------|--------|---------------|-------|-------|
 | `[SETUP]` | — (orchestrator) | — | plan.md §structure | T001 | `packages/core/package.json` |
 | `[DB]` | `database-architect` | `database-design` | data-model.md | T002 | `packages/core/src/db.ts` |
-| `[BE]` | `backend-specialist` | `api-patterns`, `system-design-patterns` | contracts/validator.ts, spec.md | T003, T004, T005, T006, T007, T008, T009, T010, T011, T012, T013 | `packages/core/src/types/`, `packages/core/src/services/validators/`, `packages/core/src/services/chat-service.ts`, `packages/core/src/services/llm-client.ts` |
+| `[BE]` | `backend-specialist` | `api-patterns`, `system-design-patterns` | contracts/validator.ts, spec.md | T003, T004, T005, T006, T007, T008, T009, T010, T011, T012, T013, T014, T015, T016 | `packages/core/src/types/`, `packages/core/src/services/validators/`, `packages/core/src/services/chat-service.ts`, `packages/core/src/services/llm-client.ts` |
 
 ---
 

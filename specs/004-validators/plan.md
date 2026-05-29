@@ -5,7 +5,7 @@
 
 ## Summary
 
-Port the legacy validator subsystem into the engine as a composable pipeline that inspects outbound replies and inbound messages, remediating unsafe content before delivery. This phase implements the `false-promise` and `format-injection` validators, adding per-tenant/persona configuration (`active` vs `dry-run`) and database persistence for audit logs. `identity-and-provider-guard` is deferred until its recon is complete.
+Port the legacy validator subsystem into the engine as a composable pipeline that inspects outbound replies and inbound messages, remediating unsafe content before delivery. This phase implements the `false-promise`, `format-injection`, and `identity-and-provider-guard` validators, adding per-tenant/persona configuration (`active` vs `dry-run`) and database persistence for audit logs.
 
 ## Technical Context
 
@@ -22,7 +22,7 @@ Port the legacy validator subsystem into the engine as a composable pipeline tha
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- [x] No `NEEDS CLARIFICATION` remaining for Phase 1 targets (R-identity deferred).
+- [x] No `NEEDS CLARIFICATION` remaining for Phase 1 targets.
 - [x] Artifacts versioned (using tags in Phase 1 snapshot).
 - [x] Meets atomicity and source-of-truth guidelines.
 
@@ -38,7 +38,7 @@ specs/004-validators/
 ├── quickstart.md        # Phase 1 output
 ├── contracts/           # Interfaces and types
 │   └── validator.ts
-└── tasks.md             # Phase 2 output (Pending)
+└── tasks.md             # Phase 2 output
 ```
 
 ### Source Code (repository root)
@@ -52,12 +52,13 @@ packages/core/src/
 │   └── validators/
 │       ├── pipeline.ts               # Orchestrator
 │       ├── false-promise.ts          # False promise validator
-│       └── format-injection.ts       # Format injection strip
+│       ├── format-injection.ts       # Format injection strip
+│       └── identity-guard.ts         # Identity & provider guard
 └── types/
     └── validator.ts     # Internal DTOs and types
 ```
 
-**Structure Decision**: The validator logic belongs in `packages/core/src/services/validators`. The shared LLM client extraction will live at `packages/core/src/services/llm-client.ts` to be shared between this feature and `003-script-funnels`. Database additions go into the existing Drizzle definitions in `packages/core/src/db.ts`.
+**Structure Decision**: The validator logic belongs in `packages/core/src/services/validators`. The shared LLM client extraction will live at `packages/core/src/services/llm-client.ts` to be shared between this feature and `003-script-funnels`. Database additions go into the existing Drizzle definitions in `packages/core/src/db.ts`. `identity-and-provider-guard` will be implemented as a deterministic regex-based validator.
 
 ## Complexity Tracking
 
