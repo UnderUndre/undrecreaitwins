@@ -38,7 +38,7 @@ vi.mock('@undrecreaitwins/core/middleware/auth.js', () => ({
 vi.mock('@undrecreaitwins/core/middleware/error-handler.js', () => ({
   errorHandler: (error: any, _request: any, reply: any) => {
     const status = error.statusCode ?? 500;
-    return reply.status(status).send({ error: { code: error.code || 'internal_error', message: error.message } });
+    return reply.status(status).send({ error: { code: error.code || 'internal_error', message: error.message, details: error.details } });
   },
 }));
 
@@ -104,6 +104,7 @@ describe('Funnels API (Integration)', () => {
         },
         stages: [
           {
+            id: '00000000-0000-0000-0000-000000000001',
             name: 'Welcome',
             order: 1,
             resolutionCriteria: { type: 'all_slots_filled' },

@@ -28,6 +28,7 @@ const createVersionSchema = z.object({
     }),
   }),
   stages: z.array(z.object({
+    id: z.string().uuid(),
     name: z.string().min(1),
     order: z.number().int(),
     objective: z.string().optional(),
@@ -69,9 +70,19 @@ export const funnelRoutes: FastifyPluginAsync = async (fastify) => {
     const { id } = request.params as { id: string };
     const body = createVersionSchema.parse(request.body);
     
-    // Additional validation logic (FR-017)
+    // Additional validation logic (FR-017, FR-026)
     if (body.config.off_script_behavior === 'catch_all' && !body.config.catch_all_fragment_id) {
         throw new ValidationError([{ field: 'config.catch_all_fragment_id', message: 'Required when behavior is catch_all' }]);
+    }
+
+    for (const [index, stage] of body.stages.entries()) {
+        if (stage.fragments.length === 0) {
+            throw new ValidationError([{ field: `stages[${index}].fragments`, message: 'Stage must have at least one fragment (FR-026)' }]);
+        }
+        const effectiveStuckAction = stage.stuckAction || body.config.stuck_action;
+        if (effectiveStuckAction === 'exit_stage' && !stage.exitStageId) {
+            throw new ValidationError([{ field: `stages[${index}].exitStageId`, message: 'Required when stuck action is exit_stage' }]);
+        }
     }
 
     const version = await repo.createVersion(id, body.config as any, body.stages as any, body.slots as any);

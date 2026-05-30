@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
+import { Redis } from 'ioredis';
 import { PersonaRepository } from './persona-repository.js';
 import { FunnelRuntime } from './funnel/funnel-runtime.js';
 import { FunnelRepository } from './funnel/funnel-repository.js';
@@ -58,7 +59,8 @@ type PersonaRow = {
 const personaRepo = new PersonaRepository();
 const letta = new LettaClient();
 const funnelRepo = new FunnelRepository();
-const funnelRuntime = new FunnelRuntime(funnelRepo, (config) => new FragmentScorer(config));
+const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : undefined;
+const funnelRuntime = new FunnelRuntime(funnelRepo, (config) => new FragmentScorer(config), redis as any);
 
 export class ChatService {
   async complete(request: ChatRequest): Promise<ChatResponse> {

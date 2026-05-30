@@ -16,7 +16,7 @@ export interface ScoredFragment {
 
 export class FragmentScorer {
   private stemmer = natural.PorterStemmerRu;
-  private tokenizer = new natural.WordTokenizer();
+  private tokenizer = new natural.AggressiveTokenizerRu();
 
   constructor(private config: FunnelConfig) {}
 
@@ -55,7 +55,7 @@ export class FragmentScorer {
           // But since JS regex lookbehind is not universally supported in older envs,
           // we use a simpler approach: check if it's at start/end or surrounded by non-alphanumeric
           const pattern = `(^|[^а-яёa-z0-9])${phraseLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^а-яёa-z0-9]|$)`;
-          const regex = new RegExp(pattern, 'i');
+          const regex = new RegExp(pattern);
           if (regex.test(normalizedMessage)) {
             signals.exact_match = Math.max(signals.exact_match, weights.exact_match);
           }
@@ -117,6 +117,6 @@ export class FragmentScorer {
 
   private containsAllTokens(messageTokens: string[], phraseTokens: string[]): boolean {
     if (phraseTokens.length === 0) return false;
-    return phraseTokens.every((pt) => messageTokens.some(mt => mt === pt));
+    return phraseTokens.every((pt) => messageTokens.includes(pt));
   }
 }

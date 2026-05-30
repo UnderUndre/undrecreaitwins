@@ -95,9 +95,10 @@ export class FunnelRepository {
       .where(and(
         eq(conversationFunnelStates.conversationId, conversationId),
         eq(conversationFunnelStates.version, expectedVersion)
-      ));
+      ))
+      .returning({ id: conversationFunnelStates.conversationId });
     
-    return (result as any).rowCount > 0;
+    return result.length > 0;
   }
 
   public async createConversationState(state: Omit<ConversationFunnelState, 'updatedAt'>): Promise<void> {
@@ -123,7 +124,7 @@ export class FunnelRepository {
   public async createVersion(
     definitionId: string, 
     config: FunnelConfig, 
-    stages: (Omit<FunnelStage, 'id' | 'funnelVersionId'> & { fragments: Omit<FunnelFragment, 'id' | 'funnelVersionId' | 'stageId'>[] })[],
+    stages: (Omit<FunnelStage, 'funnelVersionId'> & { fragments: Omit<FunnelFragment, 'id' | 'funnelVersionId' | 'stageId'>[] })[],
     slots: Omit<FunnelSlot, 'id' | 'funnelVersionId'>[]
   ): Promise<FunnelVersion> {
     return await db.transaction(async (tx) => {
@@ -152,15 +153,15 @@ export class FunnelRepository {
         const { fragments, ...sData } = stageData;
         const [stage] = await tx.insert(funnelStages).values({
           ...sData,
-          funnelVersionId: version.id,
+          funnelVersionId: version!.id,
         }).returning();
 
         if (fragments.length > 0) {
           await tx.insert(funnelFragments).values(
             fragments.map(f => ({
               ...f,
-              funnelVersionId: version.id,
-              stageId: stage.id,
+              funnelVersionId: version!.id,
+              stageId: stage!.id,
             }))
           );
         }
@@ -171,7 +172,7 @@ export class FunnelRepository {
         await tx.insert(funnelSlots).values(
           slots.map(s => ({
             ...s,
-            funnelVersionId: version.id,
+            funnelVersionId: version!.id,
           }))
         );
       }

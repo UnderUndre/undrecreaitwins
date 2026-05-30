@@ -1,8 +1,5 @@
 import type { 
   FunnelSlot, 
-  ConversationFunnelState, 
-  CapturedSlot,
-  Message
 } from '@undrecreaitwins/shared';
 import { FunnelRepository } from './funnel-repository.js';
 import pino from 'pino';
@@ -18,7 +15,9 @@ export class SlotVerificationService {
   constructor(
     private repository: FunnelRepository,
     private llmClient: any // Placeholder for LLM client
-  ) {}
+  ) {
+      void this.llmClient; // Suppress unused property warning until implemented
+  }
 
   public async verifySlots(
     tenantId: string,
@@ -79,8 +78,7 @@ export class SlotVerificationService {
     slots: FunnelSlot[]
   ): Promise<void> {
     // 1. LLM call to extract slots
-    // (In real impl, this would use a system prompt with slot definitions)
-    const extracted = await this.callLLMExtract(message, slots);
+    const extracted = await this.callLLMExtract(tenantId, message, slots);
     
     if (Object.keys(extracted).length === 0) return;
 
@@ -110,7 +108,6 @@ export class SlotVerificationService {
 
       if (!success) {
         casRetries++;
-        // Immediate retry for CAS as per research.md §3
       }
     }
 
@@ -119,9 +116,8 @@ export class SlotVerificationService {
     }
   }
 
-  private async callLLMExtract(message: string, slots: FunnelSlot[]): Promise<Record<string, any>> {
+  private async callLLMExtract(_tenantId: string, _message: string, _slots: FunnelSlot[]): Promise<Record<string, any>> {
     // This is a placeholder for actual LLM call logic
-    // Implementation would use JSON mode and prompt template
     return {}; 
   }
 }

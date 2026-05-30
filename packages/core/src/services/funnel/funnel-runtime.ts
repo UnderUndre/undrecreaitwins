@@ -8,7 +8,7 @@ import type {
 } from '@undrecreaitwins/shared';
 import { FragmentScorer, ScoredFragment } from './scorer.js';
 import { FunnelRepository } from './funnel-repository.js';
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
 export class FunnelRuntime {
   private cache = new Map<string, FullFunnel>();

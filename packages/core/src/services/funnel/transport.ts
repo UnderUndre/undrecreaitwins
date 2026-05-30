@@ -1,7 +1,6 @@
 import { EventEmitter } from 'events';
 import type { FunnelSlot } from '@undrecreaitwins/shared';
-import { SlotVerificationService } from './slot-verification.js';
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
 export interface VerificationEvent {
   tenantId: string;
@@ -30,8 +29,8 @@ export class EventEmitterTransport implements SlotVerificationTransport {
 }
 
 export class RedisTransport implements SlotVerificationTransport {
-  private pub: Redis;
-  private sub: Redis;
+  private pub: any;
+  private sub: any;
   private readonly CHANNEL = 'slot-verification';
 
   constructor(redisUrl: string) {
@@ -44,11 +43,11 @@ export class RedisTransport implements SlotVerificationTransport {
   }
 
   public subscribe(handler: (event: VerificationEvent) => Promise<void>): void {
-    this.sub.subscribe(this.CHANNEL, (err) => {
+    this.sub.subscribe(this.CHANNEL, (err: any) => {
       if (err) console.error('Redis subscribe error', err);
     });
 
-    this.sub.on('message', (channel, message) => {
+    this.sub.on('message', (channel: string, message: string) => {
       if (channel === this.CHANNEL) {
         const event = JSON.parse(message) as VerificationEvent;
         handler(event).catch(err => console.error('Verification handler error', err));
