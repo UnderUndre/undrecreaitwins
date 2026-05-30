@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "funnel_versions_active_idx" ON "funnel_versions" USING btree ("definition_id") WHERE "funnel_versions"."is_active" = true;

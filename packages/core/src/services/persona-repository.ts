@@ -18,7 +18,7 @@ type UpdatePersona = {
   systemPrompt?: string;
   traits?: PersonaTraits;
   modelPreferences?: ModelPreferences;
-  expectedVersion?: bigint;
+  expectedVersion?: number;
 };
 
 type PersonaRow = typeof personas.$inferSelect;
