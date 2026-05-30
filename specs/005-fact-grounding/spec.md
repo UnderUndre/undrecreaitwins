@@ -17,7 +17,7 @@
 ```typescript
 interface IGroundingEngine {
   query(query: string, twinId: string): Promise<GroundingContext[]>;
-  ingest(document: Buffer, meta: DocumentMeta): Promise<void>;
+  ingest(document: Buffer, meta: DocumentMeta, tenantId: string, twinId: string): Promise<void>;
 }
 ```
 

@@ -20,7 +20,7 @@ const meta = {
   sizeBytes: docBuffer.byteLength
 };
 
-await engine.grounding.ingest(docBuffer, meta);
+await engine.grounding.ingest(docBuffer, meta, tenantId, twinId);
 ```
 
 ## Querying Context

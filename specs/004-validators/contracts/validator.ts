@@ -55,27 +55,27 @@ export interface Verdict {
   matchedPatterns?: string[]; // FR-007 — populated when multiple matches collapse into one remediation
 }
 
-export interface ValidatorContext {
+export interface ValidatorContext<T extends BaseValidatorConfig = BaseValidatorConfig> {
   tenantId: string;
   personaId: string;
   conversationId?: string;
   messageId?: string;
   rawUserMessage?: string; // FR-008 — identity-guard inspects the inbound user message as well as the reply
-  config: BaseValidatorConfig;
+  config: T;
 }
 
-export interface InputValidator {
+export interface InputValidator<T extends BaseValidatorConfig = BaseValidatorConfig> {
   name: string;
-  validateAndMutate(input: string, context: ValidatorContext): Promise<{
+  validateAndMutate(input: string, context: ValidatorContext<T>): Promise<{
     verdict: Verdict;
     mutatedInput: string;
     latencyMs: number;
   }>;
 }
 
-export interface ResponseValidator {
+export interface ResponseValidator<T extends BaseValidatorConfig = BaseValidatorConfig> {
   name: string;
-  validateAndMutate(reply: string, context: ValidatorContext): Promise<{
+  validateAndMutate(reply: string, context: ValidatorContext<T>): Promise<{
     verdict: Verdict;
     mutatedReply: string;
     latencyMs: number;

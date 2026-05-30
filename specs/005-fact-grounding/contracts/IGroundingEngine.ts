@@ -22,5 +22,5 @@ export interface IGroundingEngine {
   /**
    * Parses the document, generates embeddings, and stores them in the pgvector database.
    */
-  ingest(document: Buffer, meta: DocumentMeta): Promise<void>;
+  ingest(document: Buffer, meta: DocumentMeta, tenantId: string, twinId: string): Promise<void>;
 }

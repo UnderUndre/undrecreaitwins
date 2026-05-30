@@ -10,7 +10,7 @@ export interface MTProtoChannelOptions {
 export interface IChannelAdapter {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  sendMessage(chatId: string, text: string): Promise<void>;
+  sendMessage(chatId: string, text: string): Promise<string>;
   setTyping(chatId: string, isTyping: boolean): Promise<void>;
   onMessage(handler: (msg: ChannelMessage) => void): void;
 }
