@@ -20,7 +20,7 @@ export async function withTenantContext<T>(
   fn: (tx: DbTransaction) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT set_config('app.current_tenant', ${tenantId}, true)`);
+    await tx.execute(sql`SET LOCAL app.current_tenant = ${tenantId}`);
     return fn(tx);
   });
 }

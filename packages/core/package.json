@@ -8,76 +8,81 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "default": "./dist/index.js"
     },
     "./db.js": {
       "types": "./dist/db.d.ts",
-      "import": "./dist/db.js"
+      "default": "./dist/db.js"
     },
     "./models/index.js": {
       "types": "./dist/models/index.d.ts",
-      "import": "./dist/models/index.js"
+      "default": "./dist/models/index.js"
     },
     "./services/persona-repository.js": {
       "types": "./dist/services/persona-repository.d.ts",
-      "import": "./dist/services/persona-repository.js"
-    },
-    "./services/chat-service.js": {
-      "types": "./dist/services/chat-service.d.ts",
-      "import": "./dist/services/chat-service.js"
+      "default": "./dist/services/persona-repository.js"
     },
     "./services/channel-repository.js": {
       "types": "./dist/services/channel-repository.d.ts",
-      "import": "./dist/services/channel-repository.js"
-    },
-    "./services/channel-transport.js": {
-      "types": "./dist/services/channel-transport.d.ts",
-      "import": "./dist/services/channel-transport.js"
-    },
-    "./services/channel-orchestrator.js": {
-      "types": "./dist/services/channel-orchestrator.d.ts",
-      "import": "./dist/services/channel-orchestrator.js"
+      "default": "./dist/services/channel-repository.js"
     },
     "./services/usage-service.js": {
       "types": "./dist/services/usage-service.d.ts",
-      "import": "./dist/services/usage-service.js"
+      "default": "./dist/services/usage-service.js"
+    },
+    "./services/chat-service.js": {
+      "types": "./dist/services/chat-service.d.ts",
+      "default": "./dist/services/chat-service.js"
     },
     "./middleware/tenant.js": {
       "types": "./dist/middleware/tenant.d.ts",
-      "import": "./dist/middleware/tenant.js"
+      "default": "./dist/middleware/tenant.js"
     },
     "./middleware/auth.js": {
       "types": "./dist/middleware/auth.d.ts",
-      "import": "./dist/middleware/auth.js"
+      "default": "./dist/middleware/auth.js"
     },
     "./middleware/error-handler.js": {
       "types": "./dist/middleware/error-handler.d.ts",
-      "import": "./dist/middleware/error-handler.js"
+      "default": "./dist/middleware/error-handler.js"
+    },
+    "./services/funnel/funnel-repository.js": {
+      "types": "./dist/services/funnel/funnel-repository.d.ts",
+      "default": "./dist/services/funnel/funnel-repository.js"
+    },
+    "./services/funnel/funnel-runtime.js": {
+      "types": "./dist/services/funnel/funnel-runtime.d.ts",
+      "default": "./dist/services/funnel/funnel-runtime.js"
+    },
+    "./services/funnel/scorer.js": {
+      "types": "./dist/services/funnel/scorer.d.ts",
+      "default": "./dist/services/funnel/scorer.js"
     }
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "validate": "tsc --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@undrecreaitwins/shared": "workspace:*",
     "@undrecreaitwins/memory": "workspace:*",
-    "drizzle-orm": "^0.38.0",
-    "postgres": "^3.4.0",
-    "ioredis": "^5.4.0",
+    "@undrecreaitwins/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.2.0",
-    "zod": "^3.24.0",
-    "pino": "^9.6.0"
+    "ioredis": "^5.4.0",
+    "natural": "^8.1.1",
+    "pino": "^9.6.0",
+    "postgres": "^3.4.0",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/natural": "^6.0.1",
+    "@types/node": "^22.0.0",
+    "drizzle-kit": "^0.31.10",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "drizzle-kit": "^0.30.0",
-    "@types/node": "^22.0.0"
+    "vitest": "^3.0.0"
   }
 }

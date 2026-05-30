@@ -8,7 +8,7 @@ export interface Persona {
   modelPreferences: ModelPreferences;
   createdAt: Date;
   updatedAt: Date;
-  version: bigint;
+  version: number;
 }
 
 export interface PersonaTraits {
@@ -141,4 +141,118 @@ export interface ApiToken {
   tokenHash: string;
   createdAt: Date;
   revokedAt?: Date;
+}
+
+// --- Funnel System ---
+
+export interface FunnelDefinition {
+  id: string;
+  tenantId: string;
+  personaId: string;
+  name: string;
+  deletedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface FunnelVersion {
+  id: string;
+  definitionId: string;
+  versionNumber: number;
+  config: FunnelConfig;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+export interface FunnelConfig {
+  relevance_threshold: number;
+  off_script_behavior: 'steer' | 'abstain' | 'catch_all';
+  catch_all_fragment_id?: string;
+  stuck_threshold: number;
+  stuck_action: 'yield_generation' | 'handoff' | 'exit_stage';
+  scoring_weights: ScoringWeights;
+}
+
+export interface ScoringWeights {
+  exact_match: number;
+  stemmed_match: number;
+  synonym_match: number;
+  stage_boost: number;
+  next_stage_bonus: number;
+  objection_boost: number;
+}
+
+export interface FunnelStage {
+  id: string;
+  funnelVersionId: string;
+  name: string;
+  order: number;
+  objective?: string;
+  resolutionCriteria: ResolutionCriteria;
+  nextStageId?: string;
+  stuckAction?: 'yield_generation' | 'handoff' | 'exit_stage';
+  exitStageId?: string;
+}
+
+export type ResolutionCriteria =
+  | { type: 'fragment_selected'; fragment_id: string }
+  | { type: 'slot_filled'; slot_name: string }
+  | { type: 'all_slots_filled' };
+
+export interface FunnelFragment {
+  id: string;
+  funnelVersionId: string;
+  stageId: string;
+  type: 'normal' | 'objection';
+  content: string;
+  triggers: TriggerDefinition;
+  scoreWeight: number;
+}
+
+export interface TriggerDefinition {
+  phrases?: string[];
+  synonyms?: Record<string, string[]>;
+}
+
+export interface FunnelSlot {
+  id: string;
+  funnelVersionId: string;
+  stageId?: string;
+  name: string;
+  description?: string;
+  validationRules?: Record<string, unknown>;
+}
+
+export interface FullFunnel extends FunnelVersion {
+  definition: FunnelDefinition;
+  stages: (FunnelStage & { fragments: FunnelFragment[] })[];
+  slots: FunnelSlot[];
+}
+
+export interface ConversationFunnelState {
+  conversationId: string;
+  funnelVersionId: string;
+  currentStageId: string;
+  consecutiveStuckCount: number;
+  capturedSlots: Record<string, CapturedSlot>;
+  version: number;
+  updatedAt: Date;
+}
+
+export interface CapturedSlot {
+  value: unknown;
+  verified: boolean;
+  captured_at: string; // ISO8601
+}
+
+export interface FunnelSelectionMetadata {
+  fragment_id?: string;
+  score?: number;
+  type: 'scripted' | 'steer' | 'abstain' | 'catch_all' | 'no_funnel';
+  signals?: Record<string, number>;
+  stage_transition?: {
+    from: string;
+    to: string;
+    type: 'advance' | 'regression' | 'stay';
+  };
 }
