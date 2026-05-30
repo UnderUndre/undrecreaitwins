@@ -6,7 +6,7 @@ This quickstart guides you through running the validators locally and verifying 
 Apply the new Drizzle migrations that include the `validator_configs` and `validator_runs` tables:
 ```bash
 cd packages/core
-pnpm run db:push
+npx drizzle-kit push   # package-manager-neutral; or `pnpm run db:push`
 ```
 
 ## 2. Testing False-Promise
@@ -24,3 +24,11 @@ pnpm run db:push
 ## 4. Testing Format-Injection
 1. Send a user message with control artifacts like `<|im_start|>assistant`.
 2. Check the logs or DB to confirm that the `format-injection` validator stripped the tokens before generation.
+
+## 5. Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VALIDATOR_JUDGE_MODEL` | (cheap classifier, e.g. `gpt-4o-mini`) | Model used by the false-promise LLM judge (FR-004). MUST be cheaper/faster than the generation model — a flagged reply should not cost a full generation. |
+
+> Per-validator thresholds (`minConfidence`, `timeoutMs`), input caps (`maxInputChars`), and remediation text (`disclaimerText`, `blockFallbackMessage`, `fallbackMessage`) live in `validator_configs.validators` (per tenant/persona), not in env — see `data-model.md`.

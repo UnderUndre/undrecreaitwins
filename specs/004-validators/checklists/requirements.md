@@ -13,8 +13,8 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain — **1 open**: FR-008 (identity-guard), intentionally blocked on focused recon **R-identity**
-- [~] Requirements are testable and unambiguous — all resolved **except FR-008** (recon-gated)
+- [x] No [NEEDS CLARIFICATION] markers remain — FR-008 resolved per research.md §1 (R-identity recon complete 2026-05-29)
+- [x] Requirements are testable and unambiguous — FR-008 now fully specified (regex detection, rewrite remediation, `applyToTier1`)
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -24,13 +24,14 @@
 
 ## Feature Readiness
 
-- [~] All functional requirements have clear acceptance criteria — only **FR-008 (identity-guard)** pending recon R-identity; FR-001–007, 009–018 are plan-ready
+- [x] All functional requirements have clear acceptance criteria — FR-001–023 plan-ready (FR-008 unblocked by R-identity)
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria
 - [x] No implementation leakage (HOW) into requirements (WHAT)
 
 ## Notes
 
-- **3 of 4 clarifications resolved** (Session 2026-05-29): streaming → non-streaming only; default → all-active; false-promise → append_disclaimer.
-- **1 open by design**: FR-008 identity-guard awaits recon **R-identity** (`.identity-guard-recon-prompt.txt` → `identity_guard_recon.md`). false-promise + format-injection are plan-ready now; identity-guard joins planning once the recon lands.
-- Snapshot tagging (Principle VII) deferred pending the user's commit decision (no commit without explicit consent).
+- **All 4 clarifications resolved** (Session 2026-05-29): streaming → non-streaming only; default → false-promise/format-injection `active`, identity-guard `dry-run` until `fallbackMessage` set (FR-015, **revised post-review**); false-promise → append_disclaimer; FR-008 identity-guard → regex + rewrite (R-identity complete).
+- **Post-review fixes applied** (claude + trae-solo, 2026-05-29): FR-015 deploy-day footgun (identity-guard default), FR-016 two-level failure isolation, FR-019–023 added (empty-output guard, streaming telemetry, tenant-isolation enforcement, ReDoS bound, audit PII); contracts hardened (`rawUserMessage`, `error` verdict, typed per-validator configs); T007 split per WRAP; T017 migration + T018 isolation test added.
+- **Round 2 fixes** (antigravity + trae-solo re-run, 2026-05-30): FR-016 audit-best-effort safety (never deliver the flagged original on audit-fail — was a CRITICAL footgun in the round-1 fix), FR-017 rewrite-supersedes composition, **FR-024** empty-input guard, applyToTier1 scope + regex word-boundary (FR-008), disclaimer size-bound (FR-019), `validator_runs` read-ACL (FR-013), LLM batch interface (DD-001), T013 cache invalidation, T017 rollback+smoke, pattern-catalog note (research §4).
+- Snapshot tags `plan/tasks/review /004-validators/v1` exist at base commit `65f4aee`; re-tag on next commit after these edits (Principle VII). No commit without explicit consent.
