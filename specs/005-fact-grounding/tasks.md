@@ -31,17 +31,17 @@
 
 ### Implementation for User Story 1
 
-- [ ] T001 [BE] [US1] Vector+reranker retrieval in `packages/core/src/services/grounding/retrieval.ts` — HNSW cosine candidates (`vectorTopK=20`) filtered by `tenantId`+`personaId`, then BGE-reranker-v2-m3 → `rerankTopN=5`, drop below `minRerankScore=0.3`, pack into `contextBudgetTokens≈2000`. ALL DB access via `withTenantContext(tenantId, ...)`. NOT hybrid/FTS (deferred, spec §11). (spec §5)
-- [ ] T002 [BE] [US1] Ingest adapter in `packages/core/src/services/grounding/ingest-adapter.ts` — delegate to 008 `document-service` (enqueue BullMQ parse→chunk→embed→store), return `{ documentId, status }`. Do NOT reimplement officeParser (dup of 008 T020). Enforce/relay limits: pdf·docx·txt, ≤10 MB, ≤10 docs/persona. (spec §6, §7)
-- [ ] T003 [BE] [US1] Implement `GroundingEngine` matching `contracts/IGroundingEngine.ts` in `packages/core/src/services/grounding/GroundingEngine.ts` — wires T001+T002; `twinId` is passed directly as `personaId` (identity, no lookup) inside the tenant context. (spec §3, §4)
-- [ ] T004 [BE] [US1] Register `GroundingEngine` in the core engine service registry (where other `engine.*` services are wired) so it is injected as `engine.grounding`.
+- [X] T001 [BE] [US1] Vector+reranker retrieval in `packages/core/src/services/grounding/retrieval.ts` — HNSW cosine candidates (`vectorTopK=20`) filtered by `tenantId`+`personaId`, then BGE-reranker-v2-m3 → `rerankTopN=5`, drop below `minRerankScore=0.3`, pack into `contextBudgetTokens≈2000`. ALL DB access via `withTenantContext(tenantId, ...)`. NOT hybrid/FTS (deferred, spec §11). (spec §5)
+- [X] T002 [BE] [US1] Ingest adapter in `packages/core/src/services/grounding/ingest-adapter.ts` — delegate to 008 `document-service` (enqueue BullMQ parse→chunk→embed→store), return `{ documentId, status }`. Do NOT reimplement officeParser (dup of 008 T020). Enforce/relay limits: pdf·docx·txt, ≤10 MB, ≤10 docs/persona. (spec §6, §7)
+- [X] T003 [BE] [US1] Implement `GroundingEngine` matching `contracts/IGroundingEngine.ts` in `packages/core/src/services/grounding/GroundingEngine.ts` — wires T001+T002; `twinId` is passed directly as `personaId` (identity, no lookup) inside the tenant context. (spec §3, §4)
+- [X] T004 [BE] [US1] Register `GroundingEngine` in the core engine service registry (where other `engine.*` services are wired) so it is injected as `engine.grounding`.
 
 ### Tests for User Story 1
 
-- [ ] T005 [BE] [US1] Happy-path integration in `packages/core/tests/integration/grounding/GroundingEngine.test.ts` — ingest test PDF, poll to `ready`, query returns ranked context.
-- [ ] T006 [SEC] [US1] Tenant-isolation test in `packages/core/tests/integration/grounding/tenant-isolation.test.ts` — tenant A ingests; tenant B `query()` returns `[]` (RLS enforced via `withTenantContext`). (spec §4)
-- [ ] T007 [BE] [US1] Failure-mode tests in `packages/core/tests/integration/grounding/ingest-failures.test.ts` — unsupported MIME (reject), >10 MB (reject), >10 docs (reject), parse failure → `status:'failed'` & not retrievable, embedder outage → no half-ingested document. (spec §7)
-- [ ] T008 [BE] [US1] Retrieval-quality tests in `packages/core/tests/integration/grounding/retrieval-quality.test.ts` — empty query, no-match below `minRerankScore` → `[]`, rerank ordering (more relevant chunk ranks higher), reranker-down → vector-only fallback, `parsing` document not yet retrievable. (spec §5, §6)
+- [X] T005 [BE] [US1] Happy-path integration in `packages/core/tests/integration/grounding/GroundingEngine.test.ts` — ingest test PDF, poll to `ready`, query returns ranked context.
+- [X] T006 [SEC] [US1] Tenant-isolation test in `packages/core/tests/integration/grounding/tenant-isolation.test.ts` — tenant A ingests; tenant B `query()` returns `[]` (RLS enforced via `withTenantContext`). (spec §4)
+- [X] T007 [BE] [US1] Failure-mode tests in `packages/core/tests/integration/grounding/ingest-failures.test.ts` — unsupported MIME (reject), >10 MB (reject), >10 docs (reject), parse failure → `status:'failed'` & not retrievable, embedder outage → no half-ingested document. (spec §7)
+- [X] T008 [BE] [US1] Retrieval-quality tests in `packages/core/tests/integration/grounding/retrieval-quality.test.ts` — empty query, no-match below `minRerankScore` → `[]`, rerank ordering (more relevant chunk ranks higher), reranker-down → vector-only fallback, `parsing` document not yet retrievable. (spec §5, §6)
 
 **Checkpoint**: `IGroundingEngine` fully functional, tenant-safe, async-ingest aware.
 

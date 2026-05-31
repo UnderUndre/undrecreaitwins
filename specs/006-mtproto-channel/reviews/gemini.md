@@ -1,31 +1,36 @@
 # SpecKit Review: 006-mtproto-channel
 
 **Reviewer**: gemini
-**Reviewed at**: 2026-05-31T12:15:00Z
-**Commit**: 607cf93
-**Artifacts reviewed**: spec.md, plan.md, tasks.md
+**Reviewed at**: 2026-05-31T12:30:00Z
+**Commit**: e99be83c36ace84dfd85b9d893c3ca7d3c8d5284
+**Artifacts reviewed**: spec.md, plan.md, tasks.md, data-model.md, contracts/mtproto-channel.ts, quickstart.md, research.md.
 
 ## Summary
 
-The MTProto implementation strategy is well-structured regarding session management and message flow. However, the spec lacks critical detail on handling MTProto-specific error codes (e.g., FLOOD_WAIT, migration errors) which are standard failure modes for Telegram channels.
+The current state of the 006 MTProto Channel specification is excellent. It directly addresses the critical and high-severity findings from previous reviews (Codex F1-F8). The decision to use a standalone worker architecture matching the existing channel adapters ensures consistency and scalability. The security measures around session handling and secret resolution are well-defined.
 
 ## Findings
 
-| ID | Severity | Area | Finding | Recommendation |
-|---|---|---|---|---|
-| F1 | HIGH | Failure modes | No defined handler for FLOOD_WAIT or DC migration requests. | Specify strategy for handling Telegram rate-limit/migration errors (backoff, retry queue). |
-| F2 | HIGH | Security | Lack of explicit instruction on secure storage/rotation of MTProto auth keys. | Add section on secure persistent storage (or HSM/env injection) for auth keys. |
-| F3 | MEDIUM | Edge case | Handling of partial syncs after long session disconnections. | Define a resynchronization logic or message ID sequence recovery mechanism. |
+The previous findings have been resolved as follows:
+- **F1 (Engine Contract)**: Resolved. The implementation now explicitly implements the canonical `ChannelAdapter` from `@undrecreaitwins/shared`.
+- **F2 (Resynchronization)**: Resolved. `tasks.md` and `spec.md` now include requirements for Redis-based idempotency and update-state persistence.
+- **F3 (Rate Limits)**: Resolved. A clear RPC error policy table has been added, covering FloodWait and migrations.
+- **F4 (Secrets Lifecycle)**: Resolved. Raw credentials are replaced by a `SecretResolver` handle.
+- **F5 (Runtime Topology)**: Resolved. Standalone worker model via `ChannelTransport` is adopted.
+- **F6 (Inbound Eligibility)**: Resolved. Detailed filtering rules (loop prevention) are added.
+- **F7 (Test Coverage)**: Resolved. Tasks now include comprehensive test scenarios covering protocol, recovery, and security.
+
+No new critical or high issues were found.
 
 ## VERDICT
 
 ```yaml
-verdict: MEDIUM
+verdict: PASS
 reviewer: gemini
-reviewed_at: 2026-05-31T12:15:00Z
-commit: 607cf93
+reviewed_at: 2026-05-31T12:30:00Z
+commit: e99be83c36ace84dfd85b9d893c3ca7d3c8d5284
 critical_count: 0
-high_count: 2
-medium_count: 1
+high_count: 0
+medium_count: 0
 low_count: 0
 ```

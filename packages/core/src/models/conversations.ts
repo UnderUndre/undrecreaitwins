@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, index, boolean } from 'drizzle-orm/pg-core';
 
 export const conversations = pgTable(
   'conversations',
@@ -12,6 +12,8 @@ export const conversations = pgTable(
     startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
     endedAt: timestamp('ended_at', { withTimezone: true }),
     messageCount: integer('message_count').notNull().default(0),
+    isTestThread: boolean('is_test_thread').notNull().default(false),
+    source: text('source'),
   },
   (table) => ({
     tenantPersonaIdx: index('idx_conversations_tenant_persona').on(table.tenantId, table.personaId),

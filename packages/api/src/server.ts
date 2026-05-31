@@ -6,6 +6,12 @@ import { authPlugin } from '@undrecreaitwins/core/middleware/auth.js';
 import { errorHandler } from '@undrecreaitwins/core/middleware/error-handler.js';
 import { healthCheck as dbHealthCheck } from '@undrecreaitwins/core/db.js';
 
+import { personaRoutes } from './routes/personas.js';
+import { chatCompletionsRoutes } from './routes/chat-completions.js';
+import { annotationRoutes } from './routes/annotations.js';
+import { documentRoutes } from './routes/documents.js';
+import { sandboxRoutes } from './routes/sandbox.js';
+
 export async function buildServer() {
   const fastify = Fastify({
     logger: {
@@ -39,6 +45,13 @@ export async function buildServer() {
 
   await fastify.register(tenantPlugin);
   await fastify.register(authPlugin);
+
+  // Routes
+  await fastify.register(personaRoutes);
+  await fastify.register(chatCompletionsRoutes);
+  await fastify.register(annotationRoutes);
+  await fastify.register(documentRoutes);
+  await fastify.register(sandboxRoutes);
 
   fastify.setErrorHandler(errorHandler);
 

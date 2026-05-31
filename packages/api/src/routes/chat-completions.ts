@@ -155,6 +155,11 @@ async function handleStream(
             body.model,
             result.usage || { prompt_tokens: 0, completion_tokens: 0 },
             latencyMs,
+            [
+              { role: 'system', content: result.systemPrompt },
+              ...body.messages
+            ],
+            result.content,
           );
         }
         break;

@@ -90,7 +90,7 @@ export const funnelRoutes: FastifyPluginAsync = async (fastify) => {
     return version;
   });
 
-  fastify.post('/v1/conversations/:id/funnel/reset', async (request, reply) => {
+  fastify.post('/v1/conversations/:id/funnel/reset', async (request) => {
     const { id } = request.params as { id: string };
     await repo.resetConversationState(id);
     return { status: 'reset' };

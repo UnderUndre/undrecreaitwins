@@ -13,6 +13,8 @@ import { funnelFragments } from './funnel-fragments.js';
 import { funnelSlots } from './funnel-slots.js';
 import { conversationFunnelStates } from './conversation-funnel-states.js';
 import { validatorConfigs, validatorRuns } from './validators.js';
+import { documents, documentChunks } from './documents.js';
+import { annotations } from './annotations.js';
 
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   personas: many(personas),
@@ -24,6 +26,8 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   funnelDefinitions: many(funnelDefinitions),
   validatorConfigs: many(validatorConfigs),
   validatorRuns: many(validatorRuns),
+  documents: many(documents),
+  annotations: many(annotations),
 }));
 
 export const personasRelations = relations(personas, ({ one, many }) => ({
@@ -39,6 +43,8 @@ export const personasRelations = relations(personas, ({ one, many }) => ({
   }),
   validatorConfigs: many(validatorConfigs),
   validatorRuns: many(validatorRuns),
+  documents: many(documents),
+  annotations: many(annotations),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
@@ -205,5 +211,35 @@ export const validatorRunsRelations = relations(validatorRuns, ({ one }) => ({
   message: one(messages, {
     fields: [validatorRuns.messageId],
     references: [messages.id],
+  }),
+}));
+
+export const documentsRelations = relations(documents, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [documents.tenantId],
+    references: [tenants.id],
+  }),
+  persona: one(personas, {
+    fields: [documents.personaId],
+    references: [personas.id],
+  }),
+  chunks: many(documentChunks),
+}));
+
+export const documentChunksRelations = relations(documentChunks, ({ one }) => ({
+  document: one(documents, {
+    fields: [documentChunks.documentId],
+    references: [documents.id],
+  }),
+}));
+
+export const annotationsRelations = relations(annotations, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [annotations.tenantId],
+    references: [tenants.id],
+  }),
+  persona: one(personas, {
+    fields: [annotations.personaId],
+    references: [personas.id],
   }),
 }));

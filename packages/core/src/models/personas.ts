@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, jsonb, bigint, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, bigint, uniqueIndex, index, real, boolean } from 'drizzle-orm/pg-core';
 import type { PersonaTraits, ModelPreferences } from '@undrecreaitwins/shared';
 
 export const personas = pgTable(
@@ -14,6 +14,8 @@ export const personas = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     version: bigint('version', { mode: 'number' }).notNull().default(0),
+    annotationSimilarityThreshold: real('annotation_similarity_threshold').notNull().default(0.7),
+    hasAnnotations: boolean('has_annotations').notNull().default(false),
   },
   (table) => ({
     tenantSlugIdx: uniqueIndex('personas_tenant_slug_idx').on(table.tenantId, table.slug),

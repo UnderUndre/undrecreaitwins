@@ -11,6 +11,8 @@ export { funnelStages } from './funnel-stages.js';
 export { funnelFragments, fragmentTypeEnum } from './funnel-fragments.js';
 export { funnelSlots } from './funnel-slots.js';
 export { conversationFunnelStates } from './conversation-funnel-states.js';
+export { documents, documentChunks } from './documents.js';
+export { annotations } from './annotations.js';
 export {
   validatorConfigs,
   validatorRuns,
@@ -33,4 +35,7 @@ export {
   funnelFragmentsRelations,
   funnelSlotsRelations,
   conversationFunnelStatesRelations,
+  documentsRelations,
+  documentChunksRelations,
+  annotationsRelations,
 } from './relations.js';

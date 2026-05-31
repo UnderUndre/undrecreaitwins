@@ -8,6 +8,9 @@ import { FragmentScorer } from './funnel/scorer.js';
 import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
+import { AnnotationService } from './annotation-service.js';
+import { EmbeddingService } from './embedding-service.js';
+import { LangfuseService } from './langfuse-service.js';
 import { withTenantContext } from '../db.js';
 import { conversations, messages, usageEvents } from '../models/index.js';
 import { ServiceUnavailableError, NotFoundError } from '@undrecreaitwins/shared';
@@ -21,6 +24,8 @@ interface ChatRequest {
   streamOptions?: { include_usage?: boolean };
   temperature?: number;
   maxTokens?: number;
+  isTestThread?: boolean;
+  source?: string;
 }
 
 interface ChatResponse {
@@ -56,6 +61,8 @@ type PersonaRow = {
   createdAt: Date;
   updatedAt: Date;
   version: number;
+  annotationSimilarityThreshold: number;
+  hasAnnotations: boolean;
 };
 
 const personaRepo = new PersonaRepository();
@@ -65,6 +72,9 @@ const llm = new LLMClient();
 const validatorPipeline = new ValidatorPipeline(llm);
 const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : undefined;
 const funnelRuntime = new FunnelRuntime(funnelRepo, (config) => new FragmentScorer(config), redis as any);
+const embeddingService = new EmbeddingService();
+const annotationService = new AnnotationService(embeddingService);
+const langfuseService = new LangfuseService();
 
 export class ChatService {
   async complete(request: ChatRequest): Promise<ChatResponse> {
@@ -105,6 +115,8 @@ export class ChatService {
       request.tenantId,
       persona.id,
       request.messages[0]?.content || '',
+      request.isTestThread,
+      request.source,
     );
 
     // Funnel Processing
@@ -141,7 +153,7 @@ export class ChatService {
       };
     }
 
-    const systemPrompt = this.buildSystemPrompt(persona);
+    const systemPrompt = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage);
     const allMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
       ...request.messages,
@@ -196,6 +208,8 @@ export class ChatService {
       llmResponse.model,
       llmResponse.usage,
       latencyMs,
+      allMessages,
+      finalContent,
     );
 
     return {
@@ -220,7 +234,7 @@ export class ChatService {
   async *completeStream(
     request: ChatRequest,
     signal?: AbortSignal,
-  ): AsyncGenerator<StreamChunk, { completed: boolean; content: string; conversationId?: string; personaId?: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }; metadata?: { funnel?: FunnelSelectionMetadata } }> {
+  ): AsyncGenerator<StreamChunk, { completed: boolean; content: string; conversationId?: string; personaId?: string; systemPrompt?: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }; metadata?: { funnel?: FunnelSelectionMetadata } }> {
     if (request.messages.length === 0) {
       throw new ServiceUnavailableError('Chat', 'No messages provided');
     }
@@ -238,6 +252,8 @@ export class ChatService {
       request.tenantId,
       persona.id,
       request.messages[0]?.content || '',
+      request.isTestThread,
+      request.source,
     );
 
     const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
@@ -262,7 +278,7 @@ export class ChatService {
         }],
       };
       yield chunk;
-      return { completed: true, content: "I'm sorry, I couldn't process your request. Could you please rephrase it?", conversationId, personaId: persona.id };
+      return { completed: true, content: "I'm sorry, I couldn't process your request. Could you please rephrase it?", conversationId, personaId: persona.id, systemPrompt: '' };
     }
 
     // Funnel Processing
@@ -299,12 +315,13 @@ export class ChatService {
         content: funnelResult.scriptedReply,
         conversationId,
         personaId: persona.id,
+        systemPrompt: '',
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
         metadata: { funnel: funnelResult.metadata }
       };
     }
 
-    const systemPrompt = this.buildSystemPrompt(persona);
+    const systemPrompt = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage);
     const allMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
       ...request.messages,
@@ -387,6 +404,7 @@ export class ChatService {
       content: accumulatedContent,
       conversationId,
       personaId: persona.id,
+      systemPrompt,
       usage: finalUsage || {
         prompt_tokens: 0,
         completion_tokens: 0,
@@ -396,12 +414,44 @@ export class ChatService {
     };
   }
 
-  private buildSystemPrompt(persona: PersonaRow): string {
+  private async buildSystemPrompt(tenantId: string, persona: PersonaRow, userQuery: string): Promise<string> {
     const parts = [persona.systemPrompt];
     const traits = persona.traits;
     if (traits && Object.keys(traits).length > 0) {
       parts.push(`\nPersonality traits: ${JSON.stringify(traits)}`);
     }
+
+    // Annotation few-shot injection (FR-003, US1)
+    if (persona.hasAnnotations && userQuery) {
+      try {
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Embedding timeout')), 500)
+        );
+        
+        const embedding = await Promise.race([
+          embeddingService.embed(userQuery.toLowerCase()),
+          timeoutPromise
+        ]) as number[];
+
+        const matches = await annotationService.retrieve(
+          tenantId,
+          persona.id,
+          embedding,
+          persona.annotationSimilarityThreshold || 0.7,
+          3
+        );
+
+        if (matches.length > 0) {
+          parts.push('\nFollow these specific corrections for this query:');
+          for (const m of matches) {
+            parts.push(`Q: ${m.originalQuery}\nA: ${m.correctedResponse}`);
+          }
+        }
+      } catch (err) {
+        console.warn({ err }, 'Annotation retrieval failed, proceeding without few-shot');
+      }
+    }
+
     return parts.join('\n');
   }
 
@@ -409,6 +459,8 @@ export class ChatService {
     tenantId: string,
     personaId: string,
     _firstMessage: string,
+    isTestThread = false,
+    source?: string,
   ): Promise<string> {
     return withTenantContext(tenantId, async (tx) => {
       const [conv] = await tx
@@ -418,6 +470,8 @@ export class ChatService {
           personaId,
           externalUserId: 'api',
           messageCount: 0,
+          isTestThread,
+          source,
         })
         .returning({ id: conversations.id });
       if (!conv) {
@@ -464,7 +518,21 @@ export class ChatService {
     model: string,
     usage: { prompt_tokens: number; completion_tokens: number },
     latencyMs: number,
+    messages?: any[],
+    output?: string,
   ): Promise<void> {
+    // Fire-and-forget Langfuse trace (US4)
+    langfuseService.emitTrace({
+      id: randomUUID(),
+      name: 'chat-reply',
+      userId: tenantId,
+      metadata: { personaId, conversationId, tenantId },
+      input: messages,
+      output: output,
+      model,
+      usage,
+    });
+
     return withTenantContext(tenantId, async (tx) => {
       await tx.insert(usageEvents).values({
         tenantId,

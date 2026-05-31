@@ -4,6 +4,8 @@ import type { TrainingSourceType } from '@undrecreaitwins/shared';
 
 export const TRAINING_QUEUE_NAME = 'training';
 export const TRAINING_JOB_NAME = 'process';
+export const DOCUMENT_QUEUE_NAME = 'document-ingestion';
+export const DOCUMENT_JOB_NAME = 'ingest';
 
 export interface TrainingJobData {
   tenantId: string;
@@ -13,7 +15,17 @@ export interface TrainingJobData {
   jobId: string;
 }
 
+export interface DocumentJobData {
+  documentId: string;
+  tenantId: string;
+  personaId: string;
+  filename: string;
+  mimeType: string;
+  contentBase64: string;
+}
+
 let queue: Queue<TrainingJobData> | null = null;
+let documentQueue: Queue<DocumentJobData> | null = null;
 let connection: Redis | undefined;
 
 function getConnection(): Redis {
@@ -31,6 +43,14 @@ export function getTrainingQueue(): Queue<TrainingJobData> {
   return queue;
 }
 
+export function getDocumentQueue(): Queue<DocumentJobData> {
+  if (documentQueue) return documentQueue;
+  documentQueue = new Queue<DocumentJobData>(DOCUMENT_QUEUE_NAME, {
+    connection: getConnection(),
+  });
+  return documentQueue;
+}
+
 export async function enqueueTrainingJob(data: TrainingJobData): Promise<void> {
   await getTrainingQueue().add(TRAINING_JOB_NAME, data, {
     jobId: data.jobId,
@@ -45,6 +65,10 @@ export async function closeTrainingQueue(): Promise<void> {
   if (queue) {
     await queue.close();
     queue = null;
+  }
+  if (documentQueue) {
+    await documentQueue.close();
+    documentQueue = null;
   }
   if (connection) {
     await connection.quit();

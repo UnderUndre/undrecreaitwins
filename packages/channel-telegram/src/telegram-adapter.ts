@@ -1,7 +1,7 @@
 import { Telegraf, type Context } from 'telegraf';
 import type { ChannelAdapter, ChannelMessage, ChannelHealth, ChannelStatus } from '@undrecreaitwins/shared';
 import { REDIS_STREAMS } from '@undrecreaitwins/shared';
-import { ChannelTransport } from '@undrecreaitwins/core/services/channel-transport.js';
+import { ChannelTransport, type StreamMessage } from '@undrecreaitwins/core/services/channel-transport.js';
 
 export class TelegramAdapter implements ChannelAdapter {
   private bot: Telegraf;
@@ -68,7 +68,7 @@ export class TelegramAdapter implements ChannelAdapter {
       REDIS_STREAMS.OUTBOUND,
       'channel-telegram',
       consumerName,
-      async (msg) => {
+      async (msg: StreamMessage) => {
         if (msg.data.channel_id !== this.channelId) return;
         await this.send({
           id: msg.data.message_id ?? '',

@@ -10,6 +10,7 @@ type NewPersona = {
   systemPrompt: string;
   traits?: PersonaTraits;
   modelPreferences?: ModelPreferences;
+  annotationSimilarityThreshold?: number;
 };
 
 type UpdatePersona = {
@@ -18,6 +19,7 @@ type UpdatePersona = {
   systemPrompt?: string;
   traits?: PersonaTraits;
   modelPreferences?: ModelPreferences;
+  annotationSimilarityThreshold?: number;
   expectedVersion?: number;
 };
 
@@ -35,6 +37,7 @@ export class PersonaRepository {
           systemPrompt: data.systemPrompt,
           traits: data.traits || {},
           modelPreferences: data.modelPreferences || {},
+          annotationSimilarityThreshold: data.annotationSimilarityThreshold,
         })
         .returning();
       const persona = rows[0];
@@ -101,6 +104,9 @@ export class PersonaRepository {
       if (data.systemPrompt !== undefined) updateData.systemPrompt = data.systemPrompt;
       if (data.traits !== undefined) updateData.traits = data.traits;
       if (data.modelPreferences !== undefined) updateData.modelPreferences = data.modelPreferences;
+      if (data.annotationSimilarityThreshold !== undefined) {
+        updateData.annotationSimilarityThreshold = data.annotationSimilarityThreshold;
+      }
 
       const conditions = [eq(personas.id, id)];
       if (data.expectedVersion !== undefined) {

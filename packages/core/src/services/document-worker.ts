@@ -1,0 +1,118 @@
+import { Worker, Job } from 'bullmq';
+import officeParser from 'officeparser';
+import { db } from '../db.js';
+import { documents, documentChunks } from '../models/documents.js';
+import { EmbeddingService } from './embedding-service.js';
+import { eq } from 'drizzle-orm';
+import { IngestJobData } from './document-service.js';
+
+export class DocumentWorker {
+  private worker: Worker<IngestJobData>;
+  private embeddingService: EmbeddingService;
+
+  constructor(embeddingService: EmbeddingService) {
+    this.embeddingService = embeddingService;
+    
+    this.worker = new Worker(
+      'document-ingestion',
+      async (job: Job<IngestJobData>) => {
+        await this.processIngest(job);
+      },
+      { 
+        connection: {
+          host: 'localhost',
+          port: 6379,
+          ...(process.env.REDIS_URL ? this.parseRedisUrl(process.env.REDIS_URL) : {})
+        }
+      }
+    );
+
+    this.worker.on('failed', (job, err) => {
+      console.error(`Job ${job?.id} failed with error: ${err.message}`);
+    });
+  }
+
+  private parseRedisUrl(url: string) {
+    try {
+      const u = new URL(url);
+      return {
+        host: u.hostname,
+        port: parseInt(u.port, 10) || 6379,
+        password: u.password,
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  private async processIngest(job: Job<IngestJobData>) {
+    const { documentId, contentBase64, tenantId, personaId } = job.data;
+
+    try {
+      // 1. Update status to 'parsing'
+      await db.update(documents)
+        .set({ status: 'parsing' })
+        .where(eq(documents.id, documentId));
+
+      // 2. Parse content
+      const buffer = Buffer.from(contentBase64, 'base64');
+      const text = await new Promise<string>((resolve, reject) => {
+        officeParser.parseOffice(buffer, (data: any, err: any) => {
+          if (err) return reject(err);
+          resolve(data as string);
+        });
+      });
+
+      // 3. Chunk text (Basic recursive splitter)
+      const chunks = this.splitText(text, 512, 50);
+
+      // 4. Embed and store chunks
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkText = chunks[i];
+        if (!chunkText) continue;
+
+        const embedding = await this.embeddingService.embed(chunkText);
+
+        await db.insert(documentChunks).values({
+          tenantId,
+          documentId,
+          personaId,
+          chunkIndex: i,
+          text: chunkText,
+          embedding,
+        });
+      }
+
+      // 5. Update status to 'ready'
+      await db.update(documents)
+        .set({ status: 'ready' })
+        .where(eq(documents.id, documentId));
+
+    } catch (err: any) {
+      console.error(`Failed to ingest document ${documentId}:`, err);
+      await db.update(documents)
+        .set({ status: 'failed', error: err.message })
+        .where(eq(documents.id, documentId));
+      throw err;
+    }
+  }
+
+  private splitText(text: string, chunkSize: number, overlap: number): string[] {
+    const chunks: string[] = [];
+    const words = text.split(/\s+/).filter(Boolean);
+    
+    let start = 0;
+    while (start < words.length) {
+      const end = Math.min(start + chunkSize, words.length);
+      chunks.push(words.slice(start, end).join(' '));
+      if (end === words.length) break;
+      start += chunkSize - overlap;
+    }
+    
+    return chunks;
+  }
+
+  async close() {
+    await this.worker.close();
+  }
+}

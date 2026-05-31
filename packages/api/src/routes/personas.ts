@@ -12,6 +12,7 @@ const createPersonaSchema = z.object({
   system_prompt: z.string().min(1),
   traits: z.record(z.unknown()).optional(),
   model_preferences: z.record(z.unknown()).optional(),
+  annotation_similarity_threshold: z.number().min(0).max(1).optional(),
 });
 
 const updatePersonaSchema = z.object({
@@ -21,6 +22,7 @@ const updatePersonaSchema = z.object({
   system_prompt: z.string().min(1).optional(),
   traits: z.record(z.unknown()).optional(),
   model_preferences: z.record(z.unknown()).optional(),
+  annotation_similarity_threshold: z.number().min(0).max(1).optional(),
 });
 
 function toApiPersona(row: Record<string, unknown>) {
@@ -32,6 +34,8 @@ function toApiPersona(row: Record<string, unknown>) {
     system_prompt: row.systemPrompt as string,
     traits: (row.traits as PersonaTraits) || {},
     model_preferences: (row.modelPreferences as ModelPreferences) || {},
+    annotation_similarity_threshold: row.annotationSimilarityThreshold as number,
+    has_annotations: row.hasAnnotations as boolean,
     created_at: (row.createdAt as Date)?.toISOString(),
     updated_at: (row.updatedAt as Date)?.toISOString(),
     version: row.version !== undefined && row.version !== null
@@ -58,6 +62,7 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
       systemPrompt: body.system_prompt,
       traits: body.traits as PersonaTraits | undefined,
       modelPreferences: body.model_preferences as ModelPreferences | undefined,
+      annotationSimilarityThreshold: body.annotation_similarity_threshold,
     });
     reply.status(201);
     return toApiPersona(persona as Record<string, unknown>);
@@ -98,21 +103,24 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
     const body = parseResult.data;
 
     const ifMatch = request.headers['if-match'];
-    let expectedVersion: bigint | undefined;
+    let expectedVersion: number | undefined;
     if (ifMatch) {
       const cleanIfMatch = (ifMatch as string)
         .replace(/^W\//, '')
         .replace(/^"|"$/g, '')
         .trim();
       try {
-        expectedVersion = BigInt(cleanIfMatch);
+        expectedVersion = Number(cleanIfMatch);
+        if (Number.isNaN(expectedVersion)) {
+          throw new Error();
+        }
       } catch {
         throw new ValidationError([
           { field: 'If-Match', message: `Invalid If-Match header value: ${ifMatch}` },
         ]);
       }
     } else if (body.version !== undefined) {
-      expectedVersion = BigInt(body.version);
+      expectedVersion = Number(body.version);
     }
 
     const persona = await repo.update(request.tenantId, id, {
@@ -121,6 +129,7 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
       systemPrompt: body.system_prompt,
       traits: body.traits as PersonaTraits | undefined,
       modelPreferences: body.model_preferences as ModelPreferences | undefined,
+      annotationSimilarityThreshold: body.annotation_similarity_threshold,
       expectedVersion,
     });
     return toApiPersona(persona as Record<string, unknown>);
