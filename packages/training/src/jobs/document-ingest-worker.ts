@@ -93,8 +93,8 @@ function recursiveSplit(text: string, chunkSize: number, overlap: number): strin
       }
     }
     chunks.push(text.slice(start, end).trim());
-    start = end - overlap;
-    if (start < 0) start = 0;
+    const nextStart = end - overlap;
+    start = nextStart > start ? nextStart : end;
     if (start >= text.length - 10) break;
   }
   return chunks;
