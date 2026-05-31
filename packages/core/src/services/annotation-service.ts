@@ -83,7 +83,7 @@ export class AnnotationService {
         .from(annotations)
         .where(eq(annotations.personaId, deleted.personaId));
       
-      if (result && result.value === 0) {
+      if (result && Number(result.value) === 0) {
         await tx
           .update(personas)
           .set({ hasAnnotations: false })
