@@ -7,19 +7,25 @@ import type { MtprotoAdapterOptions } from './types.js';
 import { MtprotoClient } from './client.js';
 import { EligibilityFilter } from './eligibility.js';
 import { RateLimiter } from './rate-limit.js';
+import { IdempotencyStore } from './idempotency.js';
 
 export class TelegramMtprotoAdapter implements ChannelAdapter {
   private readonly client: MtprotoClient;
   private readonly eligibility: EligibilityFilter;
   private readonly rateLimiter: RateLimiter;
+  private readonly idempotency?: IdempotencyStore;
   private incomingHandler?: (message: ChannelMessage) => Promise<void>;
   private isConnected = false;
   private typingTimers: Map<string, NodeJS.Timeout> = new Map();
+  private typingTimeouts: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(private readonly opts: MtprotoAdapterOptions) {
     this.client = new MtprotoClient(this.opts);
     this.eligibility = new EligibilityFilter(this.opts.allowlist);
     this.rateLimiter = new RateLimiter();
+    if (this.opts.redis) {
+      this.idempotency = new IdempotencyStore(this.opts.redis, this.opts.channelId);
+    }
   }
 
   async connect(): Promise<void> {
@@ -28,6 +34,9 @@ export class TelegramMtprotoAdapter implements ChannelAdapter {
     tgClient.addEventHandler(async (event: any) => {
       const message = event.message as Api.Message;
       if (!message) return;
+
+      // Deduplicate messages on reconnect
+      if (this.idempotency && await this.idempotency.isDuplicate(message.id.toString())) return;
 
       if (!this.eligibility.isEligible(message)) return;
 
@@ -91,6 +100,10 @@ export class TelegramMtprotoAdapter implements ChannelAdapter {
       clearInterval(timer);
     }
     this.typingTimers.clear();
+    for (const timeout of this.typingTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.typingTimeouts.clear();
     this.isConnected = false;
   }
 
@@ -127,6 +140,9 @@ export class TelegramMtprotoAdapter implements ChannelAdapter {
     refreshTyping();
     const timer = setInterval(refreshTyping, this.opts.typingIntervalMs || 4000);
     this.typingTimers.set(peerId, timer);
+    // Auto-stop typing after 30s to prevent indefinite interval
+    const timeout = setTimeout(() => this.stopTyping(peerId), 30000);
+    this.typingTimeouts.set(peerId, timeout);
   }
 
   private stopTyping(peerId: string): void {
@@ -134,6 +150,11 @@ export class TelegramMtprotoAdapter implements ChannelAdapter {
     if (timer) {
       clearInterval(timer);
       this.typingTimers.delete(peerId);
+    }
+    const timeout = this.typingTimeouts.get(peerId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.typingTimeouts.delete(peerId);
     }
   }
 

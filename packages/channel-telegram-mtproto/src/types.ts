@@ -1,4 +1,5 @@
 import type { ChannelTransport } from '@undrecreaitwins/core/services/channel-transport.js';
+import type { Redis } from 'ioredis';
 
 export interface SecretResolver {
   getApiHash(channelId: string): Promise<string>;
@@ -17,6 +18,7 @@ export interface MtprotoAdapterOptions {
   transport: ChannelTransport;
   allowlist?: AllowlistConfig;
   typingIntervalMs?: number;
+  redis?: Redis;
 }
 
 export class InvalidSessionError extends Error {

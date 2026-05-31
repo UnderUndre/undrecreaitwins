@@ -39,7 +39,11 @@ export class RateLimiter {
       throw new Error('Max retries exceeded');
     });
 
-    this.peerQueues.set(peerId, nextOp.catch(() => {}));
+    this.peerQueues.set(peerId, nextOp.catch(() => {}).finally(() => {
+      if (this.peerQueues.get(peerId) === nextOp) {
+        this.peerQueues.delete(peerId);
+      }
+    }));
     return nextOp;
   }
 }
