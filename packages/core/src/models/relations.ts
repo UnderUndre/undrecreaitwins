@@ -12,6 +12,7 @@ import { funnelStages } from './funnel-stages.js';
 import { funnelFragments } from './funnel-fragments.js';
 import { funnelSlots } from './funnel-slots.js';
 import { conversationFunnelStates } from './conversation-funnel-states.js';
+import { validatorConfigs, validatorRuns } from './validators.js';
 
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   personas: many(personas),
@@ -21,6 +22,8 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   usageEvents: many(usageEvents),
   apiTokens: many(apiTokens),
   funnelDefinitions: many(funnelDefinitions),
+  validatorConfigs: many(validatorConfigs),
+  validatorRuns: many(validatorRuns),
 }));
 
 export const personasRelations = relations(personas, ({ one, many }) => ({
@@ -34,6 +37,8 @@ export const personasRelations = relations(personas, ({ one, many }) => ({
     fields: [personas.id],
     references: [funnelDefinitions.personaId],
   }),
+  validatorConfigs: many(validatorConfigs),
+  validatorRuns: many(validatorRuns),
 }));
 
 export const conversationsRelations = relations(conversations, ({ one, many }) => ({
@@ -47,13 +52,15 @@ export const conversationsRelations = relations(conversations, ({ one, many }) =
   }),
   messages: many(messages),
   funnelState: one(conversationFunnelStates),
+  validatorRuns: many(validatorRuns),
 }));
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   conversation: one(conversations, {
     fields: [messages.conversationId],
     references: [conversations.id],
   }),
+  validatorRuns: many(validatorRuns),
 }));
 
 export const channelInstancesRelations = relations(channelInstances, ({ one }) => ({
@@ -168,5 +175,35 @@ export const conversationFunnelStatesRelations = relations(conversationFunnelSta
   currentStage: one(funnelStages, {
     fields: [conversationFunnelStates.currentStageId],
     references: [funnelStages.id],
+  }),
+}));
+
+export const validatorConfigsRelations = relations(validatorConfigs, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [validatorConfigs.tenantId],
+    references: [tenants.id],
+  }),
+  persona: one(personas, {
+    fields: [validatorConfigs.personaId],
+    references: [personas.id],
+  }),
+}));
+
+export const validatorRunsRelations = relations(validatorRuns, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [validatorRuns.tenantId],
+    references: [tenants.id],
+  }),
+  persona: one(personas, {
+    fields: [validatorRuns.personaId],
+    references: [personas.id],
+  }),
+  conversation: one(conversations, {
+    fields: [validatorRuns.conversationId],
+    references: [conversations.id],
+  }),
+  message: one(messages, {
+    fields: [validatorRuns.messageId],
+    references: [messages.id],
   }),
 }));

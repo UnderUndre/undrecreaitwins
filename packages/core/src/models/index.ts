@@ -11,6 +11,12 @@ export { funnelStages } from './funnel-stages.js';
 export { funnelFragments, fragmentTypeEnum } from './funnel-fragments.js';
 export { funnelSlots } from './funnel-slots.js';
 export { conversationFunnelStates } from './conversation-funnel-states.js';
+export {
+  validatorConfigs,
+  validatorRuns,
+  validatorModeEnum,
+  validatorVerdictEnum,
+} from './validators.js';
 
 export {
   tenantsRelations,
