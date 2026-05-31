@@ -1,6 +1,9 @@
 import { Queue } from 'bullmq';
-import { db } from '../db.js';
+import { withTenantContext } from '../db.js';
 import { documents } from '../models/documents.js';
+import { eq, and } from 'drizzle-orm';
+import { NotFoundError } from '@undrecreaitwins/shared';
+import type { IngestResult } from '../interfaces/IGroundingEngine.js';
 
 export interface IngestJobData {
   documentId: string;
@@ -15,66 +18,64 @@ export class DocumentService {
   private queue: Queue<IngestJobData>;
 
   constructor() {
-    // Use explicit connection options to avoid multi-version ioredis type conflicts
     this.queue = new Queue('document-ingestion', { 
       connection: {
-        host: 'localhost',
-        port: 6379,
-        ...(process.env.REDIS_URL ? this.parseRedisUrl(process.env.REDIS_URL) : {})
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
       }
     });
   }
 
-  private parseRedisUrl(url: string) {
-    try {
-      const u = new URL(url);
-      return {
-        host: u.hostname,
-        port: parseInt(u.port, 10) || 6379,
-        password: u.password,
-      };
-    } catch {
-      return {};
-    }
-  }
-
   async ingest(
-    content: Buffer,
-    meta: { filename: string; mimeType: string; sizeBytes: number },
     tenantId: string,
     personaId: string,
-  ) {
-    // 1. Create document record in PENDING state
-    const [doc] = await db.insert(documents).values({
-      tenantId,
-      personaId,
-      filename: meta.filename,
-      mimeType: meta.mimeType,
-      sizeBytes: meta.sizeBytes,
-      status: 'pending',
-    }).returning();
+    file: { filename: string; mimeType: string; buffer: Buffer }
+  ): Promise<IngestResult> {
+    return withTenantContext(tenantId, async (tx) => {
+      const [doc] = await tx
+        .insert(documents)
+        .values({
+          tenantId,
+          personaId,
+          filename: file.filename,
+          mimeType: file.mimeType,
+          sizeBytes: file.buffer.length,
+          status: 'pending',
+        })
+        .returning({ id: documents.id, status: documents.status });
 
-    if (!doc) {
-      throw new Error('Failed to create document record');
-    }
+      if (!doc) throw new Error('Failed to create document');
 
-    // 2. Enqueue the job
-    await this.queue.add('ingest', {
-      documentId: doc.id,
-      tenantId,
-      personaId,
-      filename: meta.filename,
-      mimeType: meta.mimeType,
-      contentBase64: content.toString('base64'),
+      await this.queue.add('ingest', {
+        documentId: doc.id,
+        tenantId,
+        personaId,
+        filename: file.filename,
+        mimeType: file.mimeType,
+        contentBase64: file.buffer.toString('base64'),
+      });
+
+      return { documentId: doc.id, status: doc.status as any };
     });
-
-    return { documentId: doc.id, status: doc.status };
   }
 
-  async getDocumentStatus(documentId: string) {
-    const doc = await db.query.documents.findFirst({
-      where: (docs, { eq }) => eq(docs.id, documentId),
+  async list(tenantId: string, personaId: string) {
+    return withTenantContext(tenantId, async (tx) => {
+      return tx
+        .select()
+        .from(documents)
+        .where(and(eq(documents.tenantId, tenantId), eq(documents.personaId, personaId)));
     });
-    return doc ? doc.status : null;
+  }
+
+  async delete(tenantId: string, id: string): Promise<void> {
+    await withTenantContext(tenantId, async (tx) => {
+      const [deleted] = await tx
+        .delete(documents)
+        .where(eq(documents.id, id))
+        .returning({ id: documents.id });
+      
+      if (!deleted) throw new NotFoundError('Document', id);
+    });
   }
 }

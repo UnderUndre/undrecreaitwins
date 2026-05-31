@@ -24,6 +24,10 @@ export class GroundingEngine implements IGroundingEngine {
     twinId: string,
   ): Promise<IngestResult> {
     // twinId is personaId in the substrate
-    return this.documentService.ingest(document, meta, tenantId, twinId);
+    return this.documentService.ingest(tenantId, twinId, {
+      filename: meta.filename,
+      mimeType: meta.mimeType,
+      buffer: document,
+    });
   }
 }

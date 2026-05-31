@@ -38,9 +38,21 @@
       "types": "./dist/services/embedding-service.d.ts",
       "default": "./dist/services/embedding-service.js"
     },
+    "./services/index.js": {
+      "types": "./dist/services/index.d.ts",
+      "default": "./dist/services/index.js"
+    },
     "./services/document-service.js": {
       "types": "./dist/services/document-service.d.ts",
       "default": "./dist/services/document-service.js"
+    },
+    "./services/annotation-service.js": {
+      "types": "./dist/services/annotation-service.d.ts",
+      "default": "./dist/services/annotation-service.js"
+    },
+    "./services/langfuse-service.js": {
+      "types": "./dist/services/langfuse-service.d.ts",
+      "default": "./dist/services/langfuse-service.js"
     },
     "./services/channel-transport.js": {
       "types": "./dist/services/channel-transport.d.ts",
@@ -90,6 +102,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "validate": "tsc --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
@@ -102,6 +115,7 @@
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.2.0",
     "ioredis": "^5.4.0",
+    "langfuse": "^3.38.20",
     "natural": "^8.1.1",
     "officeparser": "^7.1.0",
     "pino": "^9.6.0",
