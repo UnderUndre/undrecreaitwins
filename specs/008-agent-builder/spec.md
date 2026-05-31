@@ -92,7 +92,10 @@ The engine emits a **trace** (and optional scores) to Langfuse for each reply. O
 - Document limits: max 10 MB/file, PDF/DOCX/TXT only, ≤10 files per assistant; oversized/unsupported rejected at the UI.
 - Conflicting corrections for the same normalized question → normalized exact upsert (lowercase, trim, collapse whitespace); newest wins.
 - Partial multi-annotation match → inject only the single highest-scoring match above threshold (no merging in MVP).
-- Langfuse unavailable → trace emission is **fire-and-forget / non-blocking** and fails open (never breaks or delays the reply path).
+- Langfuse unavailable → trace emission is **fire-and-forget / non-blocking** and fails open (never breaks or delays the reply path). Implementation MUST attach an internal `.catch()` so a network failure never becomes an `UnhandledPromiseRejection` (gemini F5).
+- Embedding/TEI service unavailable **during a reply** → annotation retrieval **fails open**: skip few-shot injection and generate normally, under a strict timeout (~500 ms). Core chat MUST survive a TEI outage (gemini F1).
+- Assistant with **zero annotations** → reply path skips embed+retrieve entirely via the `hasAnnotations` guard — no wasted embedding call per message (gemini F2).
+- Document/persona **deleted while its parse job is queued/running** → the BullMQ worker treats the resulting Postgres FK violation (CASCADE, code `23503`) as a graceful abort, not a retryable failure (gemini F6).
 - Sandbox vs production side-effects → all production effects gated on `isTestThread`/`source`.
 
 ## Requirements *(mandatory)*
@@ -101,7 +104,8 @@ The engine emits a **trace** (and optional scores) to Langfuse for each reply. O
 
 - **FR-001** `[ENGINE]`: The system MUST persist operator corrections as **Annotations** linked to an assistant, performing a normalized-exact upsert on the question (lowercase, trim, collapse whitespace) to avoid conflicting rules.
 - **FR-002** `[ENGINE]`: Each annotation's normalized question MUST be vectorized for semantic retrieval, isolated from knowledge-base document vectors (separate namespace/filter).
-- **FR-003** `[ENGINE]`: Before generation, the reply path MUST retrieve relevant annotations above a configurable similarity threshold (default 0.70) and inject the top match(es) as a dedicated few-shot section in the prompt (after KB context, before script fragments; max 3).
+- **FR-002a** `[ENGINE]`: The persona MUST carry a `hasAnnotations` flag (default `false`), toggled `true` on the first annotation upsert and re-evaluated on delete. The reply path uses it as a hot-path guard to skip embedding/retrieval for assistants with zero annotations (gemini F2).
+- **FR-003** `[ENGINE]`: Before generation, the reply path MUST retrieve relevant annotations above a configurable similarity threshold (default 0.70) and inject the top match(es) as a dedicated few-shot section in the prompt (after KB context, before script fragments; max 3). Retrieval MUST **fail open** (gemini F1): on embedding/TEI error or timeout (~500 ms), log and skip few-shot injection, then generate normally — the core chat MUST survive a TEI outage. Retrieval MUST be **skipped entirely** when the assistant has no annotations (`hasAnnotations = false`, FR-002a) — no embedding call on every query (gemini F2).
 - **FR-004** `[ENGINE]`: Deleting an annotation MUST remove its vector from the store.
 - **FR-005** `[ENGINE]`: The vector substrate for annotations and document-RAG MUST be **pgvector** on the engine's existing Postgres (no separate vector service). Document ingestion MUST use a **TS-native parser** (officeParser or LiteParse) with an OCR fallback; a Python OCR sidecar (PaddleOCR/Docling) is an optional later upgrade only if scanned/complex-table documents dominate. Embeddings MUST use a **multilingual, Russian-capable model** (BGE-M3) with a multilingual reranker (BGE-reranker-v2-m3) for two-stage retrieval, served via the engine's model-provider path.
 - **FR-006** `[PRODUCT]`: The admin MUST provide a multi-step wizard to create/edit an assistant's core fields (name, system prompt, documents); other fields use `defaultAssistantConfig`. Advanced settings deferred.
@@ -119,7 +123,7 @@ The engine emits a **trace** (and optional scores) to Langfuse for each reply. O
 
 ### Key Entities
 
-- **Assistant**: operator-created config — name, system prompt, documents, `annotationSimilarityThreshold`, defaults. (Maps to the engine `persona` or an assistant wrapper — planning decision.)
+- **Assistant**: operator-created config — name, system prompt, documents, `annotationSimilarityThreshold`, `hasAnnotations` (hot-path guard), defaults. (Maps to the engine `persona` or an assistant wrapper — planning decision.)
 - **Annotation**: a correction — `originalQuery` (normalized), `badResponse`, `correctedResponse`, assistant ref, vector. The inference-time few-shot store (engine-owned).
 - **Document**: uploaded file, parsed + vectorized for RAG.
 - **Trace/Score (Langfuse)**: per-reply observability record; human annotations/scores/datasets live here, not in the engine.

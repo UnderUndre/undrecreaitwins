@@ -25,9 +25,9 @@ Agent tags: `[SETUP]` orchestrator · `[DB]` database-architect · `[BE]` backen
 - [ ] T004 [DB] Enable pgvector: `CREATE EXTENSION vector` migration + Drizzle custom `vector(1024)` type in `packages/core/src/db.ts`.
 - [ ] T005 [NOTE] **(coordination, not a build task)** No callLLM extraction in 008 — the shared `llm-client.ts` is owned by **004-validators** (DD-001 / its T003); reuse it *if* a chat-style call is ever needed. 008's model calls are **embeddings + rerank** (`embedding-service.ts`, T006), independent — no three-way refactor.
 - [ ] T006 [BE] `embedding-service.ts`: client calling the **TEI sidecar** (T002) that serves **BGE-M3** (embed) + **BGE-reranker-v2-m3** (rerank) over HTTP. (Use the model proxy only if it is confirmed to expose `/embeddings` — recon found it chat-only, so default to the sidecar.) **Net-new, long pole — de-risk first.**
-- [ ] T007 [DB] Models: `documents`, `document_chunks`, `annotations` + `personas.annotationSimilarityThreshold`; re-export `models/index.ts` + `relations.ts` + `drizzle-kit generate`.
+- [ ] T007 [DB] Models: `documents`, `document_chunks`, `annotations` + `personas.annotationSimilarityThreshold` + `personas.hasAnnotations` (bool, default false — hot-path guard, gemini F2); re-export `models/index.ts` + `relations.ts` + `drizzle-kit generate`.
 - [ ] T008 [DB] Reviewed `.sql`: RLS policies + HNSW cosine indexes on `annotations.embedding`, `document_chunks.embedding`.
-- [ ] T009 [BE] `langfuse-service.ts`: fire-and-forget trace + one-way dataset push helpers (never block/throw on reply path).
+- [ ] T009 [BE] `langfuse-service.ts`: fire-and-forget trace + one-way dataset push helpers (never block/throw on reply path). **(gemini F5)** Every fire-and-forget call MUST attach `.catch(err => logger.warn({ err }, 'langfuse emit failed'))` internally — no floating promise (an `UnhandledPromiseRejection` crashes Node).
 
 **Checkpoint**: substrate ready — stories can begin.
 
@@ -36,9 +36,9 @@ Agent tags: `[SETUP]` orchestrator · `[DB]` database-architect · `[BE]` backen
 **Goal**: correction → vectorize → retrieve → few-shot inject → corrected answer.
 **Independent test**: submit correction via API, re-ask, get corrected answer; verdict recorded.
 
-- [ ] T010 [BE] [US1] `annotation-service.ts`: normalized upsert (lower/trim/collapse), vectorize via T006, delete + vector cleanup (FR-001/002/004).
+- [ ] T010 [BE] [US1] `annotation-service.ts`: normalized upsert (lower/trim/collapse), vectorize via T006, delete + vector cleanup (FR-001/002/004). **(gemini F2)** On first upsert set `persona.hasAnnotations = true`; on delete, if the persona's annotation count reaches 0, set it back to `false` (same transaction).
 - [ ] T011 [BE] [US1] `routes/annotations.ts` (POST/GET/DELETE, inline Zod, AppError) + **wire into `buildServer()`** (FR-001).
-- [ ] T012 [BE] [US1] `chat-service.buildSystemPrompt` (:315): retrieve top-k annotations (embed→pgvector cosine→rerank→threshold ≥ persona.annotationSimilarityThreshold) → inject ≤3 few-shot block after KB, before fragments (FR-003/017).
+- [ ] T012 [BE] [US1] `chat-service.buildSystemPrompt` (:315): retrieve top-k annotations (embed→pgvector cosine→rerank→threshold ≥ persona.annotationSimilarityThreshold) → inject ≤3 few-shot block after KB, before fragments (FR-003/017). **(gemini F2)** Pre-check `persona.hasAnnotations` first — if `false`, SKIP embed+retrieve entirely (no TEI call). **(gemini F1)** Wrap embed+retrieve in try-catch with a strict ~500 ms timeout; on TEI/embedding error or timeout → log + skip few-shot and proceed with generation. The reply MUST NOT fail because few-shot search failed.
 - [ ] T013 [BE] [US1] One-way push corrections → Langfuse dataset; store `langfuseDatasetItemId` (FR-012).
 - [ ] T014 [BE] [US1] Integration test (vi.mock LLM+embed): correction → re-ask → corrected answer (SC-003); threshold filtering ignores low matches.
 - [ ] T015 [E2E] [US1] Retrieval precision test on 20-question set (SC-005).
@@ -50,7 +50,7 @@ Agent tags: `[SETUP]` orchestrator · `[DB]` database-architect · `[BE]` backen
 **Goal**: every reply emits a Langfuse trace; ops measures from Langfuse.
 **Independent test**: reply → trace appears; Langfuse-down → reply unaffected.
 
-- [ ] T016 [BE] [US4] Wire trace emit at `chat-service.emitUsageEvent` (:109): model, resolved prompt, latency, tokens, tenant+assistant tags — fire-and-forget (FR-010).
+- [ ] T016 [BE] [US4] Wire trace emit at `chat-service.emitUsageEvent` (:109): model, resolved prompt, latency, tokens, tenant+assistant tags — fire-and-forget (FR-010) via the T009 helper (errors swallowed + logged, never an unhandled rejection — gemini F5).
 - [ ] T017 [E2E] [US4] Test: reply produces trace; simulate Langfuse-down → zero reply-path failure (SC-006).
 
 ## Phase 5: User Story 2 — Agent builder wizard (P1)
@@ -59,8 +59,8 @@ Agent tags: `[SETUP]` orchestrator · `[DB]` database-architect · `[BE]` backen
 **Independent test**: run wizard, upload PDF, save → assistant + chunks persisted.
 
 - [ ] T018 [BE] [US2] `routes/assistants.ts`: create/update core (name, prompt, threshold) — extend `/v1/personas` or new `/v1/assistants`; wire into `buildServer()` (FR-006).
-- [ ] T019 [BE] [US2] `routes/documents.ts`: upload (enqueue BullMQ), GET, DELETE; enforce ≤10MB / PDF·DOCX·TXT / ≤10 per assistant (FR-007).
-- [ ] T020 [BE] [US2] `document-service.ts` + BullMQ worker in `packages/training`: officeParser parse → **chunk (recursive splitter, ~512-token chunks, ~10% overlap)** → embed (T006) → store `document_chunks` (FR-007).
+- [ ] T019 [BE] [US2] `routes/documents.ts`: upload (enqueue BullMQ), GET, DELETE; enforce ≤10MB / PDF·DOCX·TXT / ≤10 per assistant (FR-007). **(gemini F4)** Set route `bodyLimit` ≥10 MB (Fastify default is 1 MB → pre-handler 413); use `@fastify/multipart` streaming to temp/disk (not a full in-memory buffer); cap concurrent parses to bound memory (OOM guard against 10×10 MB).
+- [ ] T020 [BE] [US2] `document-service.ts` + BullMQ worker in `packages/training`: officeParser parse → **chunk (recursive splitter, ~512-token chunks, ~10% overlap)** → embed (T006) → store `document_chunks` (FR-007). **(gemini F3)** Worker MUST run as a BullMQ **sandboxed processor** (separate Node process via processor-file path) or use worker threads, so officeParser/chunking never blocks the API event loop. **(gemini F6)** Catch Postgres FK violation (code `23503`) from a CASCADE-deleted document/persona as a graceful abort — no retry, no alert noise.
 - [ ] T021 [FE] [US2] Wizard UI (name/prompt/docs upload) in `apps/web/app/(dashboard)/assistants/builder/` via engine-client.
 - [ ] T022 [E2E] [US2] Integration: create assistant + upload PDF → chunks stored (SC-001).
 

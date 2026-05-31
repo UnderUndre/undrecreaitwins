@@ -119,6 +119,12 @@ specs/008-agent-builder/
 | Langfuse ops (+ClickHouse) | MED | Self-host compose; emission fire-and-forget so engine never hard-depends. |
 | 003-funnels lands later and also injects into prompt | LOW | Inject order documented (annotation before fragments); coexist by design. |
 | `buildServer()` route-registration gap | LOW | Known — wire new routes explicitly (T-task). |
+| **TEI down on reply path** (gemini F1) | **HIGH** | Annotation retrieval fails open: try-catch + ~500 ms timeout in `buildSystemPrompt` (T012); skip few-shot, generate normally. Core chat survives TEI outage. |
+| **Embedding every query** (gemini F2) | MED | `persona.hasAnnotations` guard (toggled on upsert/delete, T010) skips embed+retrieve when zero annotations (T012). |
+| **Event-loop starvation parsing 10 MB docs** (gemini F3) | HIGH | BullMQ **sandboxed processor** (separate Node process) / worker threads — parsing off the API loop (T020). |
+| **Fastify bodyLimit + OOM** (gemini F4) | HIGH | Route `bodyLimit` ≥10 MB; `@fastify/multipart` streaming to disk; bounded parse concurrency (T019). |
+| **Unhandled rejection (fire-and-forget)** (gemini F5) | MED | `.catch()` inside `langfuse-service` helper (T009); no floating rejection. |
+| **Orphaned BullMQ job vs CASCADE** (gemini F6) | LOW | Worker treats PG FK violation `23503` as graceful abort — no retry/alert (T020). |
 
 ## Post-Design Constitution Re-check
 

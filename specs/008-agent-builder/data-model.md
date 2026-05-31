@@ -13,6 +13,7 @@ Existing: `id, tenantId, name, slug, systemPrompt, traits(jsonb), modelPreferenc
 | Column | Type | Notes |
 |--------|------|-------|
 | `annotationSimilarityThreshold` | `real` | default **0.70**; tunable without redeploy (FR-014). |
+| `hasAnnotations` | `boolean` | default **false**; toggled `true` on first annotation upsert, re-evaluated on delete. Hot-path guard (gemini F2) — reply path skips embed/retrieve when `false`. |
 
 No new table — the wizard writes the existing persona fields (FR-006) + this column.
 
@@ -91,7 +92,7 @@ Mirrors `drizzle/rls/001_enable_rls.sql`. Verified by a tenant-isolation integra
 ## Migration order (one reviewed `.sql`)
 
 1. `CREATE EXTENSION IF NOT EXISTS vector;`
-2. `ALTER TABLE personas ADD COLUMN annotation_similarity_threshold real NOT NULL DEFAULT 0.70;`
+2. `ALTER TABLE personas ADD COLUMN annotation_similarity_threshold real NOT NULL DEFAULT 0.70, ADD COLUMN has_annotations boolean NOT NULL DEFAULT false;`
 3. `CREATE TABLE documents …; document_chunks …; annotations …;`
 4. HNSW indexes on the two `embedding` columns.
 5. RLS enable + policies on the three new tables.

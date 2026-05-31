@@ -5,17 +5,17 @@
 
 ## Summary
 
-Implementation of the RAG-module (Retrieval-Augmented Generation) at the Engine level (`undrecreaitwins`) to support LLM factual accuracy. It integrates with pgvector and parses complex documents using TS-native libraries. It shares the pgvector substrate and BGE-M3 embedding services with the `008-agent-builder` feature to avoid duplication.
+005 is a RETRIEVAL layer over the shared `008-agent-builder` substrate (pgvector + TEI embedding-service: BGE-M3 + BGE-reranker-v2-m3). It does NOT build its own ingest pipeline: ingestion delegates to 008's document-service (async BullMQ); 005 owns vector+reranker retrieval and LLM context formatting. Hybrid full-text search is deferred (spec §11).
 
 ## Technical Context
 
 **Language/Version**: TypeScript, Node.js
-**Primary Dependencies**: `pgvector` (via Drizzle ORM), `officeParser`
+**Primary Dependencies**: `pgvector` (via Drizzle ORM); shared 008 embedding-service (TEI: BGE-M3 + BGE-reranker-v2-m3). Ingest delegates to 008 `document-service` — 005 ships no parser of its own.
 **Storage**: PostgreSQL (pgvector)
 **Testing**: Jest / Vitest
 **Target Platform**: Node.js backend (`packages/core`)
 **Project Type**: Backend library / Core engine module
-**Constraints**: Must share pgvector and embedding-service with 008. No Qdrant.
+**Constraints**: Shares pgvector + embedding-service with 008. No Qdrant. BLOCKED on 008 substrate (T002/T004/T006/T007/T008; T020 for ingest) — see tasks.md Phase 0. Vector+reranker only; hybrid FTS deferred (spec §11). All DB access via `withTenantContext(tenantId, ...)`.
 
 ## Constitution Check
 
@@ -45,9 +45,9 @@ packages/core/
 ├── src/
 │   ├── services/
 │   │   ├── grounding/
-│   │   │   ├── GroundingEngine.ts
-│   │   │   ├── parsers.ts
-│   │   │   └── hybrid-search.ts
+│   │   │   ├── GroundingEngine.ts      # wires retrieval + ingest adapter
+│   │   │   ├── retrieval.ts            # vector (HNSW cosine) + BGE-reranker-v2-m3
+│   │   │   └── ingest-adapter.ts       # delegates to 008 document-service (BullMQ)
 │   └── interfaces/
 │       └── IGroundingEngine.ts
 └── tests/
@@ -56,4 +56,4 @@ packages/core/
             └── GroundingEngine.test.ts
 ```
 
-**Structure Decision**: The implementation will live entirely within `packages/core`, specifically under a new `grounding` service module that orchestrates parsing, embedding generation (calling the shared embedding-service), and vector storage.
+**Structure Decision**: The implementation lives within `packages/core` under a new `grounding` service module. It orchestrates RETRIEVAL (vector + rerank via the shared embedding-service) and delegates INGEST to 008's document-service. No parsing / embedding / storage is reimplemented here — that is owned by the 008 substrate.
