@@ -69,6 +69,8 @@ const CLASS_TO_ACTION: Record<FalsePromiseClass, string> = {
   action_on_behalf: 'выполнять действия от вашего имени',
 };
 
+const DEFAULT_SYSTEM_PROMPT = 'You are a false-promise validator. Analyze the assistant response and user message to detect commitments the assistant cannot fulfill. Respond in JSON.';
+
 export class FalsePromiseValidator implements ResponseValidator<FalsePromiseConfig> {
   name = 'false-promise';
 
@@ -96,12 +98,13 @@ export class FalsePromiseValidator implements ResponseValidator<FalsePromiseConf
     let judgeVerdict: { verdict: 'append_disclaimer' | 'block' | 'no_op'; confidence: number; reasoning: string };
     
     try {
-      const prompt = this.buildJudgePrompt(reply, context.rawUserMessage || '', matchedPatternClass);
-      const model = config.judgeModel; // Fallback handled in LLMClient
+      const userPrompt = this.buildJudgePrompt(reply, context.rawUserMessage || '', matchedPatternClass);
+      const systemPrompt = (config as any).systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      const model = config.judgeModel;
       
       const [response] = await this.llm.completeBatch([{
-        systemPrompt: 'You are a false-promise validator. Analyze the assistant response and user message to detect commitments the assistant cannot fulfill. Respond in JSON.',
-        userPrompt: prompt,
+        systemPrompt,
+        userPrompt,
         model
       }]);
 
@@ -109,7 +112,10 @@ export class FalsePromiseValidator implements ResponseValidator<FalsePromiseConf
         throw new Error('No response from LLM judge');
       }
 
-      const data = JSON.parse(response.content);
+      // Robust JSON stripping
+      const cleanContent = response.content.replace(/```json\s*|```/g, '').trim();
+      const data = JSON.parse(cleanContent);
+      
       judgeVerdict = {
         verdict: data.verdict,
         confidence: data.confidence,
@@ -131,12 +137,10 @@ export class FalsePromiseValidator implements ResponseValidator<FalsePromiseConf
     }
 
     // T007c: Remediation
-    let decision: VerdictDecision = judgeVerdict.verdict === 'no_op' ? 'no_op' : 'append_disclaimer';
+    let decision: VerdictDecision = 'no_op';
     
     if (judgeVerdict.verdict !== 'no_op' && judgeVerdict.confidence >= (config.minConfidence ?? 0.7)) {
        decision = config.remediation === 'block' ? 'block' : 'append_disclaimer';
-    } else {
-       decision = 'no_op';
     }
 
     const mutatedText = (decision !== 'no_op') ? this.applyRemediation(reply, matchedPatternClass, context) : reply;

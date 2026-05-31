@@ -8,15 +8,28 @@ import {
 
 // --- Homoglyph normalisation ---
 
-const HOMOGLYPH_MAP: Record<string, string> = {
+const LATIN_TO_CYRILLIC: Record<string, string> = {
   a: 'а', A: 'А', c: 'с', C: 'С', e: 'е', E: 'Е', o: 'о', O: 'О', p: 'р', P: 'Р', x: 'х', X: 'Х', y: 'у', Y: 'У', k: 'к', K: 'К', H: 'Н', B: 'В', M: 'М', T: 'Т',
 };
 
-function normaliseHomoglyphs(s: string): string {
+const CYRILLIC_TO_LATIN: Record<string, string> = {
+  'а': 'a', 'А': 'A', 'с': 'c', 'С': 'C', 'е': 'e', 'Е': 'E', 'о': 'o', 'О': 'O', 'р': 'p', 'Р': 'P', 'х': 'x', 'Х': 'X', 'у': 'y', 'У': 'Y', 'к': 'k', 'К': 'K', 'Н': 'H', 'В': 'B', 'М': 'M', 'Т': 'T',
+};
+
+function normaliseToCyrillic(s: string): string {
+  if (!/[a-zA-Z]/.test(s)) return s;
+  let out = '';
+  for (const ch of s) {
+    out += LATIN_TO_CYRILLIC[ch] ?? ch;
+  }
+  return out;
+}
+
+function normaliseToLatin(s: string): string {
   if (!/[Ѐ-ӿ]/.test(s)) return s;
   let out = '';
   for (const ch of s) {
-    out += HOMOGLYPH_MAP[ch] ?? ch;
+    out += CYRILLIC_TO_LATIN[ch] ?? ch;
   }
   return out;
 }
@@ -57,13 +70,10 @@ export class FormatInjectionValidator implements InputValidator<FormatInjectionC
     const startTime = Date.now();
     const { config } = context;
 
-    // FR-022: length cap before regex evaluation
     const maxChars = config.maxInputChars || 8000;
     const truncatedInput = input.slice(0, maxChars);
     
     let rewritten = truncatedInput;
-    const normalised = normaliseHomoglyphs(truncatedInput);
-    let rewrittenNorm = normalised;
     const matchedLabels: string[] = [];
 
     // 1) Block-strip role tags
@@ -71,7 +81,6 @@ export class FormatInjectionValidator implements InputValidator<FormatInjectionC
     if (blockStripped !== rewritten) {
       matchedLabels.push('role_tag_block');
       rewritten = blockStripped;
-      rewrittenNorm = rewrittenNorm.replace(ROLE_TAG_BLOCK_STRIP, ' ');
     }
 
     // 2) Global role-tag tokens
@@ -79,44 +88,48 @@ export class FormatInjectionValidator implements InputValidator<FormatInjectionC
       const next = rewritten.replace(re, ' ');
       if (next !== rewritten) {
         rewritten = next;
-        rewrittenNorm = rewrittenNorm.replace(re, ' ');
         matchedLabels.push('role_tag_token');
       }
     }
 
-    // 3) Instructions patterns
-    const allPatterns = [...RU_PATTERNS, ...EN_PATTERNS];
-    for (const re of allPatterns) {
-      // Use non-global for detection on normalised
+    // 3) Instructions patterns (Bidirectional normalisation)
+    
+    // Russian check (normalise input to Cyrillic)
+    const normalisedRU = normaliseToCyrillic(rewritten);
+    let ruMatched = false;
+    let ruStripped = normalisedRU;
+    for (const re of RU_PATTERNS) {
       const detectRe = new RegExp(re.source, re.flags.replace(/[gy]/g, ''));
-      if (!detectRe.test(normalised)) continue;
-
-      matchedLabels.push('instruction_injection');
-
-      // Use global for stripping on both
-      const stripRe = new RegExp(re.source, `${re.flags.replace(/[gy]/g, '')}g`);
-      const stripped = rewritten.replace(stripRe, ' ');
-      const strippedNorm = rewrittenNorm.replace(stripRe, ' ');
-
-      if (stripped !== rewritten) {
-        rewritten = stripped;
-        rewrittenNorm = strippedNorm;
-      } else if (strippedNorm !== rewrittenNorm) {
-        // Homoglyph-only match
-        rewritten = strippedNorm;
-        rewrittenNorm = strippedNorm;
+      if (detectRe.test(normalisedRU)) {
+        ruMatched = true;
+        matchedLabels.push('instruction_injection_ru');
+        const stripRe = new RegExp(re.source, `${re.flags.replace(/[gy]/g, '')}g`);
+        ruStripped = ruStripped.replace(stripRe, ' ');
       }
+    }
+    if (ruMatched) {
+      rewritten = ruStripped;
+    }
+
+    // English check (normalise current state to Latin)
+    const normalisedEN = normaliseToLatin(rewritten);
+    let enMatched = false;
+    let enStripped = normalisedEN;
+    for (const re of EN_PATTERNS) {
+      const detectRe = new RegExp(re.source, re.flags.replace(/[gy]/g, ''));
+      if (detectRe.test(normalisedEN)) {
+        enMatched = true;
+        matchedLabels.push('instruction_injection_en');
+        const stripRe = new RegExp(re.source, `${re.flags.replace(/[gy]/g, '')}g`);
+        enStripped = enStripped.replace(stripRe, ' ');
+      }
+    }
+    if (enMatched) {
+      rewritten = enStripped;
     }
 
     rewritten = rewritten.replace(/\s+/g, ' ').trim();
-
     const decision: VerdictDecision = matchedLabels.length > 0 ? 'strip' : 'pass';
-    
-    // FR-024: Empty-input guard - handled in decision or mutatedText
-    // If stripped to empty, we mark it.
-    if (decision === 'strip' && !rewritten) {
-       // Orchestrator or caller should handle empty string
-    }
 
     return {
       verdict: {
