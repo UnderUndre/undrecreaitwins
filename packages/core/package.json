@@ -34,6 +34,18 @@
       "types": "./dist/services/chat-service.d.ts",
       "default": "./dist/services/chat-service.js"
     },
+    "./services/embedding-service.js": {
+      "types": "./dist/services/embedding-service.d.ts",
+      "default": "./dist/services/embedding-service.js"
+    },
+    "./services/document-service.js": {
+      "types": "./dist/services/document-service.d.ts",
+      "default": "./dist/services/document-service.js"
+    },
+    "./services/channel-transport.js": {
+      "types": "./dist/services/channel-transport.d.ts",
+      "default": "./dist/services/channel-transport.js"
+    },
     "./middleware/tenant.js": {
       "types": "./dist/middleware/tenant.d.ts",
       "default": "./dist/middleware/tenant.js"
@@ -57,6 +69,22 @@
     "./services/funnel/scorer.js": {
       "types": "./dist/services/funnel/scorer.d.ts",
       "default": "./dist/services/funnel/scorer.js"
+    },
+    "./services/grounding/GroundingEngine.js": {
+      "types": "./dist/services/grounding/GroundingEngine.d.ts",
+      "default": "./dist/services/grounding/GroundingEngine.js"
+    },
+    "./models/types.js": {
+      "types": "./dist/models/types.d.ts",
+      "default": "./dist/models/types.js"
+    },
+    "./models/documents.js": {
+      "types": "./dist/models/documents.d.ts",
+      "default": "./dist/models/documents.js"
+    },
+    "./models/annotations.js": {
+      "types": "./dist/models/annotations.d.ts",
+      "default": "./dist/models/annotations.js"
     }
   },
   "scripts": {
@@ -70,10 +98,12 @@
   "dependencies": {
     "@undrecreaitwins/memory": "workspace:*",
     "@undrecreaitwins/shared": "workspace:*",
+    "bullmq": "^5.34.0",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.2.0",
     "ioredis": "^5.4.0",
     "natural": "^8.1.1",
+    "officeparser": "^7.1.0",
     "pino": "^9.6.0",
     "postgres": "^3.4.0",
     "zod": "^3.24.0"
