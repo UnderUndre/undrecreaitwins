@@ -5,10 +5,12 @@ import { PersonaRepository } from './persona-repository.js';
 import { FunnelRuntime } from './funnel/funnel-runtime.js';
 import { FunnelRepository } from './funnel/funnel-repository.js';
 import { FragmentScorer } from './funnel/scorer.js';
+import { LLMClient } from './llm-client.js';
+import { ValidatorPipeline } from './validators/pipeline.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { withTenantContext } from '../db.js';
 import { conversations, messages, usageEvents } from '../models/index.js';
-import { ServiceUnavailableError, AppError, NotFoundError } from '@undrecreaitwins/shared';
+import { ServiceUnavailableError, NotFoundError } from '@undrecreaitwins/shared';
 import type { PersonaTraits, ModelPreferences, StreamChunk, FunnelSelectionMetadata } from '@undrecreaitwins/shared';
 
 interface ChatRequest {
@@ -59,6 +61,8 @@ type PersonaRow = {
 const personaRepo = new PersonaRepository();
 const letta = new LettaClient();
 const funnelRepo = new FunnelRepository();
+const llm = new LLMClient();
+const validatorPipeline = new ValidatorPipeline(llm);
 const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : undefined;
 const funnelRuntime = new FunnelRuntime(funnelRepo, (config) => new FragmentScorer(config), redis as any);
 
@@ -75,6 +79,28 @@ export class ChatService {
 
     const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
 
+    // FR-002: Inbound sanitize (pre-generation)
+    const sanitizedUserMessage = await validatorPipeline.validateInput(lastUserMessage, {
+      tenantId: request.tenantId,
+      personaId: persona.id
+    });
+
+    // FR-024: Empty-input guard
+    if (lastUserMessage && !sanitizedUserMessage.trim()) {
+       return {
+         id: randomUUID(),
+         object: 'chat.completion',
+         created: Math.floor(Date.now() / 1000),
+         model: 'system-guard',
+         choices: [{
+           index: 0,
+           message: { role: 'assistant', content: "I'm sorry, I couldn't process your request. Could you please rephrase it?" },
+           finish_reason: 'stop',
+         }],
+         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+       };
+    }
+
     const conversationId = await this.findOrCreateConversation(
       request.tenantId,
       persona.id,
@@ -86,7 +112,7 @@ export class ChatService {
       request.tenantId,
       persona.id,
       conversationId,
-      lastUserMessage
+      sanitizedUserMessage
     );
 
     if (funnelResult.scriptedReply) {
@@ -140,7 +166,7 @@ export class ChatService {
     }
 
     const startTime = Date.now();
-    const llmResponse = await this.callLLM({
+    const llmResponse = await llm.complete({
       messages: allMessages,
       temperature: request.temperature ?? persona.modelPreferences?.temperature,
       maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
@@ -148,11 +174,19 @@ export class ChatService {
     });
     const latencyMs = Date.now() - startTime;
 
+    // FR-001: Response validation (post-generation)
+    const finalContent = await validatorPipeline.validateResponse(llmResponse.content, {
+      tenantId: request.tenantId,
+      personaId: persona.id,
+      conversationId,
+      rawUserMessage: lastUserMessage
+    });
+
     await this.persistMessages(
       request.tenantId,
       conversationId,
       request.messages,
-      llmResponse.content,
+      finalContent,
     );
 
     await this.emitUsageEvent(
@@ -208,12 +242,35 @@ export class ChatService {
 
     const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
 
+    // FR-002: Inbound sanitize (pre-generation)
+    const sanitizedUserMessage = await validatorPipeline.validateInput(lastUserMessage, {
+      tenantId: request.tenantId,
+      personaId: persona.id
+    });
+
+    // FR-024: Empty-input guard
+    if (lastUserMessage && !sanitizedUserMessage.trim()) {
+      const chunk: StreamChunk = {
+        id: randomUUID(),
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: 'system-guard',
+        choices: [{
+          index: 0,
+          delta: { content: "I'm sorry, I couldn't process your request. Could you please rephrase it?" },
+          finish_reason: 'stop',
+        }],
+      };
+      yield chunk;
+      return { completed: true, content: "I'm sorry, I couldn't process your request. Could you please rephrase it?", conversationId, personaId: persona.id };
+    }
+
     // Funnel Processing
     const funnelResult = await funnelRuntime.processMessage(
       request.tenantId,
       persona.id,
       conversationId,
-      lastUserMessage
+      sanitizedUserMessage
     );
 
     if (funnelResult.scriptedReply) {
@@ -275,7 +332,7 @@ export class ChatService {
     const includeUsage = request.streamOptions?.include_usage === true;
 
     try {
-      const generator = this.callLLMStream({
+      const generator = llm.completeStream({
         messages: allMessages,
         temperature: request.temperature ?? persona.modelPreferences?.temperature,
         maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
@@ -316,6 +373,15 @@ export class ChatService {
       return { completed: false, content: accumulatedContent };
     }
 
+    // FR-019: Streaming-bypass telemetry
+    validatorPipeline.recordBypass({
+      tenantId: request.tenantId,
+      personaId: persona.id,
+      conversationId
+    }, accumulatedContent).catch(err => {
+      console.error('[ChatService] Failed to record streaming bypass', err);
+    });
+
     return {
       completed: true,
       content: accumulatedContent,
@@ -328,152 +394,6 @@ export class ChatService {
       },
       metadata: { funnel: funnelResult.metadata }
     };
-  }
-
-  private async *callLLMStream(params: {
-    messages: Array<{ role: string; content: string }>;
-    temperature?: number;
-    maxTokens?: number;
-    model?: string;
-    signal?: AbortSignal;
-  }): AsyncGenerator<StreamChunk> {
-    const providerUrl = process.env.LLM_PROVIDER_URL || 'http://localhost:4000';
-    const model = params.model || process.env.LLM_DEFAULT_MODEL || 'gpt-4o';
-    const streamTimeout = Number(process.env.TWIN_STREAM_TIMEOUT_MS) || 30000;
-
-    const internalAbort = new AbortController();
-
-    let timeoutId: NodeJS.Timeout | undefined;
-    const resetTimeout = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        internalAbort.abort(new AppError('Stream timeout from provider', 503, 'stream_timeout'));
-      }, streamTimeout);
-    };
-
-    if (params.signal) {
-      if (params.signal.aborted) {
-        if (timeoutId) clearTimeout(timeoutId);
-        internalAbort.abort(params.signal.reason);
-      } else {
-        params.signal.addEventListener('abort', () => {
-          if (timeoutId) clearTimeout(timeoutId);
-          internalAbort.abort(params.signal!.reason);
-        }, { once: true });
-      }
-    }
-
-    resetTimeout();
-
-    let response: Response;
-    try {
-      response = await fetch(`${providerUrl}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(process.env.LLM_API_KEY && { Authorization: `Bearer ${process.env.LLM_API_KEY}` }),
-        },
-        body: JSON.stringify({
-          model,
-          messages: params.messages,
-          temperature: params.temperature,
-          max_tokens: params.maxTokens,
-          stream: true,
-          stream_options: { include_usage: true },
-        }),
-        signal: internalAbort.signal,
-      });
-    } catch (err: any) {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (params.signal?.aborted) {
-        return;
-      }
-      if (internalAbort.signal.aborted && !params.signal?.aborted) {
-        throw internalAbort.signal.reason || new AppError('LLM provider connection timeout', 503, 'stream_timeout');
-      }
-      throw err;
-    }
-
-    if (timeoutId) clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new ServiceUnavailableError('LLM provider', `Provider returned ${response.status}`);
-    }
-
-    if (!response.body) {
-      throw new ServiceUnavailableError('LLM provider', 'Provider returned empty response body');
-    }
-
-    resetTimeout();
-
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        resetTimeout();
-
-        buffer += value;
-        if (Buffer.byteLength(buffer, 'utf8') > 65536) {
-          throw new AppError('SSE buffer overflow from provider', 502, 'buffer_overflow');
-        }
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          if (trimmed.startsWith(':')) continue;
-
-          if (trimmed.startsWith('data: ')) {
-            const dataStr = trimmed.slice(6);
-            if (dataStr === '[DONE]') {
-              if (timeoutId) clearTimeout(timeoutId);
-              return;
-            }
-
-            let parsed: StreamChunk;
-            try {
-              parsed = JSON.parse(dataStr) as StreamChunk;
-            } catch {
-              throw new AppError('Malformed SSE chunk from provider', 502, 'parse_error');
-            }
-
-            yield parsed;
-          }
-        }
-      }
-
-      if (buffer.trim()) {
-        const trimmed = buffer.trim();
-        if (trimmed.startsWith('data: ')) {
-          const dataStr = trimmed.slice(6);
-          if (dataStr !== '[DONE]') {
-            let parsed: StreamChunk;
-            try {
-              parsed = JSON.parse(dataStr) as StreamChunk;
-              yield parsed;
-            } catch {}
-          }
-        }
-      }
-    } catch (err: any) {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (params.signal?.aborted) {
-        return;
-      }
-      if (internalAbort.signal.aborted && !params.signal?.aborted) {
-        throw internalAbort.signal.reason || new AppError('LLM provider stream timeout', 503, 'stream_timeout');
-      }
-      throw err;
-    } finally {
-      if (timeoutId) clearTimeout(timeoutId);
-      reader.cancel().catch(() => {});
-      reader.releaseLock();
-    }
   }
 
   private buildSystemPrompt(persona: PersonaRow): string {
@@ -557,52 +477,6 @@ export class ChatService {
         latencyMs,
       });
     });
-  }
-
-  private async callLLM(params: {
-    messages: Array<{ role: string; content: string }>;
-    temperature?: number;
-    maxTokens?: number;
-    model?: string;
-  }): Promise<{
-    content: string;
-    model: string;
-    usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-    finishReason: 'stop' | 'length';
-  }> {
-    const providerUrl = process.env.LLM_PROVIDER_URL || 'http://localhost:4000';
-    const model = params.model || process.env.LLM_DEFAULT_MODEL || 'gpt-4o';
-
-    const response = await fetch(`${providerUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(process.env.LLM_API_KEY && { Authorization: `Bearer ${process.env.LLM_API_KEY}` }),
-      },
-      body: JSON.stringify({
-        model,
-        messages: params.messages,
-        temperature: params.temperature,
-        max_tokens: params.maxTokens,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new ServiceUnavailableError('LLM provider', `Provider returned ${response.status}`);
-    }
-
-    const data = await response.json() as {
-      choices: Array<{ message: { content: string }; finish_reason: string }>;
-      model: string;
-      usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-    };
-
-    return {
-      content: data.choices[0]?.message?.content || '',
-      model: data.model,
-      usage: data.usage,
-      finishReason: (data.choices[0]?.finish_reason as 'stop' | 'length') || 'stop',
-    };
   }
 }
 
