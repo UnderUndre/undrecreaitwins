@@ -8,7 +8,7 @@ const chatService = new ChatService();
 const sandboxChatSchema = z.object({
   model: z.string().min(1),
   messages: z.array(z.object({
-    role: z.enum(['system', 'user', 'assistant']),
+    role: z.enum(['user', 'assistant']),
     content: z.string(),
   })).min(1),
   temperature: z.number().min(0).max(2).optional(),

@@ -111,6 +111,9 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
         .trim();
       try {
         expectedVersion = Number(cleanIfMatch);
+        if (Number.isNaN(expectedVersion)) {
+          throw new Error();
+        }
       } catch {
         throw new ValidationError([
           { field: 'If-Match', message: `Invalid If-Match header value: ${ifMatch}` },
