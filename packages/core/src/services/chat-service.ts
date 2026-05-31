@@ -1,11 +1,15 @@
 import { eq, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
+import { Redis } from 'ioredis';
 import { PersonaRepository } from './persona-repository.js';
+import { FunnelRuntime } from './funnel/funnel-runtime.js';
+import { FunnelRepository } from './funnel/funnel-repository.js';
+import { FragmentScorer } from './funnel/scorer.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { withTenantContext } from '../db.js';
 import { conversations, messages, usageEvents } from '../models/index.js';
 import { ServiceUnavailableError, AppError, NotFoundError } from '@undrecreaitwins/shared';
-import type { PersonaTraits, ModelPreferences, StreamChunk } from '@undrecreaitwins/shared';
+import type { PersonaTraits, ModelPreferences, StreamChunk, FunnelSelectionMetadata } from '@undrecreaitwins/shared';
 
 interface ChatRequest {
   tenantId: string;
@@ -35,6 +39,7 @@ interface ChatResponse {
   metadata?: {
     conversation_id: string;
     degraded_mode?: boolean;
+    funnel?: FunnelSelectionMetadata;
   };
 }
 
@@ -48,11 +53,14 @@ type PersonaRow = {
   modelPreferences: ModelPreferences;
   createdAt: Date;
   updatedAt: Date;
-  version: bigint;
+  version: number;
 };
 
 const personaRepo = new PersonaRepository();
 const letta = new LettaClient();
+const funnelRepo = new FunnelRepository();
+const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : undefined;
+const funnelRuntime = new FunnelRuntime(funnelRepo, (config) => new FragmentScorer(config), redis as any);
 
 export class ChatService {
   async complete(request: ChatRequest): Promise<ChatResponse> {
@@ -61,12 +69,51 @@ export class ChatService {
     }
 
     const persona = await personaRepo.getBySlug(request.tenantId, request.personaSlug) as unknown as PersonaRow;
+    if (!persona) {
+      throw new NotFoundError('Persona', request.personaSlug);
+    }
+
+    const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
 
     const conversationId = await this.findOrCreateConversation(
       request.tenantId,
       persona.id,
       request.messages[0]?.content || '',
     );
+
+    // Funnel Processing
+    const funnelResult = await funnelRuntime.processMessage(
+      request.tenantId,
+      persona.id,
+      conversationId,
+      lastUserMessage
+    );
+
+    if (funnelResult.scriptedReply) {
+      await this.persistMessages(
+        request.tenantId,
+        conversationId,
+        request.messages,
+        funnelResult.scriptedReply,
+      );
+
+      return {
+        id: randomUUID(),
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: 'script-funnel-1.0',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: funnelResult.scriptedReply },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        metadata: {
+          conversation_id: conversationId,
+          funnel: funnelResult.metadata,
+        },
+      };
+    }
 
     const systemPrompt = this.buildSystemPrompt(persona);
     const allMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -131,6 +178,7 @@ export class ChatService {
       metadata: {
         conversation_id: conversationId,
         ...(degradedMode && { degraded_mode: true }),
+        funnel: funnelResult.metadata,
       },
     };
   }
@@ -138,7 +186,7 @@ export class ChatService {
   async *completeStream(
     request: ChatRequest,
     signal?: AbortSignal,
-  ): AsyncGenerator<StreamChunk, { completed: boolean; content: string; conversationId?: string; personaId?: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }> {
+  ): AsyncGenerator<StreamChunk, { completed: boolean; content: string; conversationId?: string; personaId?: string; usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }; metadata?: { funnel?: FunnelSelectionMetadata } }> {
     if (request.messages.length === 0) {
       throw new ServiceUnavailableError('Chat', 'No messages provided');
     }
@@ -157,6 +205,47 @@ export class ChatService {
       persona.id,
       request.messages[0]?.content || '',
     );
+
+    const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
+
+    // Funnel Processing
+    const funnelResult = await funnelRuntime.processMessage(
+      request.tenantId,
+      persona.id,
+      conversationId,
+      lastUserMessage
+    );
+
+    if (funnelResult.scriptedReply) {
+      await this.persistMessages(
+        request.tenantId,
+        conversationId,
+        request.messages,
+        funnelResult.scriptedReply,
+      );
+
+      const chunk: StreamChunk = {
+        id: randomUUID(),
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: 'script-funnel-1.0',
+        choices: [{
+          index: 0,
+          delta: { content: funnelResult.scriptedReply },
+          finish_reason: 'stop',
+        }],
+      };
+      yield chunk;
+
+      return {
+        completed: true,
+        content: funnelResult.scriptedReply,
+        conversationId,
+        personaId: persona.id,
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        metadata: { funnel: funnelResult.metadata }
+      };
+    }
 
     const systemPrompt = this.buildSystemPrompt(persona);
     const allMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
@@ -227,8 +316,6 @@ export class ChatService {
       return { completed: false, content: accumulatedContent };
     }
 
-
-
     return {
       completed: true,
       content: accumulatedContent,
@@ -239,6 +326,7 @@ export class ChatService {
         completion_tokens: 0,
         total_tokens: 0,
       },
+      metadata: { funnel: funnelResult.metadata }
     };
   }
 

@@ -13,7 +13,7 @@ export const personas = pgTable(
     modelPreferences: jsonb('model_preferences').notNull().$type<ModelPreferences>().default({}),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-    version: bigint('version', { mode: 'bigint' }).notNull().default(0n),
+    version: bigint('version', { mode: 'number' }).notNull().default(0),
   },
   (table) => ({
     tenantSlugIdx: uniqueIndex('personas_tenant_slug_idx').on(table.tenantId, table.slug),

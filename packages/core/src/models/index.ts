@@ -6,6 +6,11 @@ export { channelInstances } from './channel-instances.js';
 export { trainingJobs } from './training-jobs.js';
 export { usageEvents } from './usage-events.js';
 export { apiTokens } from './api-tokens.js';
+export { funnelDefinitions, funnelVersions } from './funnels.js';
+export { funnelStages } from './funnel-stages.js';
+export { funnelFragments, fragmentTypeEnum } from './funnel-fragments.js';
+export { funnelSlots } from './funnel-slots.js';
+export { conversationFunnelStates } from './conversation-funnel-states.js';
 
 export {
   tenantsRelations,
@@ -16,4 +21,10 @@ export {
   trainingJobsRelations,
   usageEventsRelations,
   apiTokensRelations,
+  funnelDefinitionsRelations,
+  funnelVersionsRelations,
+  funnelStagesRelations,
+  funnelFragmentsRelations,
+  funnelSlotsRelations,
+  conversationFunnelStatesRelations,
 } from './relations.js';
