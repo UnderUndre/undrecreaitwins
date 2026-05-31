@@ -50,7 +50,14 @@ export interface MtprotoAdapterOptions {
 }
 
 /** Thrown when the session string is invalid/expired/revoked — no retry loop (codex F4). */
-export declare class InvalidSessionError extends Error {}
+export class InvalidSessionError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = 'InvalidSessionError';
+    // Restore the prototype chain so `instanceof` holds under down-level targets.
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
 
 /**
  * Standalone MTProto userbot adapter. Implements the SHARED ChannelAdapter
@@ -67,11 +74,12 @@ export declare class InvalidSessionError extends Error {}
  * Typing indication is INTERNAL (codex F8/§8): start on accepted inbound,
  * refresh every typingIntervalMs, stop on outbound send / timeout. NOT a method.
  */
-export declare class TelegramMtprotoAdapter implements ChannelAdapter {
-  constructor(opts: MtprotoAdapterOptions);
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  onIncoming(handler: (message: ChannelMessage) => Promise<void>): void;
-  send(message: ChannelMessage): Promise<void>;
-  health(): Promise<ChannelHealth>;
+// Contract = constructor shape only (emit-safe; no ambient `declare class`).
+// Concrete implementation lives in packages/channel-telegram-mtproto/src/adapter.ts:
+//   export class TelegramMtprotoAdapter implements ChannelAdapter {
+//     constructor(opts: MtprotoAdapterOptions) { ... }
+//   }
+// The instance IS a canonical ChannelAdapter (connect/disconnect/onIncoming/send/health).
+export interface TelegramMtprotoAdapterConstructor {
+  new (opts: MtprotoAdapterOptions): ChannelAdapter;
 }
