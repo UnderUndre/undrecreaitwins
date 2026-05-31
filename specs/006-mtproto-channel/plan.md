@@ -7,18 +7,18 @@
 
 ## Summary
 
-Adapter (`TwinChannel`) for connecting Telegram userbots to the Engine via MTProto, implementing the `IChannelAdapter` interface. It delegates authentication and session storage to the Product layer (`ai-twins/specs/mtproto-session`), focusing solely on runtime communication: message filtering, rate limits (FloodWait), and typing indicators.
+Standalone adapter (`TelegramMtprotoAdapter`) connecting Telegram userbots to the Engine via MTProto, implementing the **canonical `ChannelAdapter`** from `@undrecreaitwins/shared` and bridging to the Engine over the shared Redis Streams `ChannelTransport` — same process model as `channel-telegram` (Bot API) / `channel-whatsapp` (codex F1/F5). Authentication + session storage delegated to Product (`ai-twins/specs/mtproto-session`); secrets resolved by handle, never raw/logged (codex F4). Runtime concerns: inbound eligibility + loop-prevention (codex F6), idempotency/resync (codex F2), RPC error policy — FloodWait/DC-migration (codex F3), typing.
 
 ## Technical Context
 
 **Language/Version**: TypeScript (Node.js >= 20)  
-**Primary Dependencies**: GramJS (or MTKruto), core Engine types (`IChannelAdapter`)  
-**Storage**: N/A (Session string is provided dynamically via initialization)  
+**Primary Dependencies**: GramJS (`telegram`); `@undrecreaitwins/shared` (canonical `ChannelAdapter`/`ChannelMessage`/`ChannelHealth`); `@undrecreaitwins/core` (`ChannelTransport` — Redis Streams)  
+**Storage**: Redis — idempotency dedup keys `mtproto:dedup:{channelId}` (codex F2). Session string owned by Product (encrypted at rest), resolved by handle — never persisted here (codex F4)  
 **Testing**: Vitest  
 **Target Platform**: Node.js Server  
 **Project Type**: library/module (`packages/channel-telegram-mtproto`)  
 **Performance Goals**: Typing indicator response time < 500ms, strict backoff for rate limits  
-**Constraints**: Avoid account bans via proactive rate limiting (queue up to 50 msgs, drop if FloodWait > 60s); ignore irrelevant chats/users  
+**Constraints**: standalone worker via `ChannelTransport` (no in-process engine coupling); secrets via `SecretResolver` only (redacted logs, at-rest by Product); per-peer FloodWait queue + RPC error policy (retry-after, DC-migration, account circuit-breaker); idempotent inbound (dedup) + reconnect catch-up; inbound eligibility (ignore self/outgoing, edits, media-only, service, channel posts) to prevent reply loops  
 **Scale/Scope**: ~1-3 core classes for MTProto bridging, <500 LOC.
 
 ## Constitution Check
@@ -28,7 +28,7 @@ Adapter (`TwinChannel`) for connecting Telegram userbots to the Engine via MTPro
 - **Principle I-III**: Does not edit generated files.
 - **Principle VI (Cross-AI Review Gate)**: This plan and subsequent tasks will require `/speckit.review` passes from at least 2 external AI reviewers before execution.
 - **Principle VII (Artifact Versioning)**: Snapshot tags will be enforced.
-- **Constraints**: No sensitive data (API keys, session strings) will be hardcoded.
+- **Constraints**: `apiHash`/`sessionString` are bearer credentials — passed only via `SecretResolver` (handle), encrypted at rest by Product, redacted from all logs/errors/metrics; never hardcoded or serialized (codex F4).
 
 ## Project Structure
 
@@ -49,17 +49,24 @@ specs/006-mtproto-channel/
 ```text
 packages/channel-telegram-mtproto/
 ├── src/
-│   ├── adapter.ts       # TwinChannel implementing IChannelAdapter
-│   ├── client.ts        # MTProto connection wrapper
-│   ├── index.ts         # Public exports
-│   └── types.ts         # Options and specific DTOs
+│   ├── adapter.ts       # TelegramMtprotoAdapter implements shared ChannelAdapter (+ ChannelTransport)
+│   ├── client.ts        # MTProto connection wrapper (DC-migration, reconnect catch-up)
+│   ├── eligibility.ts   # inbound filter + peer-id normalization (loop prevention)
+│   ├── rate-limit.ts    # per-peer FloodWait queue + RPC error policy
+│   ├── idempotency.ts   # Redis dedup {channelId, externalMessageId}
+│   ├── secrets.ts       # SecretResolver usage + redaction + InvalidSessionError
+│   ├── index.ts         # Public exports (TelegramMtprotoAdapter)
+│   └── types.ts         # MtprotoAdapterOptions / DTOs (NO local adapter interface)
 ├── test/
-│   └── adapter.spec.ts  # Vitest cases
+│   ├── contract.spec.ts   # implements shared ChannelAdapter + mapping + eligibility
+│   ├── protocol.spec.ts   # FloodWait / migration / non-retryable
+│   ├── recovery.spec.ts   # reconnect / idempotency / no double-reply
+│   └── secrets.spec.ts    # redaction + InvalidSessionError + timer cleanup
 ├── package.json
 └── tsconfig.json
 ```
 
-**Structure Decision**: Created a dedicated `packages/channel-telegram-mtproto` workspace in the monorepo to isolate MTProto dependencies (GramJS/MTKruto) from the core engine.
+**Structure Decision**: Created a dedicated `packages/channel-telegram-mtproto` workspace to isolate MTProto deps (GramJS) from the core engine. It is a **standalone `ChannelAdapter` worker** (codex F5) — implements the shared contract and talks to the Engine only via `ChannelTransport` (Redis Streams), exactly like `channel-telegram` and `channel-whatsapp`. It does NOT run inside the Engine process.
 
 ## Complexity Tracking
 
