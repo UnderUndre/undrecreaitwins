@@ -502,10 +502,17 @@ export class ChatService {
       ];
       await tx.insert(messages).values(rows);
 
+      const hasUserMessage = inboundMessages.some(m => m.role === 'user');
+
       await tx
         .update(conversations)
         .set({
           messageCount: sql`${conversations.messageCount} + ${rows.length}`,
+          lastMessageAt: new Date(),
+          ...(hasUserMessage && {
+            needsReengagement: true,
+            reengagementCount: 0,
+          }),
         })
         .where(eq(conversations.id, conversationId));
     });
