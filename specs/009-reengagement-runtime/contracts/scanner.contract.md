@@ -7,11 +7,11 @@ Identify dormant conversations matching `FollowupRule` criteria and schedule `Fo
 - **Multi-tenant isolation**: A scan for Tenant A must never see or affect conversations/rules of Tenant B.
 - **Dormancy accuracy**: A conversation is dormant if `now() - last_message_at > rule.triggerStaleMinutes`.
 - **Anti-spam**: No more than `rule.maxAttempts` per conversation/rule cycle.
-- **Backoff respect**: No new attempt if `now() - last_attempt_at < backoff[current_count]`.
+- **Backoff respect**: No new attempt if `now() - lastReengagementAt < backoff[reengagementCount]`.
 - **Exclusion**: Skip conversations with `optedOut = true`, status `closed`, or human-handled (operator-assigned) conversations.
 - **No open-attempt re-scan (FR-012)**: Skip conversations that already have an open (`scheduled`/`processing`) `FollowupAttempt` for the rule — never re-fetch a stuck/pending row (prevents batch poisoning).
 - **Cross-rule minInterval (FR-006)**: Skip if `now() - lastReengagementAt < rule.minIntervalMinutes`; schedule **at most one** attempt per conversation per scan even if multiple rules match.
-- **Backoff overflow**: when `attemptCount ≥ len(backoff)`, use the last `backoff` element.
+- **Backoff overflow**: when `reengagementCount ≥ len(backoff)`, use the last `backoff` element.
 - **Conditions (FR-002)**: apply `rule.conditions` per the data-model Conditions schema as extra filters.
 
 ## Operation: `runScan(tenantId)`
@@ -28,7 +28,7 @@ Identify dormant conversations matching `FollowupRule` criteria and schedule `Fo
    - **De-dup across rules**: collapse candidates so at most ONE attempt is scheduled per conversation per scan.
 3. For each candidate:
    - Compute `cycleIndex = reengagementCount` and `idempotencyKey = convId:ruleId:cycleIndex`.
-   - If `attemptCount < maxAttempts` AND `outside_backoff_window`:
+   - If `reengagementCount < rule.maxAttempts` AND `outside_backoff_window`:
      - Insert `FollowupAttempt` with `status='scheduled'` via `ON CONFLICT (idempotencyKey) DO NOTHING` — the UNIQUE constraint is the dedup guard (NO check-then-insert).
 
 ## Performance Contract (SC-004)

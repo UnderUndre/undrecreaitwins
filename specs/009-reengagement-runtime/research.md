@@ -53,7 +53,7 @@ const hook = await llm.complete({
 ## (f) Anti-Spam (FR-006)
 **Rules**:
 1. `maxAttempts`: Stop if `FollowupAttempt` count for (conversation, rule) >= `rule.maxAttempts`.
-2. `backoff`: Next attempt `scheduled_at` = `last_attempt_at + backoff_interval[attempt_count]`.
+2. `backoff`: Next attempt `scheduled_at` = `lastReengagementAt + backoff_interval[reengagementCount]`.
 3. `minInterval`: Ensure at least N hours between any two hooks for the same conversation across all rules.
 
 ## (g) Batching for SC-004

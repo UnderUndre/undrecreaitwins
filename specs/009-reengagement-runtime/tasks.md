@@ -66,7 +66,7 @@
 
 **Goal**: Honor opt-out and backoff/maxAttempts/minInterval constraints.
 
-- [ ] T018 [BE] [US3] Add backoff calculation to `Scanner` using `FollowupRule.backoff`; **overflow**: when `attemptCount ≥ len(backoff)` use the last element (hermes M2).
+- [ ] T018 [BE] [US3] Add backoff calculation to `Scanner` using `FollowupRule.backoff`; **overflow**: when `reengagementCount ≥ len(backoff)` use the last element (hermes M2).
 - [ ] T019 [BE] [US3] Implement `maxAttempts` check in `Scanner`.
 - [ ] T020 [BE] [US3] Ensure the scan query skips `optedOut`, `closed`, and human-handled conversations; maintain the `needsReengagement` lifecycle (clear on opt-out / close / handoff / all-rules-maxed).
 - [ ] T028 [BE] [US3] **Cross-rule anti-spam (FR-006 — hermes H1/H3)**: enforce `minIntervalMinutes` (skip if `now() - lastReengagementAt < minIntervalMinutes`) and schedule **at most ONE** attempt per conversation per scan across all rules. Unit-test: 3 matching rules → 1 hook.

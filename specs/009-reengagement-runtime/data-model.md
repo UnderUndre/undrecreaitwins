@@ -11,7 +11,7 @@ The configuration authored in the Product.
 | tenantId | UUID | Tenant isolation |
 | triggerStaleMinutes | Integer | Minutes of inactivity before trigger |
 | conditions | JSONB | Scan filters per the **Conditions schema** below (e.g. `{"source": "telegram"}`) |
-| backoff | JSONB | Array of minutes for retry backoff (e.g. `[1440, 2880, 4320]`). **Overflow**: when `attemptCount ≥ length`, use the last element. |
+| backoff | JSONB | Array of minutes for retry backoff (e.g. `[1440, 2880, 4320]`). **Overflow**: when `reengagementCount ≥ length`, use the last element. |
 | maxAttempts | Integer | Maximum hooks to send for this rule |
 | minIntervalMinutes | Integer | Cross-rule minimum minutes between ANY two hooks for the same conversation (anti-spam, FR-006). Default 1440 (24 h). |
 | template | Text | Prompt/Template for hook generation |
