@@ -33,3 +33,4 @@
 - [004-validators]: Response and input validators (false-promise, format-injection) via synchronous pipeline.
 - [005-fact-grounding]: RAG runtime using pgvector, BGE-M3 embeddings, and TS-native parsing (shared substrate with 008).
 - [006-mtproto-channel]: MTProto Telegram Userbot adapter (GramJS) with rate-limiting and typing indicators.
+- [009-reengagement-runtime]: Periodic scanner and worker for dormant conversation hooks. Features: BullMQ scheduler, contextual generation, outbound delivery via Redis streams. Shared table ownership with Product (FollowupRule/FollowupAttempt).
