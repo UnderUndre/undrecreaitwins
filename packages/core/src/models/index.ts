@@ -13,6 +13,7 @@ export { funnelSlots } from './funnel-slots.js';
 export { conversationFunnelStates } from './conversation-funnel-states.js';
 export { documents, documentChunks } from './documents.js';
 export { annotations } from './annotations.js';
+export { followupRules, followupAttempts } from './followups.js';
 export {
   validatorConfigs,
   validatorRuns,
