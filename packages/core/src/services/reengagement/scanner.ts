@@ -1,6 +1,6 @@
 import { db } from '../../db.js';
 import { conversations, followupRules, followupAttempts } from '../../models/index.js';
-import { eq, and, lte, gte, or, notInArray, isNull, sql, desc } from 'drizzle-orm';
+import { eq, and, lte, or, notInArray, isNull, sql } from 'drizzle-orm';
 import { FollowupRule } from '@undrecreaitwins/shared';
 
 export class ReengagementScanner {
@@ -118,6 +118,6 @@ export class ReengagementScanner {
   private getBackoffMinutes(backoff: number[], count: number): number {
     if (backoff.length === 0) return 0;
     const index = Math.min(count, backoff.length - 1);
-    return backoff[index];
+    return backoff[index] ?? 0;
   }
 }

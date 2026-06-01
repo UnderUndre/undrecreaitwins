@@ -1,5 +1,5 @@
 import { db } from '../../db.js';
-import { conversations, followupAttempts } from '../../models/index.js';
+import { conversations, followupAttempts, followupRules } from '../../models/index.js';
 import { eq } from 'drizzle-orm';
 import { ChannelTransport } from '../channel-transport.js';
 import { REDIS_STREAMS } from '@undrecreaitwins/shared';
@@ -58,11 +58,20 @@ export class ReengagementDelivery {
       .where(eq(followupAttempts.id, attemptId));
       
     // 6. Update conversation reengagement fields
+    const newCount = convo.reengagementCount + 1;
+
+    const [rule] = await db.select({ maxAttempts: followupRules.maxAttempts })
+      .from(followupRules)
+      .where(eq(followupRules.id, attempt.ruleId))
+      .limit(1);
+
+    const maxReached = rule ? newCount >= rule.maxAttempts : false;
+
     await db.update(conversations)
       .set({
         lastReengagementAt: new Date(),
-        reengagementCount: convo.reengagementCount + 1,
-        // needsReengagement stays true for next cycle unless maxAttempts reached
+        reengagementCount: newCount,
+        needsReengagement: !maxReached,
       })
       .where(eq(conversations.id, convo.id));
   }

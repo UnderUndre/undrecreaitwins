@@ -1,4 +1,4 @@
-import { Worker, Job, Queue } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import { db } from '../../db.js';
 import { followupAttempts, followupRules, conversations } from '../../models/index.js';
 import { eq, and, lte, sql } from 'drizzle-orm';
@@ -87,7 +87,7 @@ export class ReengagementWorker {
     // We claim N attempts at a time
     const batchSize = Number(process.env.TWIN_REENGAGE_WORKERS_BATCH) || 10;
     
-    const attempts = await db.execute(sql`
+    const result = await db.execute(sql`
       UPDATE ${followupAttempts}
       SET status = 'processing', claimed_at = NOW(), updated_at = NOW()
       WHERE id IN (
@@ -101,7 +101,9 @@ export class ReengagementWorker {
       RETURNING *
     `);
 
-    for (const attempt of attempts as any[]) {
+    const attempts = Array.isArray(result) ? result : ((result as Record<string, unknown>).rows || []) as Record<string, unknown>[];
+
+    for (const attempt of attempts) {
       try {
         await this.processAttempt(attempt);
       } catch (err: any) {
@@ -112,36 +114,35 @@ export class ReengagementWorker {
             failureReason: err.message,
             updatedAt: new Date()
           })
-          .where(eq(followupAttempts.id, attempt.id));
+          .where(eq(followupAttempts.id, attempt.id as string));
       }
     }
   }
 
-  private async processAttempt(attempt: any) {
-    // 1. Re-validate eligibility (FR-010)
-    const [convo] = await db.select().from(conversations).where(eq(conversations.id, attempt.conversation_id)).limit(1);
-    const [rule] = await db.select().from(followupRules).where(eq(followupRules.id, attempt.rule_id)).limit(1);
+  private async processAttempt(attempt: Record<string, unknown>) {
+    const [convo] = await db.select().from(conversations).where(eq(conversations.id, attempt.conversation_id as string)).limit(1);
+    const [rule] = await db.select().from(followupRules).where(eq(followupRules.id, attempt.rule_id as string)).limit(1);
 
-    if (!convo || !rule || !rule.is_active || convo.opted_out || convo.status === 'closed' || convo.status === 'operator_assigned') {
+    if (!convo || !rule || !rule.isActive || convo.optedOut || convo.status === 'closed' || convo.status === 'operator_assigned') {
       await db.update(followupAttempts)
         .set({ status: 'expired', updatedAt: new Date() })
-        .where(eq(followupAttempts.id, attempt.id));
+        .where(eq(followupAttempts.id, attempt.id as string));
       return;
     }
 
-    // Check if user replied after scheduling
-    if (convo.last_message_at > attempt.scheduled_at) {
+    const lastMessageTime = convo.lastMessageAt instanceof Date ? convo.lastMessageAt.getTime() : new Date(convo.lastMessageAt as Date).getTime();
+    const scheduledTime = attempt.scheduled_at instanceof Date ? (attempt.scheduled_at as Date).getTime() : new Date(attempt.scheduled_at as string).getTime();
+
+    if (lastMessageTime > scheduledTime) {
       await db.update(followupAttempts)
         .set({ status: 'expired', updatedAt: new Date() })
-        .where(eq(followupAttempts.id, attempt.id));
+        .where(eq(followupAttempts.id, attempt.id as string));
       return;
     }
 
-    // 2. Generate hook
-    await generator.generateHook(attempt.tenant_id, attempt.conversation_id, attempt.rule_id, this.llmTimeoutMs);
+    await generator.generateHook(attempt.tenant_id as string, attempt.conversation_id as string, attempt.rule_id as string, this.llmTimeoutMs);
 
-    // 3. Deliver
-    await delivery.deliver(attempt.id);
+    await delivery.deliver(attempt.id as string);
   }
 
   private async sweepStuckAttempts() {

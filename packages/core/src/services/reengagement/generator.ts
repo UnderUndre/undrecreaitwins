@@ -51,8 +51,7 @@ export class ReengagementGenerator {
     try {
       const response = await llm.complete({
         messages: promptMessages,
-        // Using a reasonable default model if not specified in rule
-        model: 'gpt-4o', 
+        model: process.env.REENGAGEMENT_MODEL || process.env.LLM_DEFAULT_MODEL || 'gpt-4o',
       });
 
       // 5. Persist the hook to messages table
