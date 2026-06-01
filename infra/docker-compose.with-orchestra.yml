@@ -1,38 +1,142 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Twin Engine — Orchestra Compose (engine workers/channels only)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Shared infrastructure (Postgres, Redis, TEI, Qdrant, Langfuse, Letta,
+# Omnitool, Hermes, Traefik) is provided by the orchestra stack —
+# NOT duplicated here.  All external URLs are injected via .env.
+#
+# Usage:
+#   docker compose -f infra/docker-compose.with-orchestra.yml up -d
+#
+# The orchestra stack must be running first and must expose:
+#   - DATABASE_URL  (Postgres with pgvector)
+#   - REDIS_URL     (Redis 7+)
+#   - EMBEDDINGS_URL / RERANK_URL  (TEI sidecars)
+#   - LANGFUSE_*    (optional observability)
+#
+# This file attaches to the orchestra's external network.
+# ═══════════════════════════════════════════════════════════════════════════
+
 services:
+  # ── Engine API ─────────────────────────────────────────────────────────
+
   twin-engine-api:
     build:
       context: ..
-      dockerfile: Dockerfile
+      dockerfile: packages/api/Dockerfile
     ports:
-      - "8090:8090"
-    env_file:
-      - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - "${PORT:-8090}:8090"
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      EMBEDDINGS_URL: ${EMBEDDINGS_URL:-http://tei-embed:80}
+      RERANK_URL: ${RERANK_URL:-http://tei-rerank:80}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/v1/health"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
+    networks:
+      - engine
+      - orchestra
+    restart: unless-stopped
 
-  postgres:
-    image: postgres:16-alpine
-    ports:
-      - "5432:5432"
+  # ── Workers ────────────────────────────────────────────────────────────
+
+  document-worker:
+    build:
+      context: ..
+      dockerfile: packages/training/Dockerfile
+    env_file: .env
     environment:
-      POSTGRES_DB: twinengine
-      POSTGRES_USER: ${POSTGRES_USER:-undre}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-undre}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-undre} -d twinengine"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      EMBEDDINGS_URL: ${EMBEDDINGS_URL:-http://tei-embed:80}
+      RERANK_URL: ${RERANK_URL:-http://tei-rerank:80}
+    networks:
+      - engine
+      - orchestra
+    restart: unless-stopped
 
-volumes:
-  pgdata:
+  # TODO: reengagement-worker — needs entry point + Dockerfile.
+  # Uncomment once packages/core/src/bin/reengage.ts exists.
+  #
+  # reengagement-worker:
+  #   build:
+  #     context: ..
+  #     dockerfile: packages/core/Dockerfile
+  #   command: ["node", "packages/core/dist/bin/reengage.js"]
+  #   env_file: .env
+  #   environment:
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     REDIS_URL: ${REDIS_URL}
+  #     LLM_PROVIDER_URL: ${LLM_PROVIDER_URL}
+  #     TWIN_REENGAGE_CLAIM_TIMEOUT_MS: ${TWIN_REENGAGE_CLAIM_TIMEOUT_MS:-300000}
+  #     TWIN_REENGAGE_LLM_TIMEOUT_MS: ${TWIN_REENGAGE_LLM_TIMEOUT_MS:-30000}
+  #   deploy:
+  #     replicas: ${TWIN_REENGAGE_WORKERS:-4}
+  #   networks:
+  #     - engine
+  #     - orchestra
+  #   restart: unless-stopped
+
+  # ── Channel Adapters ───────────────────────────────────────────────────
+
+  channel-telegram:
+    build:
+      context: ..
+      dockerfile: packages/channel-telegram/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: ${REDIS_URL}
+    command:
+      [
+        "node", "packages/channel-telegram/dist/index.js",
+        "--channel-id", "${TELEGRAM_CHANNEL_ID:-}",
+        "--tenant-id", "${TELEGRAM_TENANT_ID:-}",
+        "--persona-slug", "${TELEGRAM_PERSONA_SLUG:-}",
+        "--bot-token", "${TELEGRAM_BOT_TOKEN:-}",
+        "--redis-url", "${REDIS_URL}",
+      ]
+    networks:
+      - engine
+      - orchestra
+    profiles: ["channels"]
+
+  channel-whatsapp:
+    build:
+      context: ..
+      dockerfile: packages/channel-whatsapp/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: ${REDIS_URL}
+      WEBHOOK_PORT: "${WHATSAPP_WEBHOOK_PORT:-8091}"
+    ports:
+      - "${WHATSAPP_WEBHOOK_PORT:-8091}:${WHATSAPP_WEBHOOK_PORT:-8091}"
+    command:
+      [
+        "node", "packages/channel-whatsapp/dist/index.js",
+        "--channel-id", "${WHATSAPP_CHANNEL_ID:-}",
+        "--tenant-id", "${WHATSAPP_TENANT_ID:-}",
+        "--persona-slug", "${WHATSAPP_PERSONA_SLUG:-}",
+        "--evolution-url", "${EVOLUTION_API_URL:-http://evolution-api:8080}",
+        "--instance-id", "${WHATSAPP_INSTANCE_ID:-}",
+        "--webhook-secret", "${WHATSAPP_WEBHOOK_SECRET:-}",
+        "--redis-url", "${REDIS_URL}",
+      ]
+    networks:
+      - engine
+      - orchestra
+    profiles: ["channels"]
+
+  # TODO: channel-telegram-mtproto (spec 006 — unimplemented).
+
+networks:
+  orchestra:
+    external: true
+    name: ${ORCHESTRA_NETWORK:-orchestra}
+  engine:
+    driver: bridge

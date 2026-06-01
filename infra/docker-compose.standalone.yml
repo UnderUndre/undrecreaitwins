@@ -1,45 +1,44 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Twin Engine — Standalone Compose (all-in-one dev / single-host)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Usage:
+#   docker compose -f infra/docker-compose.standalone.yml up -d
+#
+# Migrations (reviewed .sql — run deliberately, NOT on every up):
+#   docker compose -f infra/docker-compose.standalone.yml --profile migrate run --rm migrate
+#
+# Langfuse is NOT bundled here — it has its own docker-compose.yml
+# (requires ClickHouse).  Set LANGFUSE_* env vars to point at it.
+#
+# For orchestra (shared-infra) mode, see docker-compose.with-orchestra.yml.
+# ═══════════════════════════════════════════════════════════════════════════
+
 services:
-  twin-engine-api:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    ports:
-      - "8090:8090"
-    env_file:
-      - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/v1/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+  # ── Infrastructure ─────────────────────────────────────────────────────
 
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
-      POSTGRES_DB: twinengine
+      POSTGRES_DB: ${POSTGRES_DB:-twinengine}
       POSTGRES_USER: ${POSTGRES_USER:-undre}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-undre}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-undre} -d twinengine"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-undre} -d ${POSTGRES_DB:-twinengine}"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     command: redis-server --appendonly yes
     volumes:
       - redisdata:/data
@@ -49,7 +48,228 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    restart: unless-stopped
+
+  tei-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    ports:
+      - "${TEI_EMBED_PORT:-8080}:80"
+    environment:
+      MODEL_ID: BAAI/bge-m3
+      REVISION: null
+      MAX_BATCH_TOKENS: 16384
+      MAX_CLIENT_BATCH_SIZE: 32
+    volumes:
+      - tei_embed_cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+
+  tei-rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    ports:
+      - "${TEI_RERANK_PORT:-8081}:80"
+    environment:
+      MODEL_ID: BAAI/bge-reranker-v2-m3
+      REVISION: null
+      MAX_BATCH_TOKENS: 16384
+    volumes:
+      - tei_rerank_cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+
+  # ── Optional: one-shot migration runner ────────────────────────────────
+
+  migrate:
+    image: node:20-alpine
+    profiles: ["migrate"]
+    working_dir: /app
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
+    volumes:
+      - ..:/app:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      [
+        "sh", "-c",
+        "npm install -g pnpm && pnpm install && pnpm --filter @undrecreaitwins/core exec drizzle-kit push",
+      ]
+
+  # ── Engine Services ────────────────────────────────────────────────────
+
+  twin-engine-api:
+    build:
+      context: ..
+      dockerfile: packages/api/Dockerfile
+    ports:
+      - "${PORT:-8090}:8090"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
+      REDIS_URL: redis://redis:6379
+      EMBEDDINGS_URL: http://tei-embed:80
+      RERANK_URL: http://tei-rerank:80
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tei-embed:
+        condition: service_healthy
+      tei-rerank:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8090/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  document-worker:
+    build:
+      context: ..
+      dockerfile: packages/training/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
+      REDIS_URL: redis://redis:6379
+      EMBEDDINGS_URL: http://tei-embed:80
+      RERANK_URL: http://tei-rerank:80
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      tei-embed:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # TODO: reengagement-worker needs its own entry point script.
+  # The worker class lives in packages/core/src/services/reengagement/worker.ts
+  # but has no standalone CLI entry (no Dockerfile, no src/bin/reengage.ts).
+  # Uncomment once T0XX creates the entry point.
+  #
+  # reengagement-worker:
+  #   build:
+  #     context: ..
+  #     dockerfile: packages/core/Dockerfile        # TODO: create dedicated Dockerfile
+  #   command: ["node", "packages/core/dist/bin/reengage.js"]
+  #   env_file: .env
+  #   environment:
+  #     DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
+  #     REDIS_URL: redis://redis:6379
+  #     LLM_PROVIDER_URL: ${LLM_PROVIDER_URL}
+  #     TWIN_REENGAGE_CLAIM_TIMEOUT_MS: ${TWIN_REENGAGE_CLAIM_TIMEOUT_MS:-300000}
+  #     TWIN_REENGAGE_LLM_TIMEOUT_MS: ${TWIN_REENGAGE_LLM_TIMEOUT_MS:-30000}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   deploy:
+  #     replicas: ${TWIN_REENGAGE_WORKERS:-4}
+  #   restart: unless-stopped
+
+  # ── Channel Adapters ───────────────────────────────────────────────────
+
+  channel-telegram:
+    build:
+      context: ..
+      dockerfile: packages/channel-telegram/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+    command:
+      [
+        "node", "packages/channel-telegram/dist/index.js",
+        "--channel-id", "${TELEGRAM_CHANNEL_ID:-}",
+        "--tenant-id", "${TELEGRAM_TENANT_ID:-}",
+        "--persona-slug", "${TELEGRAM_PERSONA_SLUG:-}",
+        "--bot-token", "${TELEGRAM_BOT_TOKEN:-}",
+        "--redis-url", "redis://redis:6379",
+      ]
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: ["channels"]
+
+  channel-whatsapp:
+    build:
+      context: ..
+      dockerfile: packages/channel-whatsapp/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      WEBHOOK_PORT: "${WHATSAPP_WEBHOOK_PORT:-8091}"
+    ports:
+      - "${WHATSAPP_WEBHOOK_PORT:-8091}:${WHATSAPP_WEBHOOK_PORT:-8091}"
+    command:
+      [
+        "node", "packages/channel-whatsapp/dist/index.js",
+        "--channel-id", "${WHATSAPP_CHANNEL_ID:-}",
+        "--tenant-id", "${WHATSAPP_TENANT_ID:-}",
+        "--persona-slug", "${WHATSAPP_PERSONA_SLUG:-}",
+        "--evolution-url", "${EVOLUTION_API_URL:-http://evolution-api:8080}",
+        "--instance-id", "${WHATSAPP_INSTANCE_ID:-}",
+        "--webhook-secret", "${WHATSAPP_WEBHOOK_SECRET:-}",
+        "--redis-url", "redis://redis:6379",
+      ]
+    depends_on:
+      redis:
+        condition: service_healthy
+    profiles: ["channels"]
+
+  evolution-api:
+    image: atendai/evolution-api:v2.1.2
+    profiles: ["channels"]
+    ports:
+      - "${EVOLUTION_API_PORT:-8082}:8080"
+    environment:
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${EVOLUTION_DB:-evolution}
+      DATABASE_CONNECTION_DB_NAME: ${EVOLUTION_DB:-evolution}
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379
+      CACHE_REDIS_PREFIX_KEY: evolution
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-changeme}
+      LANGUAGE: en
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - evolution_instances:/evolution/instances
+    restart: unless-stopped
+
+  # TODO: channel-telegram-mtproto (spec 006 — unimplemented).
+  # Uncomment once the MTProto adapter package + Dockerfile exist.
+  #
+  # channel-telegram-mtproto:
+  #   build:
+  #     context: ..
+  #     dockerfile: packages/channel-telegram-mtproto/Dockerfile
+  #   profiles: ["channels"]
 
 volumes:
   pgdata:
   redisdata:
+  tei_embed_cache:
+  tei_rerank_cache:
+  evolution_instances:

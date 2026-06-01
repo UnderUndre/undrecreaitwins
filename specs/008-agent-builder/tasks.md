@@ -61,8 +61,8 @@ Agent tags: `[SETUP]` orchestrator · `[DB]` database-architect · `[BE]` backen
 - [x] T018 [BE] [US2] `routes/assistants.ts`: create/update core (name, prompt, threshold) — extend `/v1/personas` or new `/v1/assistants`; wire into `buildServer()` (FR-006).
 - [x] T019 [BE] [US2] `routes/documents.ts`: upload (enqueue BullMQ), GET, DELETE; enforce ≤10MB / PDF·DOCX·TXT / ≤10 per assistant (FR-007). **(gemini F4)** Set route `bodyLimit` ≥10 MB (Fastify default is 1 MB → pre-handler 413); use `@fastify/multipart` streaming to temp/disk (not a full in-memory buffer); cap concurrent parses to bound memory (OOM guard against 10×10 MB).
 - [x] T020 [BE] [US2] `document-service.ts` + BullMQ worker in `packages/training`: officeParser parse → **chunk (recursive splitter, ~512-token chunks, ~10% overlap)** → embed (T006) → store `document_chunks` (FR-007). **(gemini F3)** Worker MUST run as a BullMQ **sandboxed processor** (separate Node process via processor-file path) or use worker threads, so officeParser/chunking never blocks the API event loop. **(gemini F6)** Catch Postgres FK violation (code `23503`) from a CASCADE-deleted document/persona as a graceful abort — no retry, no alert noise.
-- [ ] T021 [FE] [US2] Wizard UI (name/prompt/docs upload) in `apps/web/app/(dashboard)/assistants/builder/` via engine-client.
-- [ ] T022 [E2E] [US2] Integration: create assistant + upload PDF → chunks stored (SC-001).
+- [ ] T021 [FE] → **DELEGATED to `ai-twins/010-agent-builder-admin`** (its T006/T007). Wizard UI is owned by the Product spec; engine side only ensures `/v1/assistants` + documents endpoints (T018/T019) are FE-ready. Not executed in this repo.
+- [ ] T022 [E2E] [US2] Integration (**engine API-level**, no FE): create assistant + upload PDF via API → chunks stored (SC-001). FE round-trip lives in ai-twins/010 (T008).
 
 ## Phase 6: User Story 3 — Sandbox testing (P2)
 
@@ -70,8 +70,8 @@ Agent tags: `[SETUP]` orchestrator · `[DB]` database-architect · `[BE]` backen
 **Independent test**: sandbox reply via real path; side-effects gated off.
 
 - [x] T023 [BE] [US3] `routes/sandbox.ts` → real reply path with `isTestThread`/`source`; gate CRM/billing/re-engagement side-effects (FR-008).
-- [ ] T024 [FE] [US3] Sandbox chat UI + thumbs-down + corrected-answer capture (feeds US1) in `apps/web/.../assistants/sandbox/` (FR-009).
-- [ ] T025 [E2E] [US3] Integration: sandbox reply via real path, side-effects excluded (SC-002).
+- [ ] T024 [FE] → **DELEGATED to `ai-twins/010-agent-builder-admin`** (its T009/T011). Sandbox UI + thumbs-down owned by the Product spec; engine side only ensures the sandbox route (T023) + annotations endpoint (T011) are FE-ready. Not executed in this repo.
+- [ ] T025 [E2E] [US3] Integration (**engine API-level**, no FE): sandbox reply via real path, side-effects excluded (SC-002). FE gating E2E lives in ai-twins/010 (T010).
 
 ## Phase 7: Polish & cross-cutting
 
@@ -99,10 +99,10 @@ T012 → T015, T028
 T016 → T017
 T018 + T019 → T021
 T003 → T021, T024
-T020 + T021 → T022
+T020 → T022
 T007 → T023
 T023 → T024
-T023 + T024 → T025
+T023 → T025
 T010 + T018 + T019 → T027
 
 ### Self-validation
@@ -146,10 +146,10 @@ graph LR
     T018 & T019 --> T021
     T003 --> T021
     T003 --> T024
-    T020 & T021 --> T022
+    T020 --> T022
     T007 --> T023
     T023 --> T024
-    T023 & T024 --> T025
+    T023 --> T025
     T010 & T018 & T019 --> T027
 ```
 
@@ -165,7 +165,7 @@ graph LR
 | 4 | [BE] core | T006 → T010 → T012 | T001 |
 | 5 | [BE] api | T009, T011, T013, T016, T018, T019, T023, T028 | T007 / T010 |
 | 6 | [BE] jobs | T020 | T006 + T007 |
-| 7 | [FE] | T021, T024 | T003 + API |
+| 7 | [FE] | T021, T024 → **delegated to ai-twins/010** | — |
 | 8 | [E2E] | T014, T015, T017, T022, T025, T027 | per-story |
 
 ---
@@ -178,7 +178,7 @@ graph LR
 | [OPS] | 2 | immediately (T002) |
 | [DB] | 3 | T001 |
 | [BE] | 13 | T001 (core) / T007 (api) |
-| [FE] | 2 | T003 + API ready |
+| [FE] | 0 (2 delegated → ai-twins/010) | — |
 | [E2E] | 6 | per-story BE ready |
 
 **Critical Path**: T001 → T006 → T010 → T012 → T014  *(embeddings net-new = long pole)*
@@ -193,7 +193,7 @@ graph LR
 | `[OPS]` | devops-engineer | deployment-procedures | plan.md §ops, spec §OPS | T002, T026 | `langfuse/docker-compose.yml`, `specs/main/architecture.md` |
 | `[DB]` | database-architect | database-design | data-model.md | T004, T007, T008 | `packages/core/src/models/`, `packages/core/src/db.ts`, `drizzle/` |
 | `[BE]` | backend-specialist | api-patterns, system-design-patterns | data-model.md, plan.md §Phase1, recon | T005,T006,T009,T010,T011,T012,T013,T016,T018,T019,T020,T023,T028 | `packages/core/src/services/`, `packages/api/src/routes/`, `packages/api/src/server.ts`, `packages/training/` |
-| `[FE]` | frontend-specialist | react-patterns, tailwind-patterns, frontend-design | plan.md §structure, spec §US2/US3 | T021, T024 | `ai-twins/apps/web/app/(dashboard)/assistants/` |
+| `[FE]` | — (delegated) | — | — | T021, T024 → **`ai-twins/010-agent-builder-admin`** | (Product repo, not here) |
 | `[E2E]` | test-engineer | testing-patterns, webapp-testing | spec §SC, data-model.md | T014,T015,T017,T022,T025,T027 | `packages/api/tests/integration/`, `apps/web` e2e |
 
 ---

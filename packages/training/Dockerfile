@@ -38,4 +38,4 @@ COPY --from=builder /app/packages/memory/dist ./packages/memory/dist
 COPY --from=builder /app/packages/core/dist ./packages/core/dist
 COPY --from=builder /app/packages/training/dist ./packages/training/dist
 
-CMD ["node", "packages/training/dist/jobs/training-job.js"]
+CMD ["node", "packages/training/dist/index.js"]

@@ -15,7 +15,7 @@ Today, configuring and improving an assistant needs a developer. We want operato
 
 **Repo split (cross-repo, like 003-script-funnels):**
 - `[ENGINE]` `undrecreaitwins` — annotation storage + vectorization + retrieval/injection on the reply path; Langfuse trace/score emission; assistant config.
-- `[PRODUCT]` `ai-twins/apps/web/app/(dashboard)/assistants` — the builder wizard UI, the sandbox chat, the "thumbs-down + correction" capture (extends the existing assistants dashboard).
+- `[PRODUCT]` `ai-twins/apps/web/app/(dashboard)/assistants` — the builder wizard UI, the sandbox chat, the "thumbs-down + correction" capture (extends the existing assistants dashboard). → **specced & owned by `ai-twins/010-agent-builder-admin`** (FE de-bundled from this engine spec; T021/T024 here are delegated, not executed in-engine).
 - `[OPS]` self-hosted **Langfuse** sidecar (Postgres — exists; ClickHouse — **new**; Redis — exists) + a **TEI** embedding sidecar (BGE-M3 + reranker).
 
 **Glossary:** "Assistant" (product/UI term) **==** "persona" (engine entity) — one concept, two names; mapping in data-model §1.
