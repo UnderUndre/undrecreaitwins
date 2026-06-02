@@ -32,6 +32,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | Observability / eval | **Langfuse** (self-host, its own compose) | trace per reply, fire-and-forget, project-per-tenant |
 | LLM gateway | OmniRoute (orchestra) / OpenAI-compatible | `LLM_PROVIDER_URL` |
 | Doc parsing | **officeParser** (TS-native) | PDF/DOCX/TXT |
+| AI execution (agentic) | self-host **hermes-agent** (MIT) + **Honcho** working-memory | agentic turns (010); engine = orchestrator + guardrail; **supersedes Letta** for memory |
 
 ## 3. Core Service Patterns
 
@@ -58,6 +59,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | 006-mtproto-channel | Telegram userbot adapter (GramJS); shared `ChannelAdapter` + Redis-Streams transport; secrets via resolver; FloodWait/migration policy; idempotency |
 | 008-agent-builder | Annotation→few-shot feedback loop + doc RAG + Langfuse adoption; builder/sandbox **FE delegated to Product** (010) |
 | 009-reengagement-runtime | Dormant-conversation scanner + hook delivery (BullMQ scan + DB-status-claim worker + Redis Streams); idempotent, anti-spam |
+| 010-hermes-executor | **Hermes** as agentic LLM backend (Topology C hybrid; always-agent for non-scripted; real write-actions; self-host MIT). Engine = orchestrator + SoR + guardrail (validators / tool-gateway / anti-spam / metering); Honcho working-memory + Postgres SoR |
 
 ## 6. Cross-repo boundary (runtime ↔ admin)
 

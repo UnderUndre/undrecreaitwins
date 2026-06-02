@@ -20,7 +20,7 @@ export async function withTenantContext<T>(
   fn: (tx: DbTransaction) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL app.current_tenant = ${tenantId}`);
+    await tx.execute(sql.raw(`SET LOCAL app.current_tenant = '${tenantId.replace(/'/g, "''")}'`));
     return fn(tx);
   });
 }

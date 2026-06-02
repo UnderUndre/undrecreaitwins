@@ -119,13 +119,15 @@ services:
       REDIS_URL: redis://redis:6379
       EMBEDDINGS_URL: http://tei-embed:80
       RERANK_URL: http://tei-rerank:80
+      DOTENV_CONFIG_AUTOLOAD: "false"
+      TWIN_AUTH_STATIC_TOKEN: "${TWIN_AUTH_STATIC_TOKEN:-twin-engine-secret-token}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8090/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/v1/health"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -142,6 +144,7 @@ services:
       REDIS_URL: redis://redis:6379
       EMBEDDINGS_URL: http://tei-embed:80
       RERANK_URL: http://tei-rerank:80
+      DOTENV_CONFIG_AUTOLOAD: "false"
     depends_on:
       postgres:
         condition: service_healthy

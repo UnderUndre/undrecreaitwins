@@ -5,7 +5,7 @@ export const followupRules = pgTable(
   'followup_rules',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     triggerStaleMinutes: integer('trigger_stale_minutes').notNull(),
     conditions: jsonb('conditions').notNull().default({}),
     backoff: jsonb('backoff').notNull().$type<number[]>().default([]),
@@ -27,7 +27,7 @@ export const followupAttempts = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     conversationId: uuid('conversation_id').notNull().references(() => conversations.id),
     ruleId: uuid('rule_id').notNull().references(() => followupRules.id),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     status: text('status').notNull(), // 'scheduled', 'processing', 'sent', 'failed', 'opted_out', 'expired'
     scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
     sentAt: timestamp('sent_at', { withTimezone: true }),

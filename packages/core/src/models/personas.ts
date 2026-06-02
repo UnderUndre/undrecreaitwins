@@ -5,7 +5,7 @@ export const personas = pgTable(
   'personas',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     systemPrompt: text('system_prompt').notNull(),
