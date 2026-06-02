@@ -18,11 +18,9 @@ export class DocumentService {
   private queue: Queue<IngestJobData>;
 
   constructor() {
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.queue = new Queue('document-ingestion', { 
-      connection: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      }
+      connection: { url: redisUrl },
     });
   }
 

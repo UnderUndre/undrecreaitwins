@@ -6,37 +6,35 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY packages/memory/package.json ./packages/memory/
 COPY packages/core/package.json ./packages/core/
+COPY packages/training/package.json ./packages/training/
 COPY packages/api/package.json ./packages/api/
-
-RUN pnpm install --frozen-lockfile
 
 COPY packages/shared/ ./packages/shared/
 COPY packages/memory/ ./packages/memory/
 COPY packages/core/ ./packages/core/
+COPY packages/training/ ./packages/training/
 COPY packages/api/ ./packages/api/
 COPY tsconfig.json ./
 
-RUN pnpm --filter @undrecreaitwins/shared run build
-RUN pnpm --filter @undrecreaitwins/memory run build
-RUN pnpm --filter @undrecreaitwins/core run build
-RUN pnpm --filter @undrecreaitwins/api run build
+RUN pnpm install --frozen-lockfile
+
+RUN pnpm --filter @undrecreaitwins/shared run build && \
+    pnpm --filter @undrecreaitwins/memory run build && \
+    pnpm --filter @undrecreaitwins/core run build && \
+    pnpm --filter @undrecreaitwins/training run build && \
+    pnpm --filter @undrecreaitwins/api run build
+
+RUN pnpm prune --prod
 
 FROM node:20-alpine AS runner
-RUN corepack enable
 WORKDIR /app
 
-COPY pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/shared/package.json ./packages/shared/
-COPY packages/memory/package.json ./packages/memory/
-COPY packages/core/package.json ./packages/core/
-COPY packages/api/package.json ./packages/api/
-
-RUN pnpm install --frozen-lockfile --prod
-
-COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
-COPY --from=builder /app/packages/memory/dist ./packages/memory/dist
-COPY --from=builder /app/packages/core/dist ./packages/core/dist
-COPY --from=builder /app/packages/api/dist ./packages/api/dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages/shared ./packages/shared
+COPY --from=builder /app/packages/memory ./packages/memory
+COPY --from=builder /app/packages/core ./packages/core
+COPY --from=builder /app/packages/training ./packages/training
+COPY --from=builder /app/packages/api ./packages/api
 
 EXPOSE 8090
 CMD ["node", "packages/api/dist/server.js"]
