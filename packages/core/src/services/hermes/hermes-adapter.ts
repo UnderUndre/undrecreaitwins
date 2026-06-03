@@ -169,10 +169,15 @@ export class AcpClient {
       }
     });
 
+    const onAbort = (): void => {
+      logger.warn('Abort signal received, killing hermes acp');
+      this.kill();
+    };
+
     this.child.on('exit', (code) => {
       logger.info({ code }, 'hermes acp process exited');
       this.dead = true;
-      // Reject all pending requests
+      if (config.signal) config.signal.removeEventListener('abort', onAbort);
       const entries = Array.from(this.pending.entries());
       this.pending.clear();
       for (const [, entry] of entries) {
@@ -183,6 +188,7 @@ export class AcpClient {
     this.child.on('error', (err) => {
       logger.error({ err }, 'hermes acp process error');
       this.dead = true;
+      if (config.signal) config.signal.removeEventListener('abort', onAbort);
       const entries = Array.from(this.pending.entries());
       this.pending.clear();
       for (const [, entry] of entries) {
@@ -190,16 +196,12 @@ export class AcpClient {
       }
     });
 
-    // Wire abort signal
     if (config.signal) {
       if (config.signal.aborted) {
         this.kill();
         throw new AppError('Aborted before spawn', 499, 'acp_aborted');
       }
-      config.signal.addEventListener('abort', () => {
-        logger.warn('Abort signal received, killing hermes acp');
-        this.kill();
-      }, { once: true });
+      config.signal.addEventListener('abort', onAbort, { once: true });
     }
   }
 

@@ -122,10 +122,12 @@ export class HermesExecutor {
     const loopIterations = 0;
     let acpSessionId: string | undefined;
 
+    let mcpServer: { server: { stop: () => Promise<void> }; mcpEntry: { url: string; headers: Record<string, string> } } | undefined;
+
     try {
       // ── Start engine MCP server for this tenant+persona ───────────────
       const allowlist = this.getToolAllowlist(input.persona);
-      const mcpServer = await this.startMcpServer(input.tenantId, input.persona.id, allowlist);
+      mcpServer = await this.startMcpServer(input.tenantId, input.persona.id, allowlist);
 
       // ── ACP turn ──────────────────────────────────────────────────────
       const acpClient = new AcpClient();
@@ -194,9 +196,6 @@ export class HermesExecutor {
 
       steps.push({ type: 'done' });
 
-      // Stop MCP server
-      await mcpServer.server.stop();
-
       return {
         answer,
         steps,
@@ -205,9 +204,6 @@ export class HermesExecutor {
         acpSessionId,
       };
     } catch (err) {
-      // ── Stop MCP server on error ──────────────────────────────────────
-      // (best effort — don't await in error path)
-
       if (timedOut) {
         steps.push({ type: 'timeout', content: `Execution timed out after ${maxMs}ms` });
         logger.warn({ maxMs }, 'ACP execution timeout, falling back');
@@ -224,6 +220,11 @@ export class HermesExecutor {
       );
     } finally {
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+      if (mcpServer) {
+        mcpServer.server.stop().catch((stopErr) => {
+          logger.error({ err: stopErr }, 'Failed to stop MCP server');
+        });
+      }
     }
   }
 

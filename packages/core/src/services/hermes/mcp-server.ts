@@ -68,7 +68,11 @@ export class EngineMcpServer {
 
   /** Handle a single JSON-RPC request and return a JSON-RPC response. */
   async handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
-    const { id = null, method, params = {} } = req;
+    if (!req) {
+      return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } };
+    }
+    const { id = null, method } = req;
+    const params = req.params && typeof req.params === 'object' ? req.params : {};
 
     try {
       let result: unknown;
