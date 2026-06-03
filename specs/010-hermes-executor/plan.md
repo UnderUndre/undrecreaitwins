@@ -9,7 +9,7 @@ The engine becomes an **orchestrator + system-of-record + safety interlock** aro
 
 ## Technical Context
 
-**Language/Version**: TypeScript engine (Fastify) ↔ **self-host `hermes-agent`** (Python, MIT, v0.7.0) over HTTP
+**Language/Version**: TypeScript engine (Fastify) ↔ **self-host `hermes-agent`** (MIT, **v0.15.1**) over **ACP** (JSON-RPC/ndjson/stdio) for the turn + an **engine-hosted MCP server** for tools. *(Verified T000a — supersedes the OpenAI-HTTP assumption; `proxy`/OmniRoute = fallback only.)*
 **Primary Dependencies**: `hermes-agent` (self-host; Docker baseline, Modal/Daytona for serverless-persistence/hibernate), **Honcho** (working memory), existing engine (Drizzle, Postgres+pgvector, Redis+BullMQ), **OmniRoute** (provider routing + metering), Langfuse (observability), OpenMeter (007 budgets)
 **Storage**: engine Postgres (SoR + new: `agent_runs`, `action_audit`, persona tool-allowlist/agent flags); Honcho (working memory — external, reconstructible); Redis (warm-pool/lifecycle state, 009 cron)
 **Testing**: Vitest (unit) + integration (mock `hermes-agent` HTTP + tool-gateway)
@@ -30,8 +30,9 @@ The engine becomes an **orchestrator + system-of-record + safety interlock** aro
 
 ```text
 packages/core/src/services/hermes/
-├── hermes-executor.ts      # runAgentTurn: invoke self-host hermes-agent + inject context + stream + hard maxExecutionMs timeout
-├── hermes-adapter.ts       # isolates the hermes-agent v0.7.0 HTTP contract (pre-1.0 → adapter shields breaking changes; claude F3)
+├── hermes-executor.ts      # runAgentTurn: drive an ACP session on a pooled hermes-agent + inject context + stream + hard maxExecutionMs timeout
+├── hermes-adapter.ts       # ACP client (JSON-RPC/ndjson/stdio): initialize/session/new/session/prompt + session/update mapping; pins the v0.15.1 contract
+├── mcp-server.ts           # exposes tool-gateway as an MCP server — the agent's ONLY toolset (per-session, tenant+persona scoped)
 ├── tool-gateway.ts         # engine-mediated tools/actions: allowlist + permission + idempotency + audit
 ├── agent-lifecycle.ts      # spawn-on-demand / hydrate(SoR+Honcho) / hibernate / warm-pool
 ├── turn-router.ts          # scripted(003) → deterministic ; else → Hermes (always-agent)
@@ -41,14 +42,14 @@ packages/core/src/models/   # personas EXTEND (agentEnabled, toolAllowlist, agen
 packages/api/               # status-stream route (extends 002), wired in buildServer()
 ```
 
-**Structure Decision**: all Hermes orchestration in `packages/core/src/services/hermes/`. The engine speaks HTTP to a self-hosted `hermes-agent` sidecar **via a thin `hermes-adapter`** that isolates the pre-1.0 (v0.7.0) HTTP contract (claude F3); **the agent reaches the world only through the engine tool-gateway** (its native terminal/browser are off unless allow-listed). Warm-pool ships a documented default size in Phase 2 (T009), tuned later in T023 (claude F6). 003 funnel engine untouched (router chooses it).
+**Structure Decision**: all Hermes orchestration in `packages/core/src/services/hermes/`. The engine drives a self-hosted `hermes acp` process **via a thin `hermes-adapter`** (ACP client — JSON-RPC/ndjson/stdio; pins the v0.15.1 contract, T000a); **the agent reaches the world only through the engine MCP server** (`mcp-server.ts` = tool-gateway exposed as MCP; native terminal/browser/sub-agent tools off unless allow-listed). Warm-pool ships a documented default size in Phase 2 (T009), tuned in T023 (claude F6). 003 funnel engine untouched (router chooses it).
 
 ## Phase 0 — Research (resolved → research.md)
 
 | Unknown | Resolution |
 |---------|-----------|
 | `hermes-agent` license (multi-tenant self-host resale) | **MIT — GREEN**, no restriction (vs n8n fair-code) |
-| Integration shape | engine (TS) → self-host `hermes-agent` HTTP run-turn; **engine-mediated tool-gateway** (agent calls back; gated) |
+| Integration shape | **ACP (turn) + engine-MCP (tools)** — verified T000a; engine = ACP client to a pooled `hermes acp`; agent's only toolset = engine MCP server (tool-gateway); HTTP/`proxy` = fallback only |
 | Dangerous native tools | terminal/browser **disabled** unless per-persona allow-listed |
 | Memory | Honcho namespace per (tenant,persona,**conversation**); reconstructible from SoR; **fitness validated by gate T000c** (scale + failure + reconstruction round-trip; claude F1/F10) |
 | Lifecycle | spawn-on-demand + hibernate; Docker baseline, Modal/Daytona = serverless-persistence; warm-pool; 009 cron heartbeat |
@@ -67,7 +68,9 @@ packages/api/               # status-stream route (extends 002), wired in buildS
 | **Cost blowup (always-agent)** | **HIGH** | hard loop/token cap + per-tenant budget (FR-008) + warm-pool; over-budget curtail→fallback |
 | **Write-action blast radius** (agent does wrong external write) | **HIGH** | engine-mediated tool-gateway only; permission allowlist; idempotency; audit; validators gate; confirm/dry-run high-stakes |
 | **Agent off-script in funnel** | MED | router keeps scripted turns deterministic; stage-guard + validators override |
-| **TS↔Python (hermes-agent) integration drift** (API v0.7.0) | MED | T000a gate pins the run-turn/tool-callback/stream contract; adapter isolates |
+| **ACP off-label for server use** (editor-oriented, pre-1.0) | MED | T000a verified full turn+MCP flow on v0.15.1; `hermes-adapter` pins the contract; lock the version |
+| **Cross-session tenant isolation in a shared agent process** | **HIGH → leak confirmed (both memory-on AND tool-off)** | T000d 🔴: hermes memory is durable + global + auto-injected at session load → **process-per-tenant with isolated memory store/HOME**; same-tenant multi-session sharing is fine |
+| **Provider stop-token quirk** (local glm-5.1 `finish_reason=length`) | LOW | production-grade model + `maxExecutionMs` curtail |
 | **Two memory roles (Honcho vs SoR)** | MED | SoR authoritative; Honcho reconstructible; nothing-of-record only in Honcho |
 | **Lifecycle at scale** (spawn/hibernate latency) | MED | warm-pool hot twins; serverless-persistence backend (Modal/Daytona) |
 | **Abort/idempotency over multi-step side-effects** (002/009) | MED | reserve→execute→finalize idempotency; mid-loop abort + orphan-TTL sweep (FR-012; claude F2) |

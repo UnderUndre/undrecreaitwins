@@ -24,6 +24,7 @@ All new tables tenant-scoped via Postgres **RLS** (`app.current_tenant`, `withTe
 | `tokensIn` / `tokensOut` / `costEstimate` | integer / numeric | per-turn cost (→ OpenMeter, 007) |
 | `fallbackUsed` | boolean | true if Hermes-outage → completion path |
 | `honchoSessionRef` | text | working-memory handle (reconstructible) |
+| `acpSessionRef` | text | resumable ACP session id (lifecycle hibernate/resume; T000a) |
 | `startedAt` / `endedAt` | timestamptz | latency |
 
 Index: `(tenantId, conversationId, startedAt)`; `(tenantId, status)`.
