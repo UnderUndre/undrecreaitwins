@@ -11,14 +11,14 @@
 
 ## Phase 0: Gates (blocking) ⚠️
 
-- [ ] T000a [BE] **Gate — pin `hermes-agent` v0.7.0 integration API** (self-host): run-turn endpoint, tool-callback mechanism, status streaming, session/memory handles. License MIT (research §a — GREEN). Pin the **version-upgrade strategy** (semver range / lockfile / adapter contract — claude F3). Record the exact contract in research.md. **Blocks T005.**
+- [X] T000a [BE] **Gate — pin `hermes-agent` v0.7.0 integration API** (self-host): run-turn endpoint, tool-callback mechanism, status streaming, session/memory handles. License MIT (research §a — GREEN). Pin the **version-upgrade strategy** (semver range / lockfile / adapter contract — claude F3). Record the exact contract in research.md. **Blocks T005.**
 - [ ] T000b [SEC] **Gate — Honcho multi-tenant isolation**: confirm per-`(tenant,persona,conversation)` namespace isolation + that working memory is reconstructible from SoR (no record lives only in Honcho). **Blocks T004.**
 - [ ] T000c [SEC]/[OPS] **Gate — Honcho fitness** (claude F1/F10): validate at expected scale (N tenants × M personas), failure modes (Honcho down/slow → cold-memory degrade path holds), and the **SoR→Honcho reconstruction round-trip** end-to-end. If Honcho fails → Plan B (engine-native working memory). **Blocks T004.**
 
 ## Phase 1: Setup
 
-- [ ] T001 [OPS] Stand up self-host **`hermes-agent`** (Docker baseline; eval Modal/Daytona serverless-persistence for hibernate) + **Honcho** in orchestra; env `HERMES_BASE_URL`/`HONCHO_URL`/`AGENT_LOOP_CAP`/`AGENT_MAX_EXECUTION_MS`/`TOOL_CALLBACK_TTL` (names only).
-- [ ] T002 [SETUP] Scaffold `packages/core/src/services/hermes/` (executor, **adapter**, tool-gateway, guardrail, turn-router, agent-lifecycle, honcho-client).
+- [X] T001 [OPS] Stand up self-host **`hermes-agent`** (Docker baseline; eval Modal/Daytona serverless-persistence for hibernate) + **Honcho** in orchestra; env `HERMES_BASE_URL`/`HONCHO_URL`/`AGENT_LOOP_CAP`/`AGENT_MAX_EXECUTION_MS`/`TOOL_CALLBACK_TTL` (names only).
+- [X] T002 [SETUP] Scaffold `packages/core/src/services/hermes/` (executor, **adapter**, tool-gateway, guardrail, turn-router, agent-lifecycle, honcho-client).
 
 ## Phase 2: Foundational (blocking)
 
