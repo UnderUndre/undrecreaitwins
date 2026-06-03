@@ -26,3 +26,11 @@
 
 ## (h) Action / write model
 **Decision**: write-actions (CRM/calendar/booking/external mutations) execute **only via the engine tool-gateway** under: per-persona permission allow-list, **idempotency key** (UNIQUE), audit log, validators gate; **high-stakes actions** require a confirm/dry-run step. v1 includes write-actions (C1).
+
+## (i) `hermes-agent` v0.7.0 API Contract (Gate T000a)
+**Confirmed**: v0.7.0 "Resilience" uses an OpenAI-compatible REST server.
+- **Endpoint**: `/v1/chat/completions`.
+- **Continuity**: `X-Hermes-Session-Id` header (binds turn to engine session).
+- **Streaming**: Token-by-token text + event-by-event tool progress in the same SSE stream.
+- **Tooling**: Agent generates tool calls; Engine tool-gateway executes and returns result via completion restart or tool-result injection.
+- **Isolation**: Each agent run is isolated; state is persisted to `SessionDB` via session ID.

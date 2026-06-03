@@ -7,9 +7,9 @@
 | Package | Role |
 |---------|------|
 | `packages/shared` | Common types, errors, utils — incl. canonical `ChannelAdapter`/`ChannelMessage`, `StreamChunk` |
-| `packages/core` | Business logic, Drizzle models, services (chat, embedding, annotation, document, grounding, reengagement, langfuse), `ChannelTransport`, `withTenantContext` |
+| `packages/core` | Business logic, Drizzle models (incl. `agent_runs`, `action_audit`), services (chat, embedding, annotation, document, grounding, reengagement, langfuse, **hermes**: executor/tool-gateway/guardrail/turn-router/agent-lifecycle/honcho-client), `ChannelTransport`, `withTenantContext` |
 | `packages/api` | Fastify REST (`/v1/...`), route wiring via `buildServer()` |
-| `packages/memory` | Letta-based conversational/personality memory |
+| `packages/memory` | Letta-based memory (**legacy**) — superseded by **Honcho** for agentic working-memory (010); kept until migrated off |
 | `packages/training` | BullMQ workers (document parse → chunk → embed) |
 | `packages/channel-telegram` | Telegram **Bot API** adapter |
 | `packages/channel-whatsapp` | WhatsApp adapter (Evolution API backing) |
@@ -37,15 +37,16 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 ## 3. Core Service Patterns
 
 - **Repositories**: Drizzle CRUD, tenant-scoped via `withTenantContext(tenantId, fn)`.
-- **Services**: `chat` (reply path + streaming), `embedding` (TEI client), `annotation` (few-shot loop), `document` (parse/chunk/embed), `grounding` (RAG retrieval), `reengagement` (scan/worker), `langfuse` (trace emit).
+- **Services**: `chat` (reply path + streaming), `embedding` (TEI client), `annotation` (few-shot loop), `document` (parse/chunk/embed), `grounding` (RAG retrieval), `reengagement` (scan/worker), `langfuse` (trace emit), **`hermes`** (agentic: `runAgentTurn` via self-host hermes-agent; engine-mediated tool-gateway = allow-list + per-tenant write-permission + `reserve→execute→finalize` idempotency + audit; validators/guardrail outbound gate + fallback; Honcho working-memory; spawn/hibernate lifecycle).
 - **Middleware**: auth (Bearer, server-to-server), tenant resolution, error handling.
 - **Reply path** (`ChatService.buildSystemPrompt` → `complete`): KB/RAG context → annotation few-shot (pre-gen, fail-open on embedder outage) → generate → stream (002) or `complete()` → persist + Langfuse emit.
 
 ## 4. Data Flow
 
 - **Inbound (channel)**: adapter → `ChannelTransport.publish(INBOUND)` → engine consumes → `ChatService` reply → `publish(OUTBOUND)` → adapter `send()`.
-- **API**: request → tenant middleware → `packages/api` → `core` services → models + RAG (pgvector) + memory (Letta) → response (JSON or SSE stream, spec 002).
+- **API**: request → tenant middleware → `packages/api` → `core` services → models + RAG (pgvector) + memory (**Honcho** for agentic; Letta legacy) → response (JSON or SSE stream, spec 002).
 - **Async**: document upload → BullMQ (`training`) parse→chunk→embed→pgvector; re-engagement → BullMQ scan cron + DB-status-claim worker → hook via `OUTBOUND`.
+- **Agentic (010)**: agent-enabled persona → `turn-router` (scripted→deterministic; else→Hermes) → `runAgentTurn` (self-host hermes-agent) → tool-gateway (allow-list + permission + `reserve→execute→finalize` idempotency + `action_audit`) → validators (004) outbound gate → persist `agent_runs` + meter (007); Hermes outage / `maxExecutionMs` timeout → fallback to thin completion (fail-open).
 
 ## 5. Feature Tracking (engine specs)
 

@@ -16,7 +16,8 @@ Open-source headless AI-clone (digital twin) backend. **Multi-tenant from day on
 - **Vector store**: **pgvector** on the primary Postgres (HNSW cosine). **Qdrant dropped** — single store, no second RAG stack.
 - **Embeddings + rerank**: **BGE-M3** (embed) + **BGE-reranker-v2-m3** (rerank) via a **TEI sidecar** over HTTP (`EMBEDDINGS_URL`). Multilingual incl. Russian.
 - **Retrieval**: vector + reranker (hybrid / full-text **deferred** until keyword recall demands it).
-- **Memory**: **Honcho** (agent working / user-model memory; reconstructible from Postgres SoR) — supersedes Letta (010-hermes-executor).
+- **Memory**: **Honcho** (agent working / user-model memory; reconstructible from Postgres SoR; `HONCHO_URL`) — supersedes Letta (010-hermes-executor).
+- **Agentic executor**: self-host **hermes-agent** (MIT) as the agentic LLM backend (spec 010) — plan→tool→observe; **engine-mediated tool-gateway** (allow-list + per-tenant write-permission + `reserve→execute→finalize` idempotency + `action_audit`); validators outbound gate; fail-open fallback to thin completion. Env: `HERMES_BASE_URL`, `HERMES_API_TOKEN`, `AGENT_MAX_EXECUTION_MS`, `AGENT_LOOP_CAP`.
 - **LLM gateway**: OmniRoute / OpenAI-compatible provider (`LLM_PROVIDER_URL`).
 - **Observability / eval**: **Langfuse** (self-host) — trace per reply, fire-and-forget, project-per-tenant.
 - **Doc parsing**: officeParser (TS-native) — PDF/DOCX/TXT.
@@ -40,3 +41,4 @@ Standalone `ChannelAdapter` workers bridged to the engine via `ChannelTransport`
 - RAG/annotation retrieval (005/008): adds < 300 ms to reply; few-shot **fails open** on embedder/TEI outage (chat survives).
 - Re-engagement (009): no double-send (idempotency key + atomic claim), stuck-`processing` recovery (timeout sweep), cross-rule anti-spam (minInterval), worker concurrency for throughput.
 - Channels (006): FloodWait/DC-migration policy, inbound eligibility/loop-prevention, encrypted session handling.
+- Agentic executor (010): per-tenant cost + loop/token cap + hard `maxExecutionMs` → **fail-open** to thin completion; write-actions **crash-durable** (`reserve→execute→finalize`, no double-write under retry/crash); per-`(tenant,persona,conversation)` session isolation; secrets never reach the agent (engine tool-gateway holds creds); every answer through the validators (004) gate.
