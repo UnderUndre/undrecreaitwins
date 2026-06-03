@@ -1,14 +1,33 @@
+/**
+ * HermesExecutor — ACP-backed agent turn orchestration.
+ *
+ * Drives a spawned "hermes acp" process via the AcpAdapter (JSON-RPC/ndjson/stdio).
+ * The agent's tools come from the engine MCP server (mcp-server.ts) which wraps
+ * tool-gateway.ts — allowlist, permission, idempotency, audit, confirm/dry-run.
+ *
+ * Fallback: on timeout, spawn failure, or ACP error → LLMClient.complete (thin completion).
+ *
+ * Lifecycle/warm-pool (T009) is OUT OF SCOPE — fresh spawn per turn.
+ * TODO(T009): process-per-(tenant,persona) pool with isolated HERMES_HOME per tenant.
+ */
 import type { Persona } from '@undrecreaitwins/shared';
 import { AppError } from '@undrecreaitwins/shared';
 import { LLMClient } from '../llm-client.js';
+import { AcpClient, type SessionUpdate, type AcpMcpServerEntry } from './hermes-adapter.js';
+import { makeHttpMcpServer, type McpServerConfig, type HttpMcpTransport } from './mcp-server.js';
+import type { ToolAllowEntry } from './tool-gateway.js';
 import pino from 'pino';
 
-const logger = pino();
+const logger = pino({ name: 'hermes-executor' });
+
+// ─── Exported interfaces (keep backward-compatible) ──────────────────────────
 
 export interface RunAgentTurnInput {
   tenantId: string;
   persona: Persona;
   sessionId?: string;
+  /** ACP session ID for resume (future warm-pool). */
+  acpSessionId?: string;
   userMessage: string;
   context: {
     ragChunks?: string[];
@@ -40,25 +59,28 @@ export interface RunAgentTurnResult {
   };
   agentRunId: string;
   fallbackUsed?: boolean;
+  /** The ACP session ID — can be passed back for resume. */
+  acpSessionId?: string;
 }
 
+// ─── Executor ────────────────────────────────────────────────────────────────
+
 export class HermesExecutor {
-  private readonly baseUrl: string;
-  private readonly apiToken: string;
+  private readonly acpCmd: string;
+  private readonly acpArgs: string[];
   private readonly fallbackClient: LLMClient;
 
   constructor() {
-    const baseUrl = process.env.HERMES_BASE_URL;
-    if (!baseUrl) {
-      throw new AppError('HERMES_BASE_URL is required', 500, 'configuration_error');
+    const acpCmd = process.env.HERMES_ACP_CMD;
+    if (!acpCmd) {
+      throw new AppError('HERMES_ACP_CMD is required', 500, 'configuration_error');
     }
-    this.baseUrl = baseUrl;
+    this.acpCmd = acpCmd;
 
-    const apiToken = process.env.HERMES_API_TOKEN;
-    if (!apiToken) {
-      throw new AppError('HERMES_API_TOKEN is required', 500, 'configuration_error');
-    }
-    this.apiToken = apiToken;
+    // Split into command + args (e.g., "hermes acp --accept-hooks" → cmd="hermes", args=["acp","--accept-hooks"])
+    const parts = acpCmd.split(/\s+/);
+    this.acpCmd = parts[0]!;
+    this.acpArgs = parts.length > 1 ? parts.slice(1) : ['acp', '--accept-hooks'];
 
     this.fallbackClient = new LLMClient();
   }
@@ -67,9 +89,12 @@ export class HermesExecutor {
     const steps: AgentStepEvent[] = [];
     const controller = new AbortController();
 
-    // H2: Hard execution timeout
+    // ── Hard execution timeout ────────────────────────────────────────────
     const maxMs = input.budget.maxExecutionMs
-      ?? (process.env.AGENT_MAX_EXECUTION_MS ? parseInt(process.env.AGENT_MAX_EXECUTION_MS, 10) : undefined);
+      ?? (process.env.AGENT_MAX_EXECUTION_MS
+        ? parseInt(process.env.AGENT_MAX_EXECUTION_MS, 10)
+        : undefined);
+
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
 
@@ -87,93 +112,198 @@ export class HermesExecutor {
       { role: 'user' as const, content: input.userMessage },
     ];
 
+    // Build the full prompt text that ACP receives (system + context injected as first message)
+    const promptText = this.buildPromptText(systemPrompt, input.userMessage, input.context);
+
+    // Accumulator for streamed answer
+    let answer = '';
+    let tokensUsed = 0;
+    let toolCallsCount = 0;
+    const loopIterations = 0;
+    let acpSessionId: string | undefined;
+
     try {
-      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiToken}`,
-          ...(input.sessionId ? { 'X-Hermes-Session-Id': input.sessionId } : {}),
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: 'system', content: systemPrompt }, ...messages],
-          stream: true,
-          max_tokens: input.budget.maxTokens,
-        }),
-        signal: controller.signal,
-      });
+      // ── Start engine MCP server for this tenant+persona ───────────────
+      const allowlist = this.getToolAllowlist(input.persona);
+      const mcpServer = await this.startMcpServer(input.tenantId, input.persona.id, allowlist);
 
-      if (!response.ok) {
-        logger.warn({ status: response.status }, 'Hermes API error, falling back to thin completion');
-        return this.fallbackComplete(messages, systemPrompt, steps, input, model, 'Hermes API error');
-      }
+      // ── ACP turn ──────────────────────────────────────────────────────
+      const acpClient = new AcpClient();
 
-      let answer = '';
-      let tokensUsed = 0;
-      const loopIterations = 0;
-      const toolCallsCount = 0;
+      const mcpEntry: AcpMcpServerEntry = {
+        type: 'http',
+        url: mcpServer.mcpEntry.url,
+        headers: mcpServer.mcpEntry.headers,
+      };
 
-      const handleSse = (raw: string): void => {
-        if (!raw.startsWith('data: ')) return;
-        const data = raw.slice(6).trim();
-        if (data === '' || data === '[DONE]') return;
-        try {
-          const event = JSON.parse(data);
-          const delta = event.choices?.[0]?.delta;
-          if (delta?.content) {
-            answer += delta.content;
-            steps.push({ type: 'thinking', content: delta.content });
-          }
-          if (event.usage) {
-            tokensUsed = event.usage.total_tokens ?? tokensUsed;
-          }
-        } catch (err) {
-          logger.warn({ err }, 'Failed to parse SSE event from Hermes');
+      // Session/update → AgentStepEvent callback
+      const onUpdate = (update: SessionUpdate): void => {
+        switch (update.kind) {
+          case 'agent_message_chunk':
+            if (update.text) {
+              answer += update.text;
+              steps.push({ type: 'answer', content: update.text });
+            }
+            break;
+          case 'agent_thought_chunk':
+            if (update.text) {
+              steps.push({ type: 'thinking', content: update.text });
+            }
+            break;
+          case 'tool_call':
+            toolCallsCount++;
+            steps.push({
+              type: 'tool_call',
+              toolName: update.title,
+              toolArgs: update.rawInput ? this.safeParseJson(update.rawInput) : undefined,
+            });
+            break;
+          case 'tool_call_update':
+            steps.push({
+              type: 'tool_result',
+              toolName: update.title,
+              content: update.content ?? update.status,
+            });
+            break;
+          case 'usage_update':
+            if (update.usage?.totalTokens) {
+              tokensUsed = update.usage.totalTokens;
+            }
+            break;
         }
       };
 
-      if (response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+      const result = await acpClient.runTurn({
+        command: this.acpCmd,
+        args: this.acpArgs,
+        cwd: process.cwd(),
+        model,
+        mcpServers: [mcpEntry],
+        existingSessionId: input.acpSessionId,
+        signal: controller.signal,
+        onUpdate,
+        promptText,
+      });
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      acpSessionId = acpClient.getSessionId() ?? undefined;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          for (const line of lines) handleSse(line);
-        }
-
-        // Flush decoder + process any residual buffered line (final chunk may lack a trailing newline).
-        buffer += decoder.decode();
-        if (buffer.trim()) handleSse(buffer.trim());
+      // Use final usage from response if available
+      if (result.usage) {
+        tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
       }
 
-      steps.push({ type: 'answer', content: answer });
       steps.push({ type: 'done' });
+
+      // Stop MCP server
+      await mcpServer.server.stop();
 
       return {
         answer,
         steps,
         usage: { loopIterations, tokensUsed, toolCallsCount },
         agentRunId: '',
+        acpSessionId,
       };
     } catch (err) {
+      // ── Stop MCP server on error ──────────────────────────────────────
+      // (best effort — don't await in error path)
+
       if (timedOut) {
         steps.push({ type: 'timeout', content: `Execution timed out after ${maxMs}ms` });
-        logger.warn({ maxMs }, 'Hermes execution timeout, falling back');
-        return this.fallbackComplete(messages, systemPrompt, steps, input, model, `Execution timeout after ${maxMs}ms`);
+        logger.warn({ maxMs }, 'ACP execution timeout, falling back');
+        return this.fallbackComplete(
+          messages, systemPrompt, steps, input, model,
+          `Execution timeout after ${maxMs}ms`,
+        );
       }
 
-      logger.warn({ err }, 'Hermes fetch failed, falling back to thin completion');
-      return this.fallbackComplete(messages, systemPrompt, steps, input, model, err instanceof Error ? err.message : String(err));
+      logger.warn({ err }, 'ACP turn failed, falling back to thin completion');
+      return this.fallbackComplete(
+        messages, systemPrompt, steps, input, model,
+        err instanceof Error ? err.message : String(err),
+      );
     } finally {
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    }
+  }
+
+  // ─── Private helpers ────────────────────────────────────────────────────
+
+  private async startMcpServer(
+    tenantId: string,
+    personaId: string,
+    allowlist: ToolAllowEntry[],
+  ): Promise<{ server: HttpMcpTransport; mcpEntry: { url: string; headers: Record<string, string> } }> {
+    const secret = process.env.ENGINE_MCP_SECRET;
+    if (!secret) {
+      throw new AppError('ENGINE_MCP_SECRET is required', 500, 'configuration_error');
+    }
+
+    const portStr = process.env.ENGINE_MCP_PORT;
+    if (!portStr) {
+      throw new AppError('ENGINE_MCP_PORT is required', 500, 'configuration_error');
+    }
+    const port = parseInt(portStr, 10);
+    if (!Number.isFinite(port) || port <= 0) {
+      throw new AppError('ENGINE_MCP_PORT must be a positive integer', 500, 'configuration_error');
+    }
+
+    const config: McpServerConfig = { tenantId, personaId, allowlist };
+    const transport = makeHttpMcpServer({ port, config, secret });
+    const { mcpEntry } = await transport.start();
+    return { server: transport, mcpEntry };
+  }
+
+  private getToolAllowlist(persona: Persona): ToolAllowEntry[] {
+    // persona.toolAllowlist may be stored as jsonb on the persona model
+    // For now, use a typed accessor — the persona type doesn't include it
+    // directly, so we cast through unknown.
+    const raw = (persona as unknown as Record<string, unknown>).toolAllowlist;
+    if (Array.isArray(raw)) {
+      return raw as ToolAllowEntry[];
+    }
+    // No allowlist → empty (all tools denied)
+    return [];
+  }
+
+  private buildPromptText(
+    systemPrompt: string,
+    userMessage: string,
+    context: RunAgentTurnInput['context'],
+  ): string {
+    // ACP session/prompt takes a single text block. We assemble:
+    // [system prompt] [context] [few-shot] [user message]
+    const parts: string[] = [];
+
+    parts.push(systemPrompt);
+
+    if (context.ragChunks?.length) {
+      parts.push('\n---\nRelevant context:\n' + context.ragChunks.join('\n'));
+    }
+
+    if (context.fewShotExamples?.length) {
+      parts.push('\n---\nExamples:');
+      for (const ex of context.fewShotExamples) {
+        parts.push(`User: ${ex.input}\nAssistant: ${ex.output}`);
+      }
+    }
+
+    parts.push(`\n---\nUser: ${userMessage}`);
+
+    return parts.join('\n');
+  }
+
+  private buildSystemPrompt(input: RunAgentTurnInput): string {
+    // Persona system prompt ONLY. RAG + few-shot are added once by buildPromptText
+    // (ACP path); duplicating them here would inject the context twice.
+    return input.persona.systemPrompt || `You are ${input.persona.name}, an AI assistant.`;
+  }
+
+  private safeParseJson(text: string): Record<string, unknown> | undefined {
+    try {
+      return JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return undefined;
     }
   }
 
@@ -210,20 +340,5 @@ export class HermesExecutor {
       agentRunId: '',
       fallbackUsed: true,
     };
-  }
-
-  private buildSystemPrompt(input: RunAgentTurnInput): string {
-    const parts: string[] = [];
-    parts.push(input.persona.systemPrompt || `You are ${input.persona.name}, an AI assistant.`);
-    if (input.context.ragChunks?.length) {
-      parts.push('\nRelevant context:\n' + input.context.ragChunks.join('\n'));
-    }
-    if (input.context.fewShotExamples?.length) {
-      parts.push('\nExamples:');
-      for (const ex of input.context.fewShotExamples) {
-        parts.push(`User: ${ex.input}\nAssistant: ${ex.output}`);
-      }
-    }
-    return parts.join('\n');
   }
 }
