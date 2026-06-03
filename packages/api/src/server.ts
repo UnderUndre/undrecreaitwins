@@ -1,10 +1,13 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
-import { tenantPlugin } from '@undrecreaitwins/core/middleware/tenant.js';
-import { authPlugin } from '@undrecreaitwins/core/middleware/auth.js';
 import { errorHandler } from '@undrecreaitwins/core/middleware/error-handler.js';
 import { healthCheck as dbHealthCheck } from '@undrecreaitwins/core/db.js';
+import { UnauthorizedError, ForbiddenError } from '@undrecreaitwins/shared';
+import { createHash } from 'crypto';
+import { db } from '@undrecreaitwins/core/db.js';
+import { tenants, apiTokens } from '@undrecreaitwins/core/models/index.js';
+import { eq, and, isNull } from 'drizzle-orm';
 
 import { personaRoutes } from './routes/personas.js';
 import { chatCompletionsRoutes } from './routes/chat-completions.js';
@@ -43,17 +46,51 @@ export async function buildServer() {
     };
   });
 
-  await fastify.register(tenantPlugin);
-  await fastify.register(authPlugin);
+  fastify.setErrorHandler(errorHandler);
 
-  // Routes
+  fastify.addHook('onRequest', async (request) => {
+    if (request.url === '/v1/health') return;
+    const tenantId = request.headers['x-tenant-id'] as string | undefined;
+    const tenantClaim = request.headers['x-tenant-claim'] as string | undefined;
+    let resolvedTenantId: string | undefined;
+    if (tenantClaim) {
+      try {
+        const payload = JSON.parse(Buffer.from(tenantClaim, 'base64url').toString());
+        resolvedTenantId = payload.tenant;
+      } catch {}
+    }
+    if (!resolvedTenantId && tenantId) resolvedTenantId = tenantId;
+    if (!resolvedTenantId) throw new UnauthorizedError('Missing tenant context');
+    const [tenant] = await db.select({ id: tenants.id, status: tenants.status }).from(tenants).where(eq(tenants.id, resolvedTenantId)).limit(1);
+    if (!tenant) {
+      await db.insert(tenants).values({ id: resolvedTenantId, status: 'active' }).onConflictDoNothing();
+    } else if (tenant.status !== 'active') {
+      throw new UnauthorizedError('Invalid or inactive tenant');
+    }
+    (request as any).tenantId = resolvedTenantId;
+  });
+
+  fastify.addHook('onRequest', async (request) => {
+    if (request.url === '/v1/health') return;
+    const authMode = process.env.TWIN_AUTH_MODE || 'standalone';
+    if (authMode === 'gateway') return;
+    const staticToken = process.env.TWIN_AUTH_STATIC_TOKEN;
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) throw new UnauthorizedError('Missing or invalid Authorization header');
+    const token = authHeader.slice(7);
+    if (staticToken && token === staticToken) return;
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const [found] = await db.select({ id: apiTokens.id, tenantId: apiTokens.tenantId }).from(apiTokens).where(and(eq(apiTokens.tokenHash, tokenHash), isNull(apiTokens.revokedAt))).limit(1);
+    if (!found) throw new UnauthorizedError('Invalid or revoked API token');
+    if ((request as any).tenantId && (request as any).tenantId !== found.tenantId) throw new ForbiddenError('Token tenant mismatch');
+    (request as any).tenantId = found.tenantId;
+  });
+
   await fastify.register(personaRoutes);
   await fastify.register(chatCompletionsRoutes);
   await fastify.register(annotationRoutes);
   await fastify.register(documentRoutes);
   await fastify.register(sandboxRoutes);
-
-  fastify.setErrorHandler(errorHandler);
 
   return fastify;
 }
@@ -64,3 +101,8 @@ export async function start() {
   await server.listen({ port, host: '0.0.0.0' });
   return server;
 }
+
+start().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

@@ -85,6 +85,30 @@ services:
       start_period: 300s
     restart: unless-stopped
 
+  honcho:
+    image: nousresearch/honcho:latest
+    ports:
+      - "${HONCHO_PORT:-8083}:8080"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  hermes-agent:
+    image: nousresearch/hermes-agent:v0.7.0
+    ports:
+      - "${HERMES_PORT:-8084}:8080"
+    environment:
+      HONCHO_URL: http://honcho:8080
+      LLM_PROVIDER_URL: ${LLM_PROVIDER_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+    depends_on:
+      honcho:
+        condition: service_started
+    restart: unless-stopped
+
   # ── Optional: one-shot migration runner ────────────────────────────────
 
   migrate:
@@ -119,13 +143,19 @@ services:
       REDIS_URL: redis://redis:6379
       EMBEDDINGS_URL: http://tei-embed:80
       RERANK_URL: http://tei-rerank:80
+      HERMES_BASE_URL: http://hermes-agent:8080
+      HONCHO_URL: http://honcho:8080
+      DOTENV_CONFIG_AUTOLOAD: "false"
+      TWIN_AUTH_STATIC_TOKEN: "${TWIN_AUTH_STATIC_TOKEN:-twin-engine-secret-token}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      hermes-agent:
+        condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8090/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/v1/health"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -142,6 +172,7 @@ services:
       REDIS_URL: redis://redis:6379
       EMBEDDINGS_URL: http://tei-embed:80
       RERANK_URL: http://tei-rerank:80
+      DOTENV_CONFIG_AUTOLOAD: "false"
     depends_on:
       postgres:
         condition: service_healthy

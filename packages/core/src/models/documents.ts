@@ -6,7 +6,7 @@ export const documents = pgTable(
   'documents',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     personaId: uuid('persona_id')
       .notNull()
       .references(() => personas.id, { onDelete: 'cascade' }),
@@ -26,7 +26,7 @@ export const documentChunks = pgTable(
   'document_chunks',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     documentId: uuid('document_id')
       .notNull()
       .references(() => documents.id, { onDelete: 'cascade' }),

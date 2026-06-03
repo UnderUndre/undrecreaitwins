@@ -6,7 +6,7 @@ export const annotations = pgTable(
   'annotations',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     personaId: uuid('persona_id')
       .notNull()
       .references(() => personas.id, { onDelete: 'cascade' }),

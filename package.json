@@ -23,5 +23,10 @@
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "dotenv": "16.4.7"
+    }
   }
 }

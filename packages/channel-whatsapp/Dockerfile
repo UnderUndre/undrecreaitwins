@@ -21,8 +21,6 @@ RUN pnpm --filter @undrecreaitwins/shared run build && \
     pnpm --filter @undrecreaitwins/core run build && \
     pnpm --filter @undrecreaitwins/channel-whatsapp run build
 
-RUN pnpm prune --prod
-
 FROM node:20-alpine AS runner
 WORKDIR /app
 

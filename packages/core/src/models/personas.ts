@@ -5,7 +5,7 @@ export const personas = pgTable(
   'personas',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),
     systemPrompt: text('system_prompt').notNull(),
@@ -16,6 +16,9 @@ export const personas = pgTable(
     version: bigint('version', { mode: 'number' }).notNull().default(0),
     annotationSimilarityThreshold: real('annotation_similarity_threshold').notNull().default(0.7),
     hasAnnotations: boolean('has_annotations').notNull().default(false),
+    agentEnabled: boolean('agent_enabled').notNull().default(false),
+    toolAllowlist: jsonb('tool_allowlist').notNull().default([]),
+    agentConfig: jsonb('agent_config').notNull().default({}),
   },
   (table) => ({
     tenantSlugIdx: uniqueIndex('personas_tenant_slug_idx').on(table.tenantId, table.slug),

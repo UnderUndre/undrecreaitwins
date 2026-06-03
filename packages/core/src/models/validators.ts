@@ -11,7 +11,7 @@ export const validatorConfigs = pgTable(
   'validator_configs',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull().references(() => tenants.id),
+    tenantId: text('tenant_id').notNull().references(() => tenants.id),
     personaId: uuid('persona_id').notNull().references(() => personas.id),
     validatorName: text('validator_name').notNull(),
     mode: validatorModeEnum('mode').notNull().default('active'),
@@ -29,7 +29,7 @@ export const validatorRuns = pgTable(
   'validator_runs',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull().references(() => tenants.id),
+    tenantId: text('tenant_id').notNull().references(() => tenants.id),
     personaId: uuid('persona_id').notNull().references(() => personas.id),
     conversationId: uuid('conversation_id').notNull().references(() => conversations.id),
     messageId: uuid('message_id').references(() => messages.id),

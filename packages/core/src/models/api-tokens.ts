@@ -4,7 +4,7 @@ export const apiTokens = pgTable(
   'api_tokens',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    tenantId: uuid('tenant_id').notNull(),
+    tenantId: text('tenant_id').notNull(),
     name: text('name').notNull(),
     tokenHash: text('token_hash').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

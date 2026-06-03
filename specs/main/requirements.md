@@ -16,7 +16,7 @@ Open-source headless AI-clone (digital twin) backend. **Multi-tenant from day on
 - **Vector store**: **pgvector** on the primary Postgres (HNSW cosine). **Qdrant dropped** — single store, no second RAG stack.
 - **Embeddings + rerank**: **BGE-M3** (embed) + **BGE-reranker-v2-m3** (rerank) via a **TEI sidecar** over HTTP (`EMBEDDINGS_URL`). Multilingual incl. Russian.
 - **Retrieval**: vector + reranker (hybrid / full-text **deferred** until keyword recall demands it).
-- **Memory**: **Letta** (conversational/personality persistence).
+- **Memory**: **Honcho** (agent working / user-model memory; reconstructible from Postgres SoR) — supersedes Letta (010-hermes-executor).
 - **LLM gateway**: OmniRoute / OpenAI-compatible provider (`LLM_PROVIDER_URL`).
 - **Observability / eval**: **Langfuse** (self-host) — trace per reply, fire-and-forget, project-per-tenant.
 - **Doc parsing**: officeParser (TS-native) — PDF/DOCX/TXT.
