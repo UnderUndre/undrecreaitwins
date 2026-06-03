@@ -74,11 +74,11 @@ Assembled answer (`agent_message_chunk`s) → **validators (004)** → pass: per
 Per-tenant budget exhausted → finish in-flight turn, refuse new agentic turns; per-turn cap hit → curtail + finalize best answer.
 
 ## Lifecycle (ACP-backed)
-- **Warm-pool**: live `hermes acp` processes (Redis registry, keyed `(tenant,persona,conversation)`).
+- **Warm-pool**: live `hermes acp` processes (Redis registry, keyed **`(tenant, persona)`** — one process per tenant+persona with an isolated memory store; that pair's conversations are ACP sessions *within* it, T000d).
 - **Spawn**: new process or `session/new` on a pooled process; hydrate from SoR+Honcho (lazy).
 - **Hibernate/Resume**: ACP `sessionCapabilities.{resume,fork,list}` → hibernate drops/keeps the session; resume re-attaches (no full rebuild).
 - Durable state in Postgres+Honcho; process/Redis state ephemeral.
-- **Open (T000d)**: process-per-tenant vs session-per-conversation-in-shared-process — gated on cross-session isolation proof.
+- **Resolved (T000d 🔴)**: cross-session memory leak confirmed → **process-per-(tenant, persona)** with an isolated memory store/HOME; sharing one process across tenants is unsafe. A (tenant, persona)'s conversations run as ACP **sessions within** its process — but in-process cross-conversation isolation requires hermes native memory **OFF + an isolated/empty per-process store** (engine owns per-conversation memory); T000d showed in-process sessions otherwise bleed, so until that's re-tested the conservative fallback is **process-per-conversation**.
 
 ## Proactive dožим (US3, via 009)
 009 scan eligible → `lifecycle.spawn` → `runAgentTurn({kind:'dozhim'})` → 009 anti-spam + 004 validators → send/suppress (audited) → hibernate. Agent never sends directly.
