@@ -15,7 +15,7 @@ All new tables tenant-scoped via Postgres **RLS** (`app.current_tenant`, `withTe
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid PK | |
-| `tenantId` | uuid | RLS key |
+| `tenantId` | text | RLS key (tenant PKs migrated uuid→text) |
 | `personaId` | uuid FK → personas.id | |
 | `conversationId` | uuid FK → conversations.id | |
 | `kind` | text | `reply` \| `dozhim` (proactive, 009) |
@@ -33,7 +33,7 @@ Index: `(tenantId, conversationId, startedAt)`; `(tenantId, status)`.
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | uuid PK | |
-| `tenantId` | uuid | RLS key |
+| `tenantId` | text | RLS key (tenant PKs migrated uuid→text) |
 | `personaId` | uuid | |
 | `agentRunId` | uuid FK → agent_runs.id | |
 | `action` | text | tool/action id (e.g. `crm.write`) |

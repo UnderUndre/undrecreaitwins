@@ -49,6 +49,7 @@ export async function buildServer() {
   fastify.setErrorHandler(errorHandler);
 
   fastify.addHook('onRequest', async (request) => {
+    if (request.url === '/v1/health') return;
     const tenantId = request.headers['x-tenant-id'] as string | undefined;
     const tenantClaim = request.headers['x-tenant-claim'] as string | undefined;
     let resolvedTenantId: string | undefined;
@@ -70,6 +71,7 @@ export async function buildServer() {
   });
 
   fastify.addHook('onRequest', async (request) => {
+    if (request.url === '/v1/health') return;
     const authMode = process.env.TWIN_AUTH_MODE || 'standalone';
     if (authMode === 'gateway') return;
     const staticToken = process.env.TWIN_AUTH_STATIC_TOKEN;
