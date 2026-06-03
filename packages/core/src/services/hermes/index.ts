@@ -1,7 +1,7 @@
 export { HermesExecutor } from './hermes-executor.js';
 export type { RunAgentTurnInput, RunAgentTurnResult, AgentStepEvent } from './hermes-executor.js';
 export { executeTool, registerTool, getToolDefinitions } from './tool-gateway.js';
-export type { ToolCallRequest, ToolCallResult, ToolDefinition } from './tool-gateway.js';
+export type { ToolCallRequest, ToolCallResult, ToolDefinition, ToolAllowEntry } from './tool-gateway.js';
 export { routeTurn } from './turn-router.js';
 export type { TurnKind, RoutingDecision, RouterContext } from './turn-router.js';
 export { checkBudget, validateOutput, extractFinalAnswer } from './guardrail.js';

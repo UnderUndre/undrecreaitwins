@@ -1,4 +1,9 @@
 import type { Persona } from '@undrecreaitwins/shared';
+import { AppError } from '@undrecreaitwins/shared';
+import { LLMClient } from '../llm-client.js';
+import pino from 'pino';
+
+const logger = pino();
 
 export interface RunAgentTurnInput {
   tenantId: string;
@@ -13,11 +18,12 @@ export interface RunAgentTurnInput {
   budget: {
     maxLoopIterations: number;
     maxTokens: number;
+    maxExecutionMs?: number;
   };
 }
 
 export interface AgentStepEvent {
-  type: 'thinking' | 'tool_call' | 'tool_result' | 'answer' | 'done' | 'budget_exceeded' | 'error';
+  type: 'thinking' | 'tool_call' | 'tool_result' | 'answer' | 'done' | 'budget_exceeded' | 'error' | 'timeout';
   content?: string;
   toolName?: string;
   toolArgs?: Record<string, unknown>;
@@ -33,93 +39,171 @@ export interface RunAgentTurnResult {
     toolCallsCount: number;
   };
   agentRunId: string;
+  fallbackUsed?: boolean;
 }
 
 export class HermesExecutor {
   private readonly baseUrl: string;
   private readonly apiToken: string;
+  private readonly fallbackClient: LLMClient;
 
   constructor() {
-    this.baseUrl = process.env.HERMES_BASE_URL || 'http://localhost:8080';
-    this.apiToken = process.env.HERMES_API_TOKEN || '';
+    const baseUrl = process.env.HERMES_BASE_URL;
+    if (!baseUrl) {
+      throw new AppError('HERMES_BASE_URL is required', 500, 'configuration_error');
+    }
+    this.baseUrl = baseUrl;
+
+    const apiToken = process.env.HERMES_API_TOKEN;
+    if (!apiToken) {
+      throw new AppError('HERMES_API_TOKEN is required', 500, 'configuration_error');
+    }
+    this.apiToken = apiToken;
+
+    this.fallbackClient = new LLMClient();
   }
 
   async runAgentTurn(input: RunAgentTurnInput): Promise<RunAgentTurnResult> {
     const steps: AgentStepEvent[] = [];
     const controller = new AbortController();
 
+    // H2: Hard execution timeout
+    const maxMs = input.budget.maxExecutionMs
+      ?? (process.env.AGENT_MAX_EXECUTION_MS ? parseInt(process.env.AGENT_MAX_EXECUTION_MS, 10) : undefined);
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+
+    if (maxMs && Number.isFinite(maxMs) && maxMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, maxMs);
+    }
+
     const systemPrompt = this.buildSystemPrompt(input);
+    const model = input.persona.modelPreferences?.model ?? 'default';
     const messages = [
       ...input.context.conversationHistory.map(m => ({ role: m.role, content: m.content })),
       { role: 'user' as const, content: input.userMessage },
     ];
 
-    const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.apiToken ? { Authorization: `Bearer ${this.apiToken}` } : {}),
-        ...(input.sessionId ? { 'X-Hermes-Session-Id': input.sessionId } : {}),
-      },
-      body: JSON.stringify({
-        model: 'default',
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
-        stream: true,
-        max_tokens: input.budget.maxTokens,
-      }),
-      signal: controller.signal,
-    });
+    try {
+      const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiToken}`,
+          ...(input.sessionId ? { 'X-Hermes-Session-Id': input.sessionId } : {}),
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'system', content: systemPrompt }, ...messages],
+          stream: true,
+          max_tokens: input.budget.maxTokens,
+        }),
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      throw new Error(`Hermes API error: ${response.status} ${await response.text()}`);
-    }
+      if (!response.ok) {
+        logger.warn({ status: response.status }, 'Hermes API error, falling back to thin completion');
+        return this.fallbackComplete(messages, systemPrompt, steps, input, model, 'Hermes API error');
+      }
 
-    let answer = '';
-    let tokensUsed = 0;
-    let loopIterations = 0;
-    let toolCallsCount = 0;
+      let answer = '';
+      let tokensUsed = 0;
+      let loopIterations = 0;
+      let toolCallsCount = 0;
 
-    if (response.body) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') continue;
 
-          try {
-            const event = JSON.parse(data);
-            const delta = event.choices?.[0]?.delta;
-            if (delta?.content) {
-              answer += delta.content;
-              steps.push({ type: 'thinking', content: delta.content });
+            try {
+              const event = JSON.parse(data);
+              const delta = event.choices?.[0]?.delta;
+              if (delta?.content) {
+                answer += delta.content;
+                steps.push({ type: 'thinking', content: delta.content });
+              }
+              if (event.usage) {
+                tokensUsed = event.usage.total_tokens ?? tokensUsed;
+              }
+            } catch (err) {
+              logger.warn({ err }, 'Failed to parse SSE event from Hermes');
             }
-            if (event.usage) {
-              tokensUsed = event.usage.total_tokens ?? tokensUsed;
-            }
-          } catch {}
+          }
         }
       }
-    }
 
-    steps.push({ type: 'answer', content: answer });
+      steps.push({ type: 'answer', content: answer });
+      steps.push({ type: 'done' });
+
+      return {
+        answer,
+        steps,
+        usage: { loopIterations, tokensUsed, toolCallsCount },
+        agentRunId: '',
+      };
+    } catch (err) {
+      if (timedOut) {
+        steps.push({ type: 'timeout', content: `Execution timed out after ${maxMs}ms` });
+        logger.warn({ maxMs }, 'Hermes execution timeout, falling back');
+        return this.fallbackComplete(messages, systemPrompt, steps, input, model, `Execution timeout after ${maxMs}ms`);
+      }
+
+      logger.warn({ err }, 'Hermes fetch failed, falling back to thin completion');
+      return this.fallbackComplete(messages, systemPrompt, steps, input, model, err instanceof Error ? err.message : String(err));
+    } finally {
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    }
+  }
+
+  private async fallbackComplete(
+    messages: Array<{ role: string; content: string }>,
+    systemPrompt: string,
+    steps: AgentStepEvent[],
+    input: RunAgentTurnInput,
+    model: string,
+    _fallbackReason: string,
+  ): Promise<RunAgentTurnResult> {
+    const llmMessages = [
+      { role: 'system' as const, content: systemPrompt },
+      ...messages,
+    ];
+
+    const llmResponse = await this.fallbackClient.complete({
+      messages: llmMessages,
+      model,
+      maxTokens: input.budget.maxTokens,
+    });
+
+    steps.push({ type: 'answer', content: llmResponse.content });
     steps.push({ type: 'done' });
 
     return {
-      answer,
+      answer: llmResponse.content,
       steps,
-      usage: { loopIterations, tokensUsed, toolCallsCount },
+      usage: {
+        loopIterations: 0,
+        tokensUsed: llmResponse.usage.total_tokens,
+        toolCallsCount: 0,
+      },
       agentRunId: '',
+      fallbackUsed: true,
     };
   }
 

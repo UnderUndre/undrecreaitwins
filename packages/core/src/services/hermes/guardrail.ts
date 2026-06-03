@@ -26,9 +26,23 @@ export function checkBudget(
 }
 
 export async function validateOutput(
-  _output: string,
-  _validators: Array<(text: string) => Promise<{ pass: boolean; reason?: string }>>,
+  output: string,
+  validators: Array<(text: string) => Promise<{ pass: boolean; reason?: string }>>,
 ): Promise<GuardrailResult> {
+  for (const validator of validators) {
+    try {
+      const result = await validator(output);
+      if (!result.pass) {
+        return { allowed: false, reason: result.reason ?? 'Validator rejected output' };
+      }
+    } catch (err) {
+      // Fail closed: validator error = output not allowed
+      return {
+        allowed: false,
+        reason: `Validator error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
   return { allowed: true };
 }
 

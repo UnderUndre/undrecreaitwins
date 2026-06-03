@@ -1,8 +1,8 @@
 import type { Redis } from 'ioredis';
-
 export interface AgentState {
   tenantId: string;
   personaId: string;
+  conversationId?: string;
   hermesSessionId: string;
   status: 'warm' | 'cold' | 'hibernating';
   lastActivityAt: number;
@@ -11,49 +11,64 @@ export interface AgentState {
 const WARM_POOL_KEY = 'hermes:warm-pool';
 const IDLE_TTL_MS = 15 * 60 * 1000;
 
+function stateKey(tenantId: string, personaId: string, conversationId?: string): string {
+  const conv = conversationId ?? '_none';
+  return `${WARM_POOL_KEY}:${tenantId}:${personaId}:${conv}`;
+}
+
 export class AgentLifecycle {
   constructor(private readonly redis: Redis) {}
 
-  async getState(personaId: string): Promise<AgentState | null> {
-    const raw = await this.redis.get(`${WARM_POOL_KEY}:${personaId}`);
+  async getState(tenantId: string, personaId: string, conversationId?: string): Promise<AgentState | null> {
+    const raw = await this.redis.get(stateKey(tenantId, personaId, conversationId));
     return raw ? JSON.parse(raw) : null;
   }
 
-  async spawn(tenantId: string, personaId: string, hermesSessionId: string): Promise<AgentState> {
+  async spawn(tenantId: string, personaId: string, hermesSessionId: string, conversationId?: string): Promise<AgentState> {
     const state: AgentState = {
       tenantId,
       personaId,
+      conversationId,
       hermesSessionId,
       status: 'warm',
       lastActivityAt: Date.now(),
     };
-    await this.redis.set(`${WARM_POOL_KEY}:${personaId}`, JSON.stringify(state), 'PX', IDLE_TTL_MS);
+    await this.redis.set(stateKey(tenantId, personaId, conversationId), JSON.stringify(state), 'PX', IDLE_TTL_MS);
     return state;
   }
 
-  async touch(personaId: string): Promise<void> {
-    const state = await this.getState(personaId);
+  async touch(tenantId: string, personaId: string, conversationId?: string): Promise<void> {
+    const state = await this.getState(tenantId, personaId, conversationId);
     if (state) {
       state.lastActivityAt = Date.now();
       state.status = 'warm';
-      await this.redis.set(`${WARM_POOL_KEY}:${personaId}`, JSON.stringify(state), 'PX', IDLE_TTL_MS);
+      await this.redis.set(stateKey(tenantId, personaId, conversationId), JSON.stringify(state), 'PX', IDLE_TTL_MS);
     }
   }
 
-  async hibernate(personaId: string): Promise<void> {
-    const state = await this.getState(personaId);
+  async hibernate(tenantId: string, personaId: string, conversationId?: string): Promise<void> {
+    const state = await this.getState(tenantId, personaId, conversationId);
     if (state) {
       state.status = 'hibernating';
-      await this.redis.set(`${WARM_POOL_KEY}:${personaId}`, JSON.stringify(state), 'PX', IDLE_TTL_MS * 2);
+      await this.redis.set(stateKey(tenantId, personaId, conversationId), JSON.stringify(state), 'PX', IDLE_TTL_MS * 2);
     }
   }
 
-  async evict(personaId: string): Promise<void> {
-    await this.redis.del(`${WARM_POOL_KEY}:${personaId}`);
+  async evict(tenantId: string, personaId: string, conversationId?: string): Promise<void> {
+    await this.redis.del(stateKey(tenantId, personaId, conversationId));
   }
 
   async listWarm(): Promise<AgentState[]> {
-    const keys = await this.redis.keys(`${WARM_POOL_KEY}:*`);
+    const keys: string[] = [];
+    let cursor = '0';
+    const match = `${WARM_POOL_KEY}:*`;
+
+    do {
+      const [nextCursor, batch] = await this.redis.scan(cursor, 'MATCH', match, 'COUNT', 100);
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
+
     if (keys.length === 0) return [];
     const values = await this.redis.mget(...keys);
     return values.filter((v): v is string => v !== null).map(v => JSON.parse(v));

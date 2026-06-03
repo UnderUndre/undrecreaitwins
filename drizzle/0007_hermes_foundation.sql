@@ -7,7 +7,7 @@ CREATE TABLE "action_audit" (
 	"result_json" text,
 	"idempotency_key" text NOT NULL,
 	"is_write_action" boolean DEFAULT false NOT NULL,
-	"status" text DEFAULT 'ok' NOT NULL,
+	"status" text DEFAULT 'pending' NOT NULL,
 	"error_message" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "action_audit_idempotency_key_unique" UNIQUE("idempotency_key")
@@ -55,4 +55,10 @@ CREATE INDEX "action_audit_sweep_idx" ON "action_audit" USING btree ("status","c
 CREATE INDEX "action_audit_tenant_idx" ON "action_audit" USING btree ("tenant_id");--> statement-breakpoint
 CREATE INDEX "agent_runs_tenant_idx" ON "agent_runs" USING btree ("tenant_id");--> statement-breakpoint
 CREATE INDEX "agent_runs_persona_idx" ON "agent_runs" USING btree ("persona_id");--> statement-breakpoint
-CREATE INDEX "agent_runs_created_at_idx" ON "agent_runs" USING btree ("created_at");--> statement-breakpoint`nALTER TABLE \"action_audit\" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint`nALTER TABLE \"action_audit\" FORCE ROW LEVEL SECURITY;--> statement-breakpoint`nALTER TABLE \"agent_runs\" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint`nALTER TABLE \"agent_runs\" FORCE ROW LEVEL SECURITY;--> statement-breakpoint`nCREATE POLICY tenant_isolation ON \"action_audit\" USING (tenant_id = current_setting('app.current_tenant', true));--> statement-breakpoint`nCREATE POLICY tenant_isolation ON \"agent_runs\" USING (tenant_id = current_setting('app.current_tenant', true));
+CREATE INDEX "agent_runs_created_at_idx" ON "agent_runs" USING btree ("created_at");--> statement-breakpoint
+ALTER TABLE "action_audit" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "action_audit" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "agent_runs" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "agent_runs" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE POLICY tenant_isolation ON "action_audit" USING (tenant_id = current_setting('app.current_tenant', true)) WITH CHECK (tenant_id = current_setting('app.current_tenant', true));--> statement-breakpoint
+CREATE POLICY tenant_isolation ON "agent_runs" USING (tenant_id = current_setting('app.current_tenant', true)) WITH CHECK (tenant_id = current_setting('app.current_tenant', true));

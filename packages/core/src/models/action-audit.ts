@@ -11,7 +11,7 @@ export const actionAudit = pgTable(
     resultJson: text('result_json'),
     idempotencyKey: text('idempotency_key').notNull().unique(),
     isWriteAction: boolean('is_write_action').notNull().default(false),
-    status: text('status').notNull().default('ok'), // pending, ok, failed, abandoned, denied, dry_run
+    status: text('status').notNull().default('pending'), // pending, ok, failed, abandoned, denied, dry_run
     errorMessage: text('error_message'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
