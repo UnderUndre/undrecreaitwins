@@ -111,8 +111,27 @@ export class HermesExecutor {
 
       let answer = '';
       let tokensUsed = 0;
-      let loopIterations = 0;
-      let toolCallsCount = 0;
+      const loopIterations = 0;
+      const toolCallsCount = 0;
+
+      const handleSse = (raw: string): void => {
+        if (!raw.startsWith('data: ')) return;
+        const data = raw.slice(6).trim();
+        if (data === '' || data === '[DONE]') return;
+        try {
+          const event = JSON.parse(data);
+          const delta = event.choices?.[0]?.delta;
+          if (delta?.content) {
+            answer += delta.content;
+            steps.push({ type: 'thinking', content: delta.content });
+          }
+          if (event.usage) {
+            tokensUsed = event.usage.total_tokens ?? tokensUsed;
+          }
+        } catch (err) {
+          logger.warn({ err }, 'Failed to parse SSE event from Hermes');
+        }
+      };
 
       if (response.body) {
         const reader = response.body.getReader();
@@ -127,26 +146,12 @@ export class HermesExecutor {
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') continue;
-
-            try {
-              const event = JSON.parse(data);
-              const delta = event.choices?.[0]?.delta;
-              if (delta?.content) {
-                answer += delta.content;
-                steps.push({ type: 'thinking', content: delta.content });
-              }
-              if (event.usage) {
-                tokensUsed = event.usage.total_tokens ?? tokensUsed;
-              }
-            } catch (err) {
-              logger.warn({ err }, 'Failed to parse SSE event from Hermes');
-            }
-          }
+          for (const line of lines) handleSse(line);
         }
+
+        // Flush decoder + process any residual buffered line (final chunk may lack a trailing newline).
+        buffer += decoder.decode();
+        if (buffer.trim()) handleSse(buffer.trim());
       }
 
       steps.push({ type: 'answer', content: answer });
@@ -209,7 +214,7 @@ export class HermesExecutor {
 
   private buildSystemPrompt(input: RunAgentTurnInput): string {
     const parts: string[] = [];
-    parts.push(`You are ${input.persona.name}, an AI assistant.`);
+    parts.push(input.persona.systemPrompt || `You are ${input.persona.name}, an AI assistant.`);
     if (input.context.ragChunks?.length) {
       parts.push('\nRelevant context:\n' + input.context.ragChunks.join('\n'));
     }

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, index, unique } from 'drizzle-orm/pg-core';
 
 export const actionAudit = pgTable(
   'action_audit',
@@ -9,7 +9,7 @@ export const actionAudit = pgTable(
     toolName: text('tool_name').notNull(),
     argsJson: text('args_json'),
     resultJson: text('result_json'),
-    idempotencyKey: text('idempotency_key').notNull().unique(),
+    idempotencyKey: text('idempotency_key').notNull(),
     isWriteAction: boolean('is_write_action').notNull().default(false),
     status: text('status').notNull().default('pending'), // pending, ok, failed, abandoned, denied, dry_run
     errorMessage: text('error_message'),
@@ -18,5 +18,6 @@ export const actionAudit = pgTable(
   (table) => ({
     sweepIdx: index('action_audit_sweep_idx').on(table.status, table.createdAt),
     tenantIdx: index('action_audit_tenant_idx').on(table.tenantId),
+    idempotencyUnique: unique('action_audit_tenant_idempotency_key_unique').on(table.tenantId, table.idempotencyKey),
   }),
 );

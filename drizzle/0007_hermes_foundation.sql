@@ -10,7 +10,7 @@ CREATE TABLE "action_audit" (
 	"status" text DEFAULT 'pending' NOT NULL,
 	"error_message" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "action_audit_idempotency_key_unique" UNIQUE("idempotency_key")
+	CONSTRAINT "action_audit_tenant_idempotency_key_unique" UNIQUE("tenant_id","idempotency_key")
 );
 --> statement-breakpoint
 CREATE TABLE "agent_runs" (

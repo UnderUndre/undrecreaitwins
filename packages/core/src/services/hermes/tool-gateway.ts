@@ -1,6 +1,6 @@
 import { withTenantContext } from '../../db.js';
 import { actionAudit } from '../../models/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { ConflictError, AppError, ForbiddenError } from '@undrecreaitwins/shared';
 
@@ -140,7 +140,7 @@ export async function executeTool(call: ToolCallRequest): Promise<ToolCallResult
       idempotencyKey: call.idempotencyKey,
       isWriteAction: true,
       status: 'pending',
-    }).onConflictDoNothing({ target: actionAudit.idempotencyKey })
+    }).onConflictDoNothing({ target: [actionAudit.tenantId, actionAudit.idempotencyKey] })
       .returning({ id: actionAudit.id });
 
     if (reserved) {
@@ -154,7 +154,7 @@ export async function executeTool(call: ToolCallRequest): Promise<ToolCallResult
       status: actionAudit.status,
     })
       .from(actionAudit)
-      .where(eq(actionAudit.idempotencyKey, call.idempotencyKey))
+      .where(and(eq(actionAudit.tenantId, call.tenantId), eq(actionAudit.idempotencyKey, call.idempotencyKey)))
       .limit(1);
 
     if (!existing) {

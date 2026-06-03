@@ -11,6 +11,14 @@ export interface AgentState {
 const WARM_POOL_KEY = 'hermes:warm-pool';
 const IDLE_TTL_MS = 15 * 60 * 1000;
 
+function safeParse(raw: string): AgentState | null {
+  try {
+    return JSON.parse(raw) as AgentState;
+  } catch {
+    return null;
+  }
+}
+
 function stateKey(tenantId: string, personaId: string, conversationId?: string): string {
   const conv = conversationId ?? '_none';
   return `${WARM_POOL_KEY}:${tenantId}:${personaId}:${conv}`;
@@ -21,7 +29,7 @@ export class AgentLifecycle {
 
   async getState(tenantId: string, personaId: string, conversationId?: string): Promise<AgentState | null> {
     const raw = await this.redis.get(stateKey(tenantId, personaId, conversationId));
-    return raw ? JSON.parse(raw) : null;
+    return raw ? safeParse(raw) : null;
   }
 
   async spawn(tenantId: string, personaId: string, hermesSessionId: string, conversationId?: string): Promise<AgentState> {
@@ -71,6 +79,9 @@ export class AgentLifecycle {
 
     if (keys.length === 0) return [];
     const values = await this.redis.mget(...keys);
-    return values.filter((v): v is string => v !== null).map(v => JSON.parse(v));
+    return values
+      .filter((v): v is string => v !== null)
+      .map(safeParse)
+      .filter((s): s is AgentState => s !== null);
   }
 }
