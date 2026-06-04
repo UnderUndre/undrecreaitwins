@@ -17,7 +17,7 @@ Open-source headless AI-clone (digital twin) backend. **Multi-tenant from day on
 - **Embeddings + rerank**: **BGE-M3** (embed) + **BGE-reranker-v2-m3** (rerank) via a **TEI sidecar** over HTTP (`EMBEDDINGS_URL`). Multilingual incl. Russian.
 - **Retrieval**: vector + reranker (hybrid / full-text **deferred** until keyword recall demands it).
 - **Memory**: **Honcho** (agent working / user-model memory; reconstructible from Postgres SoR; `HONCHO_URL`) — supersedes Letta (010-hermes-executor).
-- **Agentic executor**: self-host **hermes-agent** (MIT) as the agentic LLM backend (spec 010) — plan→tool→observe; **engine-mediated tool-gateway** (allow-list + per-tenant write-permission + `reserve→execute→finalize` idempotency + `action_audit`); validators outbound gate; fail-open fallback to thin completion. Env: `HERMES_BASE_URL`, `HERMES_API_TOKEN`, `AGENT_MAX_EXECUTION_MS`, `AGENT_LOOP_CAP`.
+- **Agentic executor**: self-host **hermes-agent** (MIT) as the agentic LLM backend (spec 010) — plan→tool→observe; **engine-mediated tool-gateway** (allow-list + per-tenant write-permission + `reserve→execute→finalize` idempotency + `action_audit`); validators outbound gate; fail-open fallback to thin completion. Integration = **ACP** (engine spawns `hermes acp`) + **engine-hosted HTTP MCP server** (tool-gateway). Env: `HERMES_ACP_CMD`, `ENGINE_MCP_SECRET`, `ENGINE_MCP_PORT`, `AGENT_MAX_EXECUTION_MS`, `AGENT_LOOP_CAP`, `HONCHO_URL`.
 - **LLM gateway**: OmniRoute / OpenAI-compatible provider (`LLM_PROVIDER_URL`).
 - **Observability / eval**: **Langfuse** (self-host) — trace per reply, fire-and-forget, project-per-tenant.
 - **Doc parsing**: officeParser (TS-native) — PDF/DOCX/TXT.

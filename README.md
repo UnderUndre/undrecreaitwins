@@ -11,7 +11,7 @@ TypeScript · Fastify · PostgreSQL + **pgvector** · Redis (BullMQ + Streams) �
 ```bash
 # 1) Set env in infra/.env — at minimum:
 #    DATABASE_URL, REDIS_URL, LLM_PROVIDER_URL, LLM_API_KEY, EMBEDDINGS_URL
-#    (agentic, spec 010) HERMES_BASE_URL, HERMES_API_TOKEN, HONCHO_URL
+#    (agentic, spec 010) HERMES_ACP_CMD, ENGINE_MCP_SECRET, ENGINE_MCP_PORT, HONCHO_URL
 # 2) Bring up the self-contained stack:
 docker compose -f infra/docker-compose.standalone.yml up -d
 # API health → http://localhost:8090/v1/health
@@ -55,7 +55,8 @@ Standalone adapters (each a `ChannelAdapter` worker over the Redis Streams trans
 | `LANGFUSE_*` | observability / eval (optional) |
 | `TWIN_STREAM_TIMEOUT_MS` | streaming completions (spec 002) |
 | `TWIN_REENGAGE_*` | re-engagement workers (spec 009) |
-| `HERMES_BASE_URL` / `HERMES_API_TOKEN` | self-hosted `hermes-agent` endpoint (spec 010) |
+| `HERMES_ACP_CMD` | command the engine spawns for the ACP turn (spec 010), e.g. `hermes acp --accept-hooks` |
+| `ENGINE_MCP_SECRET` / `ENGINE_MCP_PORT` | engine-hosted MCP server (tool-gateway) auth secret + port (spec 010) |
 | `HONCHO_URL` | agent working-memory service (spec 010) |
 | `AGENT_MAX_EXECUTION_MS` / `AGENT_LOOP_CAP` | agent hard timeout + loop/cost cap (spec 010) |
 

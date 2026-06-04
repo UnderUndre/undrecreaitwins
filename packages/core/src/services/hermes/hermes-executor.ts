@@ -122,7 +122,7 @@ export class HermesExecutor {
     const loopIterations = 0;
     let acpSessionId: string | undefined;
 
-    let mcpServer: { server: { stop: () => Promise<void> }; mcpEntry: { url: string; headers: Record<string, string> } } | undefined;
+    let mcpServer: { server: { stop: () => Promise<void> }; mcpEntry: { name: string; url: string; headers: Array<{ name: string; value: string }> } } | undefined;
 
     try {
       // ── Start engine MCP server for this tenant+persona ───────────────
@@ -134,6 +134,7 @@ export class HermesExecutor {
 
       const mcpEntry: AcpMcpServerEntry = {
         type: 'http',
+        name: mcpServer.mcpEntry.name,
         url: mcpServer.mcpEntry.url,
         headers: mcpServer.mcpEntry.headers,
       };
@@ -234,7 +235,7 @@ export class HermesExecutor {
     tenantId: string,
     personaId: string,
     allowlist: ToolAllowEntry[],
-  ): Promise<{ server: HttpMcpTransport; mcpEntry: { url: string; headers: Record<string, string> } }> {
+  ): Promise<{ server: HttpMcpTransport; mcpEntry: { name: string; url: string; headers: Array<{ name: string; value: string }> } }> {
     const secret = process.env.ENGINE_MCP_SECRET;
     if (!secret) {
       throw new AppError('ENGINE_MCP_SECRET is required', 500, 'configuration_error');

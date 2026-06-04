@@ -45,11 +45,14 @@ export interface AcpSessionPromptResult {
 
 export interface AcpMcpServerEntry {
   type: 'http' | 'stdio';
+  /** REQUIRED by hermes acp (Pydantic validation) — server name. */
+  name: string;
   url?: string;
-  headers?: Record<string, string>;
+  /** hermes expects a LIST of {name,value}, NOT an object (verified: http-MCP smoke). */
+  headers?: Array<{ name: string; value: string }>;
   command?: string;
   args?: string[];
-  env?: Record<string, string>;
+  env?: Array<{ name: string; value: string }>;
 }
 
 export interface AcpClientConfig {

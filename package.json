@@ -10,7 +10,10 @@
     "test:unit": "pnpm -r run test:unit",
     "test:integration": "pnpm -r run test:integration",
     "validate": "pnpm -r run validate",
-    "lint": "pnpm -r run lint"
+    "lint": "pnpm -r run lint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push"
   },
   "engines": {
     "node": ">=20.0.0",
@@ -19,6 +22,7 @@
   "packageManager": "pnpm@9.15.4",
   "devDependencies": {
     "drizzle-kit": "^0.31.10",
+    "postgres": "^3.4.0",
     "tsx": "^4.22.3"
   },
   "dependencies": {

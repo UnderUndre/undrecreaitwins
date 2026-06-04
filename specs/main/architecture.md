@@ -7,7 +7,7 @@
 | Package | Role |
 |---------|------|
 | `packages/shared` | Common types, errors, utils — incl. canonical `ChannelAdapter`/`ChannelMessage`, `StreamChunk` |
-| `packages/core` | Business logic, Drizzle models (incl. `agent_runs`, `action_audit`), services (chat, embedding, annotation, document, grounding, reengagement, langfuse, **hermes**: executor/tool-gateway/guardrail/turn-router/agent-lifecycle/honcho-client), `ChannelTransport`, `withTenantContext` |
+| `packages/core` | Business logic, Drizzle models (incl. `agent_runs`, `action_audit`), services (chat, embedding, annotation, document, grounding, reengagement, langfuse, **hermes**: executor/hermes-adapter(ACP client)/mcp-server(tool-gateway over MCP)/tool-gateway/guardrail/turn-router/agent-lifecycle/honcho-client), `ChannelTransport`, `withTenantContext` |
 | `packages/api` | Fastify REST (`/v1/...`), route wiring via `buildServer()` |
 | `packages/memory` | Letta-based memory (**legacy**) — superseded by **Honcho** for agentic working-memory (010); kept until migrated off |
 | `packages/training` | BullMQ workers (document parse → chunk → embed) |

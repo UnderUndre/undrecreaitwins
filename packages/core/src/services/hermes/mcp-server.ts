@@ -4,9 +4,9 @@
  * HTTP binding via Fastify is the primary transport (shares in-process DB).
  * Stdio entrypoint can be added later.
  *
- * NOTE: http-mcp support in "hermes acp" session/new still needs runtime
- * check (stdio is the proven transport from smoke tests, but a stdio engine
- * server cannot share the in-process DB easily — hence http is preferred).
+ * VERIFIED (http-MCP smoke): hermes acp accepts an http MCP server in session/new.
+ * Entry-shape gotcha (hermes Pydantic): `name` is REQUIRED, and `headers`/`env` must be
+ * a LIST [{name,value}], NOT an object. Plain application/json replies; no Mcp-Session-Id.
  */
 import type { Server } from 'node:http';
 import type { FastifyInstance } from 'fastify';
@@ -53,8 +53,9 @@ export interface McpServerConfig {
 
 interface AcpMcpServerEntry {
   type: 'http';
+  name: string;
   url: string;
-  headers: Record<string, string>;
+  headers: Array<{ name: string; value: string }>;
 }
 
 export class EngineMcpServer {
@@ -248,8 +249,9 @@ export class HttpMcpTransport {
 
     const mcpEntry: AcpMcpServerEntry = {
       type: 'http',
+      name: 'engine-tools',
       url: `${address}/mcp`,
-      headers: { 'X-Engine-MCP-Secret': this.secret },
+      headers: [{ name: 'X-Engine-MCP-Secret', value: this.secret }],
     };
 
     return { mcpEntry, nodeServer: this.fastify.server };
