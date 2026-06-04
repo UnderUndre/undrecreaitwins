@@ -10,15 +10,16 @@ Make the LLM provider **per-assistant** (with a tenant-level default) in the eng
 Approach: extend persona (008) with a `1:0..1` provider-config entity + a tenant-default entity (Drizzle/Postgres, key encrypted at rest via 007 KMS envelope); add a provider-config service + internal API for the Product BFF; wire effective-config injection into the existing `packages/core/src/services/hermes/*` executor; add a BullMQ provider-failure retry worker; enforce SSRF egress at the engine. **Gate T000-LLM**: empirically verify whether Hermes ACP `session/new` accepts a per-session model/provider override (drives injection strategy A vs fallback B).
 
 ## Technical Context
+## Technical Context
 
 **Language/Version**: TypeScript / Node (engine `packages/core`)
 **Primary Dependencies**: Drizzle ORM + Postgres (SoR); BullMQ (durable-retry, 009); Hermes `hermes-agent` via ACP (010, `hermes-adapter.ts`/`hermes-executor.ts`/`mcp-server.ts`); OpenMeter (metering, 007); validators (004, unchanged gate); Honcho (memory, untouched)
-**Storage**: Postgres (Drizzle) — 2 new entities (`LLMProviderConfig`, `TenantLLMDefault`); API key **encrypted at rest** (007 KMS envelope) — *substrate confirmed in research.md*
+**Storage**: Postgres (Drizzle) — 2 new entities (`LLMProviderConfig`, `TenantLLMDefault`) with `version` col for optimistic locking; API key **encrypted at rest** (007 KMS envelope) — *substrate confirmed in research.md*
 **Testing**: vitest (unit/integration) + integration harness for ACP/MCP (cf. 010 T000a)
 **Target Platform**: self-host orchestra (C3, 010); engine owns data/keys
-**Project Type**: web-service (engine runtime backend)
-**Performance Goals**: preserve 010 warm-pool budget — agentic turn p95 ≤ ~8 s warm / ≤ ~20 s cold; injection must not collapse warm reuse for common configs
-**Constraints**: zero message loss on provider outage (durable-retry); API key never logged/traced/cross-tenant; SSRF egress blocked; pooling coherence (no stale/foreign config in a pooled process — T000d hazard class)
+**Performance Goals**: preserve 010 warm-pool budget — agentic turn p95 ≤ ~8 s warm / ≤ ~20 s cold; injection must not collapse warm reuse for common configs. **Strategy B limit**: max 8 distinct configs per tenant, LRU eviction on idle TTL (15 min).
+**Constraints**: zero message loss on provider outage (durable-retry); API key never logged/traced/cross-tenant; SSRF egress blocked via **DNS-resolve-and-pin** (resolve to IP, then check CIDR, then connect via pinned IP with Host header/SNI); pooling coherence (no stale/foreign config in a pooled process — T000d hazard class).
+**Failure Modes**: KMS unavailability at injection time triggers the BullMQ durable-retry loop (same as provider failure); key rotation mid-loop triggers a retry using the **current** (new) effective config.
 **Scale/Scope**: multi-tenant; few distinct provider configs per deployment (bounds pool-by-config fallback)
 
 ## Constitution Check

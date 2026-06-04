@@ -2,13 +2,9 @@
  * HermesExecutor — ACP-backed agent turn orchestration.
  *
  * Drives a spawned "hermes acp" process via the AcpAdapter (JSON-RPC/ndjson/stdio).
- * The agent's tools come from the engine MCP server (mcp-server.ts) which wraps
- * tool-gateway.ts — allowlist, permission, idempotency, audit, confirm/dry-run.
+ * Supports Strategy B: pool keyed by resolved effective config hash.
  *
  * Fallback: on timeout, spawn failure, or ACP error → LLMClient.complete (thin completion).
- *
- * Lifecycle/warm-pool (T009) is OUT OF SCOPE — fresh spawn per turn.
- * TODO(T009): process-per-(tenant,persona) pool with isolated HERMES_HOME per tenant.
  */
 import type { Persona } from '@undrecreaitwins/shared';
 import { AppError } from '@undrecreaitwins/shared';
@@ -16,9 +12,26 @@ import { LLMClient } from '../llm-client.js';
 import { AcpClient, type SessionUpdate, type AcpMcpServerEntry } from './hermes-adapter.js';
 import { makeHttpMcpServer, type McpServerConfig, type HttpMcpTransport } from './mcp-server.js';
 import type { ToolAllowEntry } from './tool-gateway.js';
+import { db } from '../../db.js';
+import { resolveEffectiveConfig } from '../llm-provider/resolution.js';
+import { decryptApiKey } from '../llm-provider/crypto.js';
+import { createHash } from 'node:crypto';
 import pino from 'pino';
 
 const logger = pino({ name: 'hermes-executor' });
+
+// ─── Warm Pool (Strategy B) ──────────────────────────────────────────────────
+
+interface PoolEntry {
+  client: AcpClient;
+  lastUsedAt: Date;
+  configHash: string;
+}
+
+/** Global process pool keyed by provider config hash. */
+const WARM_POOL = new Map<string, PoolEntry>();
+const MAX_POOL_SIZE = parseInt(process.env.LLM_MAX_CONFIGS_PER_TENANT || '8', 10);
+const IDLE_TTL_MS = parseInt(process.env.LLM_POOL_IDLE_TTL_MS || '900000', 10);
 
 // ─── Exported interfaces (keep backward-compatible) ──────────────────────────
 
@@ -75,19 +88,45 @@ export class HermesExecutor {
     if (!acpCmd) {
       throw new AppError('HERMES_ACP_CMD is required', 500, 'configuration_error');
     }
-    this.acpCmd = acpCmd;
 
-    // Split into command + args (e.g., "hermes acp --accept-hooks" → cmd="hermes", args=["acp","--accept-hooks"])
+    // Split into command + args
     const parts = acpCmd.split(/\s+/);
     this.acpCmd = parts[0]!;
     this.acpArgs = parts.length > 1 ? parts.slice(1) : ['acp', '--accept-hooks'];
 
     this.fallbackClient = new LLMClient();
+
+    // Start pool GC (reap every minute)
+    setInterval(() => this.reapPool(), 60000).unref();
   }
 
   async runAgentTurn(input: RunAgentTurnInput): Promise<RunAgentTurnResult> {
     const steps: AgentStepEvent[] = [];
     const controller = new AbortController();
+
+    // 1. Resolve effective config (Strategy B)
+    const effective = await resolveEffectiveConfig(db, input.tenantId, input.persona.id);
+    let extraEnv: Record<string, string> = {};
+    let configHash: string | null = null;
+    let model = input.persona.modelPreferences?.model ?? 'default';
+
+    if (effective.source !== 'platform' && effective.config) {
+      try {
+        const apiKey = await decryptApiKey(effective.config.apiKeyCiphertext, effective.config.apiKeyRef);
+        extraEnv = {
+          HERMES_PROVIDER: effective.config.providerType,
+          HERMES_BASE_URL: effective.config.baseUrl,
+          HERMES_API_KEY: apiKey,
+        };
+        model = effective.config.modelId;
+        configHash = createHash('sha256')
+          .update(`${effective.config.baseUrl}|${effective.config.modelId}|${apiKey}`)
+          .digest('hex');
+      } catch (err) {
+        logger.error({ err, tenantId: input.tenantId, personaId: input.persona.id }, 'Failed to resolve/decrypt provider config');
+        // Fallback to platform default if decryption fails (or let it throw if critical)
+      }
+    }
 
     // ── Hard execution timeout ────────────────────────────────────────────
     const maxMs = input.budget.maxExecutionMs
@@ -106,16 +145,13 @@ export class HermesExecutor {
     }
 
     const systemPrompt = this.buildSystemPrompt(input);
-    const model = input.persona.modelPreferences?.model ?? 'default';
     const messages = [
       ...input.context.conversationHistory.map(m => ({ role: m.role, content: m.content })),
       { role: 'user' as const, content: input.userMessage },
     ];
 
-    // Build the full prompt text that ACP receives (system + context injected as first message)
     const promptText = this.buildPromptText(systemPrompt, input.userMessage, input.context);
 
-    // Accumulator for streamed answer
     let answer = '';
     let tokensUsed = 0;
     let toolCallsCount = 0;
@@ -125,12 +161,49 @@ export class HermesExecutor {
     let mcpServer: { server: { stop: () => Promise<void> }; mcpEntry: { name: string; url: string; headers: Array<{ name: string; value: string }> } } | undefined;
 
     try {
-      // ── Start engine MCP server for this tenant+persona ───────────────
+      // ── Start engine MCP server ───────────────────────────────────────
       const allowlist = this.getToolAllowlist(input.persona);
       mcpServer = await this.startMcpServer(input.tenantId, input.persona.id, allowlist);
 
-      // ── ACP turn ──────────────────────────────────────────────────────
-      const acpClient = new AcpClient();
+      // ── ACP turn (Pooling Logic) ──────────────────────────────────────
+      let acpClient: AcpClient;
+      let isPooled = false;
+
+      if (configHash) {
+        const entry = WARM_POOL.get(configHash);
+        if (entry && !entry.client.isDead()) {
+          // T018 — HARD ASSERTION: pooled process must NEVER serve foreign config.
+          // This is Strategy B's invariant: pool key == current request's configHash.
+          // If this assertion fires, it means a pooled process was indexed under
+          // a stale hash — a critical pool coherence violation.
+          if (entry.configHash !== configHash) {
+            logger.error(
+              { poolHash: entry.configHash, requestHash: configHash },
+              'POOL COHERENCE VIOLATION — pooled client hash mismatch, evicting',
+            );
+            WARM_POOL.delete(configHash);
+            entry.client.kill();
+            // Fall through to create a fresh client below
+          } else {
+            acpClient = entry.client;
+            entry.lastUsedAt = new Date();
+            isPooled = true;
+            logger.info({ configHash }, 'Using warm-pooled ACP client');
+          }
+        }
+
+        // Create new client if not pooled (either first time or coherence eviction)
+        if (!isPooled) {
+          if (WARM_POOL.size >= MAX_POOL_SIZE) {
+            this.evictOne();
+          }
+          acpClient = new AcpClient();
+          WARM_POOL.set(configHash, { client: acpClient, lastUsedAt: new Date(), configHash });
+          logger.info({ configHash }, 'Created new pooled ACP client');
+        }
+      } else {
+        acpClient = new AcpClient();
+      }
 
       const mcpEntry: AcpMcpServerEntry = {
         type: 'http',
@@ -139,7 +212,6 @@ export class HermesExecutor {
         headers: mcpServer.mcpEntry.headers,
       };
 
-      // Session/update → AgentStepEvent callback
       const onUpdate = (update: SessionUpdate): void => {
         switch (update.kind) {
           case 'agent_message_chunk':
@@ -176,21 +248,23 @@ export class HermesExecutor {
         }
       };
 
-      const result = await acpClient.runTurn({
-        command: this.acpCmd,
-        args: this.acpArgs,
-        cwd: process.cwd(),
-        model,
-        mcpServers: [mcpEntry],
-        existingSessionId: input.acpSessionId,
-        signal: controller.signal,
-        onUpdate,
-        promptText,
-      });
+      const result = isPooled
+        ? await acpClient.sendPrompt(promptText, onUpdate)
+        : await acpClient.runTurn({
+            command: this.acpCmd,
+            args: this.acpArgs,
+            cwd: process.cwd(),
+            model,
+            mcpServers: [mcpEntry],
+            existingSessionId: input.acpSessionId,
+            signal: controller.signal,
+            onUpdate,
+            promptText,
+            extraEnv,
+          });
 
       acpSessionId = acpClient.getSessionId() ?? undefined;
 
-      // Use final usage from response if available
       if (result.usage) {
         tokensUsed = result.usage.inputTokens + result.usage.outputTokens;
       }
@@ -229,6 +303,33 @@ export class HermesExecutor {
     }
   }
 
+  // ─── Private pool helpers ───────────────────────────────────────────────
+
+  private reapPool(): void {
+    const now = Date.now();
+    for (const [hash, entry] of WARM_POOL.entries()) {
+      if (now - entry.lastUsedAt.getTime() > IDLE_TTL_MS || entry.client.isDead()) {
+        logger.info({ hash }, 'Reaping idle or dead pooled ACP client');
+        entry.client.kill();
+        WARM_POOL.delete(hash);
+      }
+    }
+  }
+
+  private evictOne(): void {
+    let oldest: PoolEntry | null = null;
+    for (const entry of WARM_POOL.values()) {
+      if (!oldest || entry.lastUsedAt < oldest.lastUsedAt) {
+        oldest = entry;
+      }
+    }
+    if (oldest) {
+      logger.info({ hash: oldest.configHash }, 'Evicting LRU pooled ACP client');
+      oldest.client.kill();
+      WARM_POOL.delete(oldest.configHash);
+    }
+  }
+
   // ─── Private helpers ────────────────────────────────────────────────────
 
   private async startMcpServer(
@@ -257,14 +358,10 @@ export class HermesExecutor {
   }
 
   private getToolAllowlist(persona: Persona): ToolAllowEntry[] {
-    // persona.toolAllowlist may be stored as jsonb on the persona model
-    // For now, use a typed accessor — the persona type doesn't include it
-    // directly, so we cast through unknown.
     const raw = (persona as unknown as Record<string, unknown>).toolAllowlist;
     if (Array.isArray(raw)) {
       return raw as ToolAllowEntry[];
     }
-    // No allowlist → empty (all tools denied)
     return [];
   }
 
@@ -273,31 +370,22 @@ export class HermesExecutor {
     userMessage: string,
     context: RunAgentTurnInput['context'],
   ): string {
-    // ACP session/prompt takes a single text block. We assemble:
-    // [system prompt] [context] [few-shot] [user message]
     const parts: string[] = [];
-
     parts.push(systemPrompt);
-
     if (context.ragChunks?.length) {
       parts.push('\n---\nRelevant context:\n' + context.ragChunks.join('\n'));
     }
-
     if (context.fewShotExamples?.length) {
       parts.push('\n---\nExamples:');
       for (const ex of context.fewShotExamples) {
         parts.push(`User: ${ex.input}\nAssistant: ${ex.output}`);
       }
     }
-
     parts.push(`\n---\nUser: ${userMessage}`);
-
     return parts.join('\n');
   }
 
   private buildSystemPrompt(input: RunAgentTurnInput): string {
-    // Persona system prompt ONLY. RAG + few-shot are added once by buildPromptText
-    // (ACP path); duplicating them here would inject the context twice.
     return input.persona.systemPrompt || `You are ${input.persona.name}, an AI assistant.`;
   }
 
@@ -326,6 +414,8 @@ export class HermesExecutor {
       messages: llmMessages,
       model,
       maxTokens: input.budget.maxTokens,
+      tenantId: input.tenantId,
+      personaId: input.persona.id,
     });
 
     steps.push({ type: 'answer', content: llmResponse.content });

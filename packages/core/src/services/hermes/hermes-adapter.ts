@@ -74,6 +74,16 @@ export interface AcpClientConfig {
   onUpdate?: (update: SessionUpdate) => void;
   /** The full prompt text to send in session/prompt (system + context + user message). */
   promptText: string;
+  /** Optional environment variables for the spawned process. */
+  extraEnv?: Record<string, string>;
+  /** Effective LLM config for BYOK injection (Strategy B). */
+  effectiveConfig?: {
+    baseUrl: string;
+    apiKey: string;
+    modelId: string;
+    temperature?: number | null;
+    maxTokens?: number | null;
+  };
 }
 
 // ─── JSON-RPC framing ────────────────────────────────────────────────────────
@@ -103,6 +113,11 @@ export class AcpClient {
   private sessionId: string | null = null;
   private initialized = false;
   private dead = false;
+
+  /** Check if the process is dead. */
+  public isDead(): boolean {
+    return this.dead;
+  }
 
   /**
    * Run a full ACP turn: spawn → initialize → session/new → session/prompt → collect updates → return.
@@ -147,6 +162,18 @@ export class AcpClient {
     return this.sessionId;
   }
 
+  /** Kill the process. */
+  public kill(): void {
+    if (this.child && !this.dead) {
+      try {
+        this.child.kill('SIGTERM');
+      } catch {
+        // already dead
+      }
+    }
+    this.dead = true;
+  }
+
   // ─── Lifecycle ───────────────────────────────────────────────────────────
 
   private async spawn(config: AcpClientConfig): Promise<void> {
@@ -154,10 +181,27 @@ export class AcpClient {
 
     logger.info({ cmd: config.command, args: config.args, cwd: config.cwd }, 'Spawning hermes acp');
 
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      NO_COLOR: '1',
+      TERM: 'dumb',
+      ...(config.extraEnv || {}),
+    } as Record<string, string | undefined>;
+
+    // Strategy B: inject BYOK effective config as env vars for the spawned hermes process
+    if (config.effectiveConfig) {
+      env.HERMES_PROVIDER = 'custom';
+      env.HERMES_BASE_URL = config.effectiveConfig.baseUrl;
+      env.HERMES_API_KEY = config.effectiveConfig.apiKey;
+      env.HERMES_MODEL_ID = config.effectiveConfig.modelId;
+      env.HERMES_TEMPERATURE = String(config.effectiveConfig.temperature ?? '');
+      env.HERMES_MAX_TOKENS = String(config.effectiveConfig.maxTokens ?? '');
+    }
+
     this.child = spawn(config.command, config.args, {
       cwd: config.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' },
+      env,
     });
 
     this.child.stdout!.on('data', (chunk: Buffer) => {
@@ -206,17 +250,6 @@ export class AcpClient {
       }
       config.signal.addEventListener('abort', onAbort, { once: true });
     }
-  }
-
-  private kill(): void {
-    if (this.child && !this.dead) {
-      try {
-        this.child.kill('SIGTERM');
-      } catch {
-        // already dead
-      }
-    }
-    this.dead = true;
   }
 
   // ─── JSON-RPC I/O ───────────────────────────────────────────────────────

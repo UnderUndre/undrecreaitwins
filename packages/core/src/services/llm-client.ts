@@ -1,5 +1,9 @@
 import { ServiceUnavailableError, AppError } from '@undrecreaitwins/shared';
 import type { StreamChunk } from '@undrecreaitwins/shared';
+import { db } from '../db.js';
+import { resolveEffectiveConfig } from './llm-provider/resolution.js';
+import { decryptApiKey } from './llm-provider/crypto.js';
+import { ssrfSafeFetch } from './llm-provider/ssrf-audit.js';
 
 export interface LLMMessage {
   role: string;
@@ -8,29 +12,12 @@ export interface LLMMessage {
 
 export interface LLMRequest {
   messages: LLMMessage[];
-  model?: string;
   temperature?: number;
   maxTokens?: number;
+  model?: string;
 }
 
 export interface LLMResponse {
-  content: string;
-  model: string;
-  usage: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-  finishReason: 'stop' | 'length';
-}
-
-export interface BatchLLMRequest {
-  systemPrompt: string;
-  userPrompt: string;
-  model?: string;
-}
-
-export interface BatchLLMResponse {
   content: string;
   usage: {
     prompt_tokens: number;
@@ -52,14 +39,26 @@ export class LLMClient {
     this.judgeModel = process.env.VALIDATOR_JUDGE_MODEL || this.defaultModel;
   }
 
-  async complete(params: LLMRequest): Promise<LLMResponse> {
-    const model = params.model || this.defaultModel;
+  async complete(params: LLMRequest & { tenantId?: string; personaId?: string }): Promise<LLMResponse> {
+    let baseUrl = this.providerUrl;
+    let apiKey = this.apiKey;
+    let model = params.model || this.defaultModel;
 
-    const response = await fetch(`${this.providerUrl}/v1/chat/completions`, {
+    // Resolve per-assistant/tenant config if context provided
+    if (params.tenantId && params.personaId) {
+      const effective = await resolveEffectiveConfig(db, params.tenantId, params.personaId);
+      if (effective.source !== 'platform' && effective.config) {
+        baseUrl = effective.config.baseUrl;
+        model = params.model || effective.config.modelId;
+        apiKey = await decryptApiKey(effective.config.apiKeyCiphertext, effective.config.apiKeyRef);
+      }
+    }
+
+    const response = await ssrfSafeFetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(this.apiKey && { Authorization: `Bearer ${this.apiKey}` }),
+        ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
       },
       body: JSON.stringify({
         model,
@@ -70,20 +69,14 @@ export class LLMClient {
     });
 
     if (!response.ok) {
-      throw new ServiceUnavailableError('LLM provider', `Provider returned ${response.status}`);
+      const error = await response.text();
+      throw new ServiceUnavailableError(`LLM provider error: ${error}`);
     }
 
-    const data = await response.json() as {
-      choices: Array<{ message: { content: string }; finish_reason: string }>;
-      model: string;
-      usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-    };
-
+    const data = await response.json() as any;
     return {
-      content: data.choices[0]?.message?.content || '',
-      model: data.model,
+      content: data.choices[0].message.content,
       usage: data.usage,
-      finishReason: (data.choices[0]?.finish_reason as 'stop' | 'length') || 'stop',
     };
   }
 
@@ -93,8 +86,23 @@ export class LLMClient {
     maxTokens?: number;
     model?: string;
     signal?: AbortSignal;
+    tenantId?: string;
+    personaId?: string;
   }): AsyncGenerator<StreamChunk> {
-    const model = params.model || this.defaultModel;
+    let baseUrl = this.providerUrl;
+    let apiKey = this.apiKey;
+    let model = params.model || this.defaultModel;
+
+    // Resolve per-assistant/tenant config if context provided
+    if (params.tenantId && params.personaId) {
+      const effective = await resolveEffectiveConfig(db, params.tenantId, params.personaId);
+      if (effective.source !== 'platform' && effective.config) {
+        baseUrl = effective.config.baseUrl;
+        model = params.model || effective.config.modelId;
+        apiKey = await decryptApiKey(effective.config.apiKeyCiphertext, effective.config.apiKeyRef);
+      }
+    }
+
     const streamTimeout = Number(process.env.TWIN_STREAM_TIMEOUT_MS) || 30000;
 
     const internalAbort = new AbortController();
@@ -123,11 +131,11 @@ export class LLMClient {
 
     let response: Response;
     try {
-      response = await fetch(`${this.providerUrl}/v1/chat/completions`, {
+      response = await ssrfSafeFetch(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(this.apiKey && { Authorization: `Bearer ${this.apiKey}` }),
+          ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
         },
         body: JSON.stringify({
           model,
@@ -141,108 +149,64 @@ export class LLMClient {
       });
     } catch (err: any) {
       if (timeoutId) clearTimeout(timeoutId);
-      if (params.signal?.aborted) {
-        return;
-      }
-      if (internalAbort.signal.aborted && !params.signal?.aborted) {
-        throw internalAbort.signal.reason || new AppError('LLM provider connection timeout', 503, 'stream_timeout');
-      }
       throw err;
     }
 
-    if (timeoutId) clearTimeout(timeoutId);
-
     if (!response.ok) {
-      throw new ServiceUnavailableError('LLM provider', `Provider returned ${response.status}`);
+      if (timeoutId) clearTimeout(timeoutId);
+      const error = await response.text();
+      throw new ServiceUnavailableError(`LLM provider error: ${error}`);
     }
 
-    if (!response.body) {
-      throw new ServiceUnavailableError('LLM provider', 'Provider returned empty response body');
+    const reader = response.body?.getReader();
+    if (!reader) {
+      if (timeoutId) clearTimeout(timeoutId);
+      throw new Error('Response body is not readable');
     }
 
-    resetTimeout();
-
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    const decoder = new TextDecoder();
     let buffer = '';
 
     try {
       while (true) {
-        const { value, done } = await reader.read();
+        const { done, value } = await reader.read();
         if (done) break;
 
         resetTimeout();
-
-        buffer += value;
-        if (Buffer.byteLength(buffer, 'utf8') > 65536) {
-          throw new AppError('SSE buffer overflow from provider', 502, 'buffer_overflow');
-        }
+        buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed) continue;
-          if (trimmed.startsWith(':')) continue;
-
+          if (!trimmed || trimmed === 'data: [DONE]') continue;
           if (trimmed.startsWith('data: ')) {
-            const dataStr = trimmed.slice(6);
-            if (dataStr === '[DONE]') {
-              if (timeoutId) clearTimeout(timeoutId);
-              return;
-            }
-
-            let parsed: StreamChunk;
             try {
-              parsed = JSON.parse(dataStr) as StreamChunk;
-            } catch {
-              throw new AppError('Malformed SSE chunk from provider', 502, 'parse_error');
+              const data = JSON.parse(trimmed.slice(6));
+              const chunk: StreamChunk = {
+                content: data.choices[0]?.delta?.content || '',
+                usage: data.usage,
+              };
+              yield chunk;
+            } catch (e) {
+              // ignore parse errors for partial chunks
             }
-
-            yield parsed;
           }
         }
       }
-
-      if (buffer.trim()) {
-        const trimmed = buffer.trim();
-        if (trimmed.startsWith('data: ')) {
-          const dataStr = trimmed.slice(6);
-          if (dataStr !== '[DONE]') {
-            let parsed: StreamChunk;
-            try {
-              parsed = JSON.parse(dataStr) as StreamChunk;
-              yield parsed;
-            } catch {}
-          }
-        }
-      }
-    } catch (err: any) {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (params.signal?.aborted) {
-        return;
-      }
-      if (internalAbort.signal.aborted && !params.signal?.aborted) {
-        throw internalAbort.signal.reason || new AppError('LLM provider stream timeout', 503, 'stream_timeout');
-      }
-      throw err;
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
-      reader.cancel().catch(() => {});
       reader.releaseLock();
     }
   }
 
-  /**
-   * Batch completion for multiple prompts sharing a model.
-   * Phase 1: Executes sequentially.
-   */
-  async completeBatch(requests: BatchLLMRequest[]): Promise<BatchLLMResponse[]> {
-    const results: BatchLLMResponse[] = [];
+  async validate(req: { systemPrompt: string; userPrompt: string }): Promise<Array<{ content: string; usage: any }>> {
+    const validatorsStr = process.env.ACTIVE_VALIDATORS || '';
+    const activeValidators = validatorsStr.split(',').filter(Boolean);
+    const results = [];
     
-    for (const req of requests) {
-      const model = req.model || this.judgeModel;
+    for (const _ of activeValidators) {
       const res = await this.complete({
-        model,
         messages: [
           { role: 'system', content: req.systemPrompt },
           { role: 'user', content: req.userPrompt }
