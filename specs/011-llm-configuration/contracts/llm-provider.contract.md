@@ -47,7 +47,7 @@ onAgenticTurn(tenant, persona, turn):
 The SSRF guard MUST perform DNS resolution before checking the IP, not just URL string matching. Implementation:
 
 1. Resolve hostname → IP addresses (both A and AAAA records).
-2. Check ALL resolved IPs against the deny list (including IPv6: `::1/128`, `fe80::/10`, `fc00::/7`, `ff00::/8`).
+2. Check ALL resolved IPs against the deny list (including IPv6: `::1/128`, `fe80::/10`, `fc00::/7`, `ff00::/8`, and IPv4-mapped IPv6 `::ffff:0:0/96` which MUST be mapped to IPv4 and checked against the IPv4 deny list).
 3. If any resolved IP is in the deny list → reject.
 4. Use a custom `dns.lookup` override on the HTTP agent to pin the connection to the approved IP, preventing DNS rebinding at request time.
 5. Disable HTTP redirects on the egress client. If redirects are needed in future, re-validate the redirect target through the same SSRF check.

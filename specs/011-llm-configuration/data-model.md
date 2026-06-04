@@ -16,7 +16,7 @@ Engine SoR (Postgres / Drizzle). Two new entities + a pure resolution function. 
 | `modelId` | text | non-empty |
 | `apiKeyCiphertext` | bytea/text | envelope-encrypted (D2); **never** plaintext at rest |
 | `apiKeyRef` | text | KMS key id/version for decrypt; rotation handle |
-| `temperature` | numeric | range 0..2; finite-guard |
+| `temperature` | real | range 0..2; finite-guard |
 | `maxTokens` | integer | > 0 |
 | `enabled` | boolean | default true |
 | `version` | integer | optimistic-lock (cf. funnel 002); increment on update |
