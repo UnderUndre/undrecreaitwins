@@ -5,6 +5,7 @@
  * - Write-only API key (encrypt via crypto.ts)
  * - Optimistic-lock via version col
  * - Masked key responses (never return plaintext)
+ * - Tenant isolation enforced (IDOR protection)
  */
 
 import { eq, and } from 'drizzle-orm';
@@ -314,11 +315,16 @@ export class ProviderConfigService {
    * Get per-assistant (persona) provider config override.
    * Returns null if no override configured.
    */
-  async getAssistantOverride(personaId: string): Promise<ProviderConfigResponse | null> {
+  async getAssistantOverride(tenantId: string, personaId: string): Promise<ProviderConfigResponse | null> {
     const [row] = await this.db
       .select(providerConfigCols)
       .from(llmProviderConfig)
-      .where(eq(llmProviderConfig.personaId, personaId))
+      .where(
+        and(
+          eq(llmProviderConfig.tenantId, tenantId),
+          eq(llmProviderConfig.personaId, personaId)
+        )
+      )
       .limit(1);
 
     if (!row) return null;
@@ -345,11 +351,16 @@ export class ProviderConfigService {
     // Encrypt API key
     const encrypted: KmsEnvelopeResult = await encryptApiKey(input.apiKey);
 
-    // Check for existing row
+    // Check for existing row (enforce tenant isolation)
     const [existing] = await this.db
       .select({ id: llmProviderConfig.id, version: llmProviderConfig.version })
       .from(llmProviderConfig)
-      .where(eq(llmProviderConfig.personaId, personaId))
+      .where(
+        and(
+          eq(llmProviderConfig.tenantId, tenantId),
+          eq(llmProviderConfig.personaId, personaId)
+        )
+      )
       .limit(1);
 
     if (existing) {
@@ -429,15 +440,20 @@ export class ProviderConfigService {
    * Delete per-assistant provider config override.
    * Returns true if a row was deleted, false if not found.
    */
-  async deleteAssistantOverride(personaId: string): Promise<boolean> {
+  async deleteAssistantOverride(tenantId: string, personaId: string): Promise<boolean> {
     const result = await this.db
       .delete(llmProviderConfig)
-      .where(eq(llmProviderConfig.personaId, personaId))
+      .where(
+        and(
+          eq(llmProviderConfig.tenantId, tenantId),
+          eq(llmProviderConfig.personaId, personaId)
+        )
+      )
       .returning({ id: llmProviderConfig.id });
 
     const deleted = result.length > 0;
     if (deleted) {
-      logger.info({ personaId }, 'deleteAssistantOverride: deleted');
+      logger.info({ tenantId, personaId }, 'deleteAssistantOverride: deleted');
     }
     return deleted;
   }
@@ -466,14 +482,19 @@ export class ProviderConfigService {
    * Get the decrypted API key for an assistant override.
    * Internal use only (e.g., test-connection merge).
    */
-  async getDecryptedAssistantKey(personaId: string): Promise<string | null> {
+  async getDecryptedAssistantKey(tenantId: string, personaId: string): Promise<string | null> {
     const [row] = await this.db
       .select({
         apiKeyCiphertext: llmProviderConfig.apiKeyCiphertext,
         apiKeyRef: llmProviderConfig.apiKeyRef,
       })
       .from(llmProviderConfig)
-      .where(eq(llmProviderConfig.personaId, personaId))
+      .where(
+        and(
+          eq(llmProviderConfig.tenantId, tenantId),
+          eq(llmProviderConfig.personaId, personaId)
+        )
+      )
       .limit(1);
 
     if (!row) return null;

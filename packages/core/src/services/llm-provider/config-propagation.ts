@@ -12,9 +12,9 @@
  */
 
 import pino from 'pino';
+import { createHash } from 'node:crypto';
 import { db } from '../../db.js';
 import { resolveEffectiveConfig } from './resolution.js';
-import { assertUrlAllowed } from './ssrf-guard.js';
 
 const logger = pino({ name: 'config-propagation' });
 
@@ -51,61 +51,30 @@ export async function verifyConfigPropagation(
   let configVersion: number | null = null;
 
   if (effective.source !== 'platform' && effective.config) {
-    const { createHash } = await import('node:crypto');
     configHash = createHash('sha256')
       .update(`${effective.config.baseUrl}|${effective.config.modelId}|${effective.config.apiKeyRef}`)
       .digest('hex');
   } else {
+    // Platform default — use a constant hash for the platform state
     configHash = 'platform-default';
   }
 
-  const changed = configHash !== previousConfigHash;
-
-  if (changed) {
-    logger.info(
-      {
-        tenantId,
-        personaId,
-        previousConfigHash,
-        newConfigHash: configHash,
-        source: effective.source,
-        configVersion,
-      },
-      'verifyConfigPropagation: config changed since last resolution',
-    );
-  }
-
-  return {
+  const check: ConfigPropagationCheck = {
     tenantId,
     personaId,
     configVersion,
     source: effective.source,
-    changed,
+    changed: configHash !== previousConfigHash,
     configHash,
     timestamp: new Date().toISOString(),
   };
-}
 
-// ---------------------------------------------------------------------------
-// Metrics: how often re-resolution yields changed config
-// ---------------------------------------------------------------------------
+  if (check.changed) {
+    logger.info(
+      { tenantId, personaId, source: effective.source },
+      'config drift detected',
+    );
+  }
 
-let totalReResolutions = 0;
-let changedReResolutions = 0;
-
-export function recordReResolution(changed: boolean): void {
-  totalReResolutions++;
-  if (changed) changedReResolutions++;
-}
-
-export function getPropagationMetrics(): {
-  total: number;
-  changed: number;
-  changeRate: number;
-} {
-  return {
-    total: totalReResolutions,
-    changed: changedReResolutions,
-    changeRate: totalReResolutions > 0 ? changedReResolutions / totalReResolutions : 0,
-  };
+  return check;
 }

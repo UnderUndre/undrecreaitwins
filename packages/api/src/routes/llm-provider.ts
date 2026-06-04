@@ -67,7 +67,7 @@ export const llmProviderRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get('/v1/personas/:id/llm-provider', async (request) => {
     const { id } = request.params as { id: string };
-    const config = await service.getAssistantOverride(id);
+    const config = await service.getAssistantOverride(request.tenantId, id);
     if (!config) throw new NotFoundError('PersonaLLMOverride', id);
     return config;
   });
@@ -98,7 +98,7 @@ export const llmProviderRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.delete('/v1/personas/:id/llm-provider', async (request, reply) => {
     const { id } = request.params as { id: string };
-    const deleted = await service.deleteAssistantOverride(id);
+    const deleted = await service.deleteAssistantOverride(request.tenantId, id);
     if (!deleted) throw new NotFoundError('PersonaLLMOverride', id);
     reply.status(204);
   });
@@ -119,10 +119,10 @@ export const llmProviderRoutes: FastifyPluginAsync = async (fastify) => {
 
     let apiKey = body.api_key;
 
-    // Key merge logic: if api_key omitted, try to fetch existing
+    // Key merge logic: if api_key omitted, try to fetch existing (with tenant isolation)
     if (!apiKey) {
       if (body.persona_id) {
-        apiKey = (await service.getDecryptedAssistantKey(body.persona_id)) || undefined;
+        apiKey = (await service.getDecryptedAssistantKey(request.tenantId, body.persona_id)) || undefined;
       } else {
         apiKey = (await service.getDecryptedTenantKey(request.tenantId)) || undefined;
       }

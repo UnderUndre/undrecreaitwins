@@ -7,6 +7,7 @@
  */
 
 import * as dns from 'node:dns/promises';
+import * as net from 'node:net';
 import pino from 'pino';
 
 const logger = pino({ name: 'llm-provider-ssrf' });
@@ -45,7 +46,7 @@ function parseIpv4Cidr(cidr: string, label: string): Ipv4Cidr {
   return { network: (network & mask) >>> 0, mask, label };
 }
 
-const IPV4_DENY: Ipv4Cidr[] = [
+const IPV4_DENY: Ipv4Cidr[] = [\
   parseIpv4Cidr('127.0.0.0/8', 'loopback'),
   parseIpv4Cidr('10.0.0.0/8', 'RFC1918-A'),
   parseIpv4Cidr('172.16.0.0/12', 'RFC1918-B'),
@@ -70,7 +71,7 @@ function ipv6ToBytes(ip: string): Uint8Array {
   const bytes = new Uint8Array(16);
 
   // IPv6-mapped IPv4 (::ffff:a.b.c.d)
-  const mappedV4Match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  const mappedV4Match = ip.match(/^::ffff:(\\d+\\.\\d+\\.\\d+\\.\\d+)$/i);
   if (mappedV4Match) {
     const v4Octets = mappedV4Match[1].split('.').map(Number);
     bytes[10] = 0xff;
@@ -120,7 +121,7 @@ function parseIpv6Cidr(cidr: string, label: string): Ipv6Cidr {
   return { network, prefixLen, label };
 }
 
-const IPV6_DENY: Ipv6Cidr[] = [
+const IPV6_DENY: Ipv6Cidr[] = [\
   parseIpv6Cidr('::1/128', 'loopback'),
   parseIpv6Cidr('fe80::/10', 'link-local'),
   parseIpv6Cidr('fc00::/7', 'ULA'),
@@ -175,7 +176,7 @@ export function isPrivateIp(ip: string): boolean {
   }
 
   // Try IPv6 (including IPv6-mapped IPv4)
-  let ipBytes: Uint8Array;
+  let ipBytes: Uint8Array;\
   try {
     ipBytes = ipv6ToBytes(ip);
   } catch {
@@ -222,10 +223,27 @@ export async function assertUrlAllowed(url: string): Promise<SsrfCheckResult> {
     return { allowed: false, reason: 'URL has no hostname' };
   }
 
+  // If hostname is already an IP address, skip DNS resolution
+  if (net.isIP(hostname)) {
+    if (isPrivateIp(hostname)) {
+      logger.warn({ hostname }, 'SSRF: provided IP is in private/reserved range');
+      return {
+        allowed: false,
+        reason: `Provided IP ${hostname} is in a private/reserved range`,
+        allIps: [hostname],
+      };
+    }
+    return {
+      allowed: true,
+      pinnedIp: hostname,
+      allIps: [hostname],
+    };
+  }
+
   // Resolve DNS (both A and AAAA)
   let allIps: string[] = [];
   try {
-    const [v4Results, v6Results] = await Promise.allSettled([
+    const [v4Results, v6Results] = await Promise.allSettled([\
       dns.resolve4(hostname),
       dns.resolve6(hostname),
     ]);
@@ -236,7 +254,7 @@ export async function assertUrlAllowed(url: string): Promise<SsrfCheckResult> {
     if (v6Results.status === 'fulfilled') {
       allIps.push(...v6Results.value);
     }
-  } catch (err) {
+  } catch (err) {\
     logger.warn({ hostname, err }, 'DNS resolution failed');
     return { allowed: false, reason: `DNS resolution failed for ${hostname}` };
   }
@@ -280,6 +298,6 @@ export function createPinnedDnsLookup(
   const family = isV6 ? 6 : 4;
 
   return (_hostname: string, _options: any, cb: (err: Error | null, address: string, family: number) => void) => {
-    cb(null, pinnedIp, family);
+    process.nextTick(() => cb(null, pinnedIp, family));
   };
 }

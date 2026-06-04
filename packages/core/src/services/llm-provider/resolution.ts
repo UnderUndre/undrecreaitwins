@@ -44,7 +44,7 @@ export type EffectiveLLMConfig =
   | { source: 'platform'; config: null };
 
 /** Map a Drizzle row (has extra cols like id, version, timestamps) to LLMProviderFields. */
-function rowToFields(row: Record<string, unknown>): LLMProviderFields {
+function rowToFields(row: any): LLMProviderFields {
   return {
     providerType: row.providerType as string,
     baseUrl: row.baseUrl as string,
@@ -73,12 +73,13 @@ export async function resolveEffectiveConfig(
   tenantId: string,
   personaId: string,
 ): Promise<EffectiveLLMConfig> {
-  // Phase 1 — per-assistant override
+  // Phase 1 — per-assistant override (enforce tenant isolation)
   const [override] = await db
     .select()
     .from(llmProviderConfig)
     .where(
       and(
+        eq(llmProviderConfig.tenantId, tenantId),
         eq(llmProviderConfig.personaId, personaId),
         eq(llmProviderConfig.enabled, true),
       ),
@@ -86,7 +87,7 @@ export async function resolveEffectiveConfig(
     .limit(1);
 
   if (override) {
-    logger.debug({ personaId, source: 'assistant' }, 'resolved assistant override');
+    logger.debug({ tenantId, personaId, source: 'assistant' }, 'resolved assistant override');
     return { source: 'assistant', config: rowToFields(override) };
   }
 

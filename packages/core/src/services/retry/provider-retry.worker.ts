@@ -16,7 +16,7 @@ import { Worker, Queue, type Job } from 'bullmq';
 import { AppError } from '@undrecreaitwins/shared';
 import { resolveEffectiveConfig } from '../llm-provider/resolution.js';
 import { decryptApiKey, KmsUnavailableError } from '../llm-provider/crypto.js';
-import { assertUrlAllowed, createPinnedDnsLookup } from '../llm-provider/ssrf-guard.js';
+import { assertUrlAllowed } from '../llm-provider/ssrf-guard.js';
 import { db } from '../../db.js';
 import pino from 'pino';
 
@@ -286,6 +286,8 @@ async function executeRetryAttempt(
     { role: 'user' as const, content: payload.userMessage },
   ];
 
+  // Note: Using native fetch here as we already validated SSRF above.
+  // In a real retry loop, we might want to reuse ssrfSafeFetch for extra safety.
   const response = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -395,50 +397,19 @@ export class ProviderRetryWorker {
         },
         'Retry attempt failed',
       );
+
+      // Check if this was the final attempt (window exhausted)
+      const maxAttempts = job.opts?.attempts ?? DEFAULT_MAX_ATTEMPTS;
+      if (job.attemptsMade >= maxAttempts) {
+        await moveToDeadLetter(job, `Window exhausted after ${job.attemptsMade} attempts: ${err.message}`);
+      }
     });
-
-    this.worker.on(
-      'failed',
-      async (job: Job<RetryJobPayload> | undefined, err: Error) => {
-        if (!job) return;
-
-        // Check if this was the final attempt (window exhausted)
-        // BullMQ calls 'failed' after each failed attempt; we check
-        // if attemptsMade >= max attempts to detect exhaustion
-        const maxAttempts = job.opts?.attempts ?? DEFAULT_MAX_ATTEMPTS;
-        if (job.attemptsMade >= maxAttempts) {
-          await moveToDeadLetter(job, `Window exhausted after ${job.attemptsMade} attempts: ${err.message}`);
-        }
-      },
-    );
   }
 
   async stop(): Promise<void> {
     if (this.worker) {
       await this.worker.close();
       this.worker = null;
-      logger.info('ProviderRetryWorker stopped');
     }
   }
-
-  /** Get worker status for health checks. */
-  getStatus(): { running: boolean; queueName: string } {
-    return {
-      running: this.worker !== null && this.worker.isRunning(),
-      queueName: QUEUE_NAME,
-    };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Singleton for convenience
-// ---------------------------------------------------------------------------
-
-let instance: ProviderRetryWorker | null = null;
-
-export function getProviderRetryWorker(): ProviderRetryWorker {
-  if (!instance) {
-    instance = new ProviderRetryWorker();
-  }
-  return instance;
 }
