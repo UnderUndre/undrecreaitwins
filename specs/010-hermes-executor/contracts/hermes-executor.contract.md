@@ -15,7 +15,7 @@ turn-router ──scripted?──► 003 deterministic (Hermes may gen slot text
 
 ## Transport (T000a — verified)
 - **ACP**: JSON-RPC 2.0 over stdio, **newline-delimited**. Engine is the ACP **client**; `hermes acp` is spawned/managed (warm-pool). Handshake: `initialize` → `session/new` → `session/prompt` → stream → response.
-- **MCP**: engine runs an MCP server exposing the tool-gateway; passed per-session via `session/new.mcpServers` (`{type:'stdio'|'http', …}`). Native hermes toolsets disabled; the engine MCP is the agent's **only** toolset.
+- **MCP**: engine runs an **HTTP** MCP server (in-process, shares DB) exposing the tool-gateway; passed per-session via `session/new.mcpServers` as **`{type:'http', name, url, headers:[{name,value}]}`** — **VERIFIED**. Gotcha (hermes Pydantic): `name` required; `headers` is a **LIST**, not an object. Native hermes toolsets disabled; the engine MCP is the agent's **only** toolset.
 - The thin OpenAI path (`proxy`/OmniRoute) is the **fallback** completion only (FR-009), never the agentic path.
 
 ## `HermesExecutor.runAgentTurn(input)`
