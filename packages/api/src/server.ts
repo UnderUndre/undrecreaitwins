@@ -14,6 +14,7 @@ import { chatCompletionsRoutes } from './routes/chat-completions.js';
 import { annotationRoutes } from './routes/annotations.js';
 import { documentRoutes } from './routes/documents.js';
 import { sandboxRoutes } from './routes/sandbox.js';
+import { llmProviderRoutes } from './routes/llm-provider.js';
 
 export async function buildServer() {
   const fastify = Fastify({
@@ -91,6 +92,7 @@ export async function buildServer() {
   await fastify.register(annotationRoutes);
   await fastify.register(documentRoutes);
   await fastify.register(sandboxRoutes);
+  await fastify.register(llmProviderRoutes);
 
   return fastify;
 }

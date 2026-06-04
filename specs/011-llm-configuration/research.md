@@ -63,3 +63,32 @@ Phase 0 — resolve unknowns from Technical Context. Decisions feed data-model, 
 | Provider-failure behavior | BullMQ durable-retry, no model-swap (D4) |
 | SSRF | engine egress guard + DNS-pin (D5) |
 | BYOK metering | OpenMeter + `byok` flag (D6) |
+
+## D1 — T000-LLM Spike Result (T003)
+
+**Date**: 2026-06-04
+
+### What the code shows
+
+Analyzed the two core ACP integration files:
+
+1. **`hermes-adapter.ts`** — The `session/new` JSON-RPC call (line 396-400) sends only three parameters: `{ cwd, model, mcpServers }`. The `model` field is a plain string (e.g. `"claude"`, `"gpt-4o"`). There are no fields for `provider`, `base_url`, `apiKey`, `temperature`, or `max_tokens` in the `AcpClientConfig` interface or anywhere in the wire protocol.
+
+2. **`hermes-executor.ts`** — The model name is resolved from `input.persona.modelPreferences?.model ?? 'default'` (line 109) and passed as-is. The executor has no mechanism to inject provider routing, base_url overrides, or API keys into the ACP session. The fallback path (`LLMClient.complete`) handles its own provider routing independently.
+
+3. **ACP protocol surface** — The full JSON-RPC surface observed is: `initialize` → `session/new` (with `cwd`, `model`, `mcpServers`) → `session/prompt` → `session/update` notifications. There is no `session/updateConfig`, `session/setProvider`, or similar per-session override method.
+
+### Conclusion: **Strategy B** — Pool keyed by provider-config
+
+The ACP protocol does **not** expose per-session provider/base_url/API key override. The model string passed to `session/new` is just a model name selector; the actual provider routing, base URL, and credentials are determined by the Hermes process's own profile/configuration at startup time.
+
+**Strategy A (per-session override on a shared process) is not feasible** with the current ACP protocol. The warm-pool must be keyed by resolved effective config — one warm Hermes process per distinct `(provider, base_url, apiKey, model)` tuple — so that each process's startup configuration matches the tenant-assistant config it serves.
+
+**Strategy C (ephemeral spawn) remains rejected** — NFR budget unacceptable.
+
+### Rationale
+
+- `session/new` params are `{ cwd, model, mcpServers }` only — no provider routing surface.
+- Hermes docs confirm provider/base_url/key configuration at config/CLI/profile level, not at ACP session level.
+- The `/model` interactive command (mentioned in docs) is a model-name switch within the already-configured provider, not a provider override.
+- Pooling by config (Strategy B) is bounded — few distinct providers per deployment — and preserves warm-pool benefits without requiring ACP protocol changes.

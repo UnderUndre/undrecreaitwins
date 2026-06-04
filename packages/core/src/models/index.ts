@@ -22,6 +22,7 @@ export {
 } from './validators.js';
 export { agentRuns } from './agent-runs.js';
 export { actionAudit } from './action-audit.js';
+export { llmProviderConfig, tenantLlmDefault } from './llm-provider.js';
 
 export {
   tenantsRelations,

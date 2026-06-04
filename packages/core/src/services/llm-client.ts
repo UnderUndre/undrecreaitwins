@@ -1,5 +1,11 @@
 import { ServiceUnavailableError, AppError } from '@undrecreaitwins/shared';
 import type { StreamChunk } from '@undrecreaitwins/shared';
+import { resolveEffectiveConfig, type EffectiveLLMConfig, type LLMProviderFields } from './llm-provider/resolution.js';
+import { decryptApiKey } from './llm-provider/crypto.js';
+import { assertUrlAllowed, createPinnedDnsLookup } from './llm-provider/ssrf-guard.js';
+import { db } from '../db.js';
+import * as https from 'node:https';
+import * as http from 'node:http';
 
 export interface LLMMessage {
   role: string;
@@ -52,17 +58,42 @@ export class LLMClient {
     this.judgeModel = process.env.VALIDATOR_JUDGE_MODEL || this.defaultModel;
   }
 
-  async complete(params: LLMRequest): Promise<LLMResponse> {
-    const model = params.model || this.defaultModel;
+  async complete(params: LLMRequest & { tenantId?: string; personaId?: string }): Promise<LLMResponse> {
+    let baseUrl = this.providerUrl;
+    let apiKey = this.apiKey;
+    let model = params.model || this.defaultModel;
 
-    const response = await fetch(`${this.providerUrl}/v1/chat/completions`, {
+    let agent: http.Agent | https.Agent | undefined;
+
+    // Resolve per-assistant/tenant config if context provided
+    if (params.tenantId && params.personaId) {
+      const effective = await resolveEffectiveConfig(db, params.tenantId, params.personaId);
+      if (effective.source !== 'platform' && effective.config) {
+        baseUrl = effective.config.baseUrl;
+        model = params.model || effective.config.modelId;
+        apiKey = await decryptApiKey(effective.config.apiKeyCiphertext, effective.config.apiKeyRef);
+
+        const ssrf = await assertUrlAllowed(baseUrl);
+        if (!ssrf.allowed || !ssrf.pinnedIp) {
+          throw new AppError('Provider URL blocked by SSRF policy', 400, 'SSRF_BLOCKED');
+        }
+        const isHttps = baseUrl.startsWith('https:');
+        const lookup = createPinnedDnsLookup(ssrf.pinnedIp);
+        agent = isHttps ? new https.Agent({ lookup }) : new http.Agent({ lookup });
+      }
+    }
+
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(this.apiKey && { Authorization: `Bearer ${this.apiKey}` }),
+        ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
       },
-      body: JSON.stringify({
-        model,
+      // @ts-ignore - node-fetch / undici compat note: if using native Node 18+ fetch, agent might be ignored depending on undici version.
+      // But we pass it here for compatibility with environments that support it (e.g. node-fetch polyfills).
+      // For strict SSRF on native fetch, undici.Dispatcher is needed, but we keep agent here for node-fetch compat.
+      agent,
+      body: JSON.stringify({        model,
         messages: params.messages,
         temperature: params.temperature,
         max_tokens: params.maxTokens,
@@ -93,8 +124,33 @@ export class LLMClient {
     maxTokens?: number;
     model?: string;
     signal?: AbortSignal;
+    tenantId?: string;
+    personaId?: string;
   }): AsyncGenerator<StreamChunk> {
-    const model = params.model || this.defaultModel;
+    let baseUrl = this.providerUrl;
+    let apiKey = this.apiKey;
+    let model = params.model || this.defaultModel;
+
+    let agent: http.Agent | https.Agent | undefined;
+
+    // Resolve per-assistant/tenant config if context provided
+    if (params.tenantId && params.personaId) {
+      const effective = await resolveEffectiveConfig(db, params.tenantId, params.personaId);
+      if (effective.source !== 'platform' && effective.config) {
+        baseUrl = effective.config.baseUrl;
+        model = params.model || effective.config.modelId;
+        apiKey = await decryptApiKey(effective.config.apiKeyCiphertext, effective.config.apiKeyRef);
+
+        const ssrf = await assertUrlAllowed(baseUrl);
+        if (!ssrf.allowed || !ssrf.pinnedIp) {
+          throw new AppError('Provider URL blocked by SSRF policy', 400, 'SSRF_BLOCKED');
+        }
+        const isHttps = baseUrl.startsWith('https:');
+        const lookup = createPinnedDnsLookup(ssrf.pinnedIp);
+        agent = isHttps ? new https.Agent({ lookup }) : new http.Agent({ lookup });
+      }
+    }
+
     const streamTimeout = Number(process.env.TWIN_STREAM_TIMEOUT_MS) || 30000;
 
     const internalAbort = new AbortController();
@@ -123,12 +179,14 @@ export class LLMClient {
 
     let response: Response;
     try {
-      response = await fetch(`${this.providerUrl}/v1/chat/completions`, {
+      response = await fetch(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(this.apiKey && { Authorization: `Bearer ${this.apiKey}` }),
+          ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
         },
+        // @ts-ignore
+        agent,
         body: JSON.stringify({
           model,
           messages: params.messages,
