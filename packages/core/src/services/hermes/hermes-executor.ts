@@ -106,17 +106,23 @@ export class HermesExecutor {
 
     // 1. Resolve effective config (Strategy B)
     const effective = await resolveEffectiveConfig(db, input.tenantId, input.persona.id);
-    let extraEnv: Record<string, string> = {};
+    // BYOK injection is materialised by the ACP adapter as a throwaway Hermes profile
+    // (HERMES_HOME + config.yaml `model.{provider,base_url,default}` + OPENAI_API_KEY env).
+    // We pass the structured effective config — NOT ad-hoc HERMES_* env names, which the
+    // Hermes model loader does not read (verified against hermes-agent v0.15.1 source).
+    let effectiveConfigForSpawn: { baseUrl: string; apiKey: string; modelId: string; temperature?: number | null; maxTokens?: number | null } | undefined;
     let configHash: string | null = null;
     let model = input.persona.modelPreferences?.model ?? 'default';
 
     if (effective.source !== 'platform' && effective.config) {
       try {
         const apiKey = await decryptApiKey(effective.config.apiKeyCiphertext, effective.config.apiKeyRef);
-        extraEnv = {
-          HERMES_PROVIDER: effective.config.providerType,
-          HERMES_BASE_URL: effective.config.baseUrl,
-          HERMES_API_KEY: apiKey,
+        effectiveConfigForSpawn = {
+          baseUrl: effective.config.baseUrl,
+          apiKey,
+          modelId: effective.config.modelId,
+          temperature: effective.config.temperature,
+          maxTokens: effective.config.maxTokens,
         };
         model = effective.config.modelId;
         configHash = createHash('sha256')
@@ -124,7 +130,7 @@ export class HermesExecutor {
           .digest('hex');
       } catch (err) {
         logger.error({ err, tenantId: input.tenantId, personaId: input.persona.id }, 'Failed to resolve/decrypt provider config');
-        // Fallback to platform default if decryption fails (or let it throw if critical)
+        // Fall back to platform default if decryption fails.
       }
     }
 
@@ -166,7 +172,9 @@ export class HermesExecutor {
       mcpServer = await this.startMcpServer(input.tenantId, input.persona.id, allowlist);
 
       // ── ACP turn (Pooling Logic) ──────────────────────────────────────
-      let acpClient: AcpClient;
+      // Definite-assignment: every branch below assigns acpClient before use
+      // (pooled hit, pooled miss/evict → new, or no-configHash → new).
+      let acpClient!: AcpClient;
       let isPooled = false;
 
       if (configHash) {
@@ -260,7 +268,7 @@ export class HermesExecutor {
             signal: controller.signal,
             onUpdate,
             promptText,
-            extraEnv,
+            effectiveConfig: effectiveConfigForSpawn,
           });
 
       acpSessionId = acpClient.getSessionId() ?? undefined;

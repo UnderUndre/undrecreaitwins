@@ -78,3 +78,56 @@ export async function verifyConfigPropagation(
 
   return check;
 }
+
+// ---------------------------------------------------------------------------
+// Re-resolution tracking — FR-008/FR-011: config-change propagation metrics
+// ---------------------------------------------------------------------------
+
+interface ReResolutionEvent {
+  tenantId: string;
+  personaId: string;
+  timestamp: string;
+  configChanged: boolean;
+  previousHash: string;
+  newHash: string;
+}
+
+const reResolutionLog: ReResolutionEvent[] = [];
+const MAX_RE_RESOLUTION_LOG_SIZE = 10_000;
+
+const propagationMetrics = {
+  totalReResolutions: 0,
+  configChanges: 0,
+  lastChangeAt: null as string | null,
+};
+
+/**
+ * Record a re-resolution event from the retry worker.
+ * Called when the worker re-resolves effective config before a retry attempt.
+ */
+export function recordReResolution(event: Omit<ReResolutionEvent, 'timestamp'>): void {
+  const entry: ReResolutionEvent = {
+    ...event,
+    timestamp: new Date().toISOString(),
+  };
+  reResolutionLog.push(entry);
+  if (reResolutionLog.length > MAX_RE_RESOLUTION_LOG_SIZE) {
+    reResolutionLog.splice(0, reResolutionLog.length - MAX_RE_RESOLUTION_LOG_SIZE);
+  }
+  propagationMetrics.totalReResolutions++;
+  if (event.configChanged) {
+    propagationMetrics.configChanges++;
+    propagationMetrics.lastChangeAt = entry.timestamp;
+  }
+  logger.debug({ event: entry }, 're-resolution recorded');
+}
+
+/**
+ * Get propagation metrics for observability dashboards.
+ */
+export function getPropagationMetrics(): typeof propagationMetrics & { recentEvents: ReResolutionEvent[] } {
+  return {
+    ...propagationMetrics,
+    recentEvents: reResolutionLog.slice(-100),
+  };
+}

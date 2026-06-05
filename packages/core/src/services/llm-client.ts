@@ -1,5 +1,6 @@
 import { ServiceUnavailableError, AppError } from '@undrecreaitwins/shared';
 import type { StreamChunk } from '@undrecreaitwins/shared';
+import { randomUUID } from 'node:crypto';
 import { db } from '../db.js';
 import { resolveEffectiveConfig } from './llm-provider/resolution.js';
 import { decryptApiKey } from './llm-provider/crypto.js';
@@ -19,6 +20,8 @@ export interface LLMRequest {
 
 export interface LLMResponse {
   content: string;
+  model: string;
+  finishReason: 'stop' | 'length' | 'content_filter' | null;
   usage: {
     prompt_tokens: number;
     completion_tokens: number;
@@ -30,13 +33,11 @@ export class LLMClient {
   private providerUrl: string;
   private apiKey?: string;
   private defaultModel: string;
-  private judgeModel: string;
 
   constructor() {
     this.providerUrl = process.env.LLM_PROVIDER_URL || 'http://localhost:4000';
     this.apiKey = process.env.LLM_API_KEY;
     this.defaultModel = process.env.LLM_DEFAULT_MODEL || 'gpt-4o';
-    this.judgeModel = process.env.VALIDATOR_JUDGE_MODEL || this.defaultModel;
   }
 
   async complete(params: LLMRequest & { tenantId?: string; personaId?: string }): Promise<LLMResponse> {
@@ -76,6 +77,8 @@ export class LLMClient {
     const data = await response.json() as any;
     return {
       content: data.choices[0].message.content,
+      model: data.model ?? model,
+      finishReason: data.choices[0].finish_reason ?? 'stop',
       usage: data.usage,
     };
   }
@@ -184,7 +187,15 @@ export class LLMClient {
             try {
               const data = JSON.parse(trimmed.slice(6));
               const chunk: StreamChunk = {
-                content: data.choices[0]?.delta?.content || '',
+                id: data.id ?? randomUUID(),
+                object: 'chat.completion.chunk',
+                created: data.created ?? Math.floor(Date.now() / 1000),
+                model: data.model ?? model,
+                choices: [{
+                  index: data.choices[0]?.index ?? 0,
+                  delta: { content: data.choices[0]?.delta?.content || '' },
+                  finish_reason: data.choices[0]?.finish_reason ?? null,
+                }],
                 usage: data.usage,
               };
               yield chunk;
@@ -198,6 +209,29 @@ export class LLMClient {
       if (timeoutId) clearTimeout(timeoutId);
       reader.releaseLock();
     }
+  }
+
+  /**
+   * Batch-complete multiple prompts in parallel.
+   * Used by validators that need to judge several items at once.
+   * Per FR-005: each prompt gets its own complete() call — no silent model-swap.
+   */
+  async completeBatch(
+    items: Array<{ systemPrompt: string; userPrompt: string; model?: string }>,
+  ): Promise<Array<{ content: string; usage: LLMResponse['usage'] }>> {
+    const results = await Promise.all(
+      items.map(async (item) => {
+        const res = await this.complete({
+          messages: [
+            { role: 'system', content: item.systemPrompt },
+            { role: 'user', content: item.userPrompt },
+          ],
+          model: item.model,
+        });
+        return { content: res.content, usage: res.usage };
+      }),
+    );
+    return results;
   }
 
   async validate(req: { systemPrompt: string; userPrompt: string }): Promise<Array<{ content: string; usage: any }>> {

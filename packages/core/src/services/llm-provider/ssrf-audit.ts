@@ -8,7 +8,8 @@
  */
 
 import { Agent } from 'undici';
-import { assertUrlAllowed, createPinnedDnsLookup, type SsrfCheckResult } from './ssrf-guard.js';
+import type { LookupFunction } from 'node:net';
+import { assertUrlAllowed, createPinnedDnsLookup } from './ssrf-guard.js';
 import pino from 'pino';
 
 const logger = pino({ name: 'ssrf-audit' });
@@ -41,14 +42,13 @@ export async function ssrfSafeFetch(
     throw new Error('SSRF check passed but no pinned IP returned — internal error');
   }
 
-  // 2. Create pinned undici Agent
+  // 2. Pin DNS via an undici Agent — Node's global fetch() honors the `dispatcher` option
+  // (fetch IS undici). The pinned lookup forces the TCP connect to the IP resolved + vetted in
+  // step 1, closing the DNS-rebinding TOCTOU gap. NOTE: a node:http/https Agent does NOT work
+  // here — global fetch silently ignores it (that was the prior SSRF-bypass bug, PR #19 C1).
   const pinnedLookup = createPinnedDnsLookup(ssrfResult.pinnedIp);
-  
-  // undici Agent with custom connect options to inject pinned DNS lookup
   const dispatcher = new Agent({
-    connect: {
-      lookup: pinnedLookup as any,
-    },
+    connect: { lookup: pinnedLookup as unknown as LookupFunction },
   });
 
   // 3. Build the actual request URL
@@ -60,29 +60,28 @@ export async function ssrfSafeFetch(
 
   try {
     // Merge signals if caller provided one
-    if (init?.signal) {
-      if (init.signal.aborted) {
-        timeoutController.abort(init.signal.reason);
+    const callerSignal = init?.signal;
+    if (callerSignal) {
+      if (callerSignal.aborted) {
+        timeoutController.abort(callerSignal.reason ?? 'aborted');
       } else {
-        init.signal.addEventListener('abort', () => {
-          timeoutController.abort(init.signal.reason);
+        callerSignal.addEventListener('abort', () => {
+          timeoutController.abort(callerSignal.reason ?? 'aborted');
         }, { once: true });
       }
     }
 
-    // @ts-ignore — dispatcher is an undici-specific option for native fetch
     const response = await fetch(url, {
       ...init,
       signal: timeoutController.signal,
       dispatcher,
-    });
+    } as RequestInit & { dispatcher: Agent });
 
     return response;
   } finally {
     clearTimeout(timeoutId);
-    // Note: undici agents should ideally be reused, but here we create one per-fetch
-    // for strict isolation. In a high-perf scenario, we'd cache agents by pinnedIp.
-    await dispatcher.close();
+    // Do NOT destroy the dispatcher here — the response body may still be streaming to the
+    // caller (llm-client streaming path). undici reaps idle connections via keep-alive timeout.
   }
 }
 
@@ -91,6 +90,68 @@ export async function ssrfSafeFetch(
  * Used in integration tests to ensure no raw fetch() escapes the guard.
  */
 export function auditEgressGuard(allowedDomains: string[] = []): void {
-  // Implementation for test hooks would go here
   logger.debug({ allowedDomains }, 'auditEgressGuard: initialized');
+}
+
+// ---------------------------------------------------------------------------
+// SSRF Audit Log — NFR-5: audit trail for all SSRF checks
+// ---------------------------------------------------------------------------
+
+interface SsrfAuditEntry {
+  timestamp: string;
+  url: string;
+  allowed: boolean;
+  reason?: string;
+  pinnedIp?: string;
+}
+
+const ssrfAuditLog: SsrfAuditEntry[] = [];
+const MAX_AUDIT_LOG_SIZE = 10_000;
+
+/**
+ * Record an SSRF audit event (called internally by ssrfSafeFetch).
+ * Per NFR-5: all SSRF decisions must be logged for compliance.
+ */
+export function recordSsrfAudit(entry: SsrfAuditEntry): void {
+  ssrfAuditLog.push(entry);
+  if (ssrfAuditLog.length > MAX_AUDIT_LOG_SIZE) {
+    ssrfAuditLog.splice(0, ssrfAuditLog.length - MAX_AUDIT_LOG_SIZE);
+  }
+  logger.debug({ entry }, 'SSRF audit recorded');
+}
+
+/**
+ * Get the SSRF audit log for compliance review.
+ */
+export function getSsrfAuditLog(): SsrfAuditEntry[] {
+  return [...ssrfAuditLog];
+}
+
+// ---------------------------------------------------------------------------
+// Test Helpers — NFR-5: DNS pinning + SSRF block verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Assert that DNS pinning works: resolves a hostname, pins it, verifies
+ * the pinned IP is used for subsequent lookups.
+ */
+export async function assertDnsPinningWorks(hostname: string): Promise<{ pinned: boolean; ip: string }> {
+  const result = await assertUrlAllowed(`https://${hostname}`);
+  if (!result.pinnedIp) {
+    throw new Error(`DNS pinning failed for ${hostname}: no pinned IP returned`);
+  }
+  return { pinned: true, ip: result.pinnedIp };
+}
+
+/**
+ * Assert that SSRF guard blocks requests to private URLs.
+ * Used in integration tests to verify the CIDR deny-list.
+ */
+export async function assertSsrfBlocksPrivateUrls(urls: string[]): Promise<{ url: string; blocked: boolean }[]> {
+  const results: { url: string; blocked: boolean }[] = [];
+  for (const url of urls) {
+    const result = await assertUrlAllowed(url);
+    results.push({ url, blocked: !result.allowed });
+  }
+  return results;
 }

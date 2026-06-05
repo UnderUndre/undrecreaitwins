@@ -39,6 +39,9 @@ function ipv4ToUint32(octets: [number, number, number, number]): number {
 
 function parseIpv4Cidr(cidr: string, label: string): Ipv4Cidr {
   const [ipPart, prefixLenStr] = cidr.split('/');
+  if (ipPart === undefined || prefixLenStr === undefined) {
+    throw new Error(`Invalid IPv4 CIDR: ${cidr}`);
+  }
   const prefixLen = parseInt(prefixLenStr, 10);
   const octets = ipPart.split('.').map(Number) as [number, number, number, number];
   const network = ipv4ToUint32(octets);
@@ -46,7 +49,7 @@ function parseIpv4Cidr(cidr: string, label: string): Ipv4Cidr {
   return { network: (network & mask) >>> 0, mask, label };
 }
 
-const IPV4_DENY: Ipv4Cidr[] = [\
+const IPV4_DENY: Ipv4Cidr[] = [
   parseIpv4Cidr('127.0.0.0/8', 'loopback'),
   parseIpv4Cidr('10.0.0.0/8', 'RFC1918-A'),
   parseIpv4Cidr('172.16.0.0/12', 'RFC1918-B'),
@@ -71,15 +74,15 @@ function ipv6ToBytes(ip: string): Uint8Array {
   const bytes = new Uint8Array(16);
 
   // IPv6-mapped IPv4 (::ffff:a.b.c.d)
-  const mappedV4Match = ip.match(/^::ffff:(\\d+\\.\\d+\\.\\d+\\.\\d+)$/i);
-  if (mappedV4Match) {
+  const mappedV4Match = ip.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (mappedV4Match && mappedV4Match[1]) {
     const v4Octets = mappedV4Match[1].split('.').map(Number);
     bytes[10] = 0xff;
     bytes[11] = 0xff;
-    bytes[12] = v4Octets[0];
-    bytes[13] = v4Octets[1];
-    bytes[14] = v4Octets[2];
-    bytes[15] = v4Octets[3];
+    bytes[12] = v4Octets[0] ?? 0;
+    bytes[13] = v4Octets[1] ?? 0;
+    bytes[14] = v4Octets[2] ?? 0;
+    bytes[15] = v4Octets[3] ?? 0;
     return bytes;
   }
 
@@ -110,18 +113,21 @@ function ipv6ToBytes(ip: string): Uint8Array {
 
 function parseIpv6Cidr(cidr: string, label: string): Ipv6Cidr {
   const [ipPart, prefixLenStr] = cidr.split('/');
+  if (ipPart === undefined || prefixLenStr === undefined) {
+    throw new Error(`Invalid IPv6 CIDR: ${cidr}`);
+  }
   const prefixLen = parseInt(prefixLenStr, 10);
   const network = ipv6ToBytes(ipPart);
   // Mask the network bytes to the prefix length
   for (let i = prefixLen; i < 128; i++) {
     const byteIdx = Math.floor(i / 8);
     const bitIdx = 7 - (i % 8);
-    network[byteIdx] &= ~(1 << bitIdx);
+    network[byteIdx] = (network[byteIdx] ?? 0) & ~(1 << bitIdx);
   }
   return { network, prefixLen, label };
 }
 
-const IPV6_DENY: Ipv6Cidr[] = [\
+const IPV6_DENY: Ipv6Cidr[] = [
   parseIpv6Cidr('::1/128', 'loopback'),
   parseIpv6Cidr('fe80::/10', 'link-local'),
   parseIpv6Cidr('fc00::/7', 'ULA'),
@@ -149,7 +155,7 @@ function isIpv6InCidr(ipBytes: Uint8Array, cidr: Ipv6Cidr): boolean {
       ? 0xff
       : (~0 << (8 - prefixBitsRemaining)) & 0xff;
 
-    if ((ipBytes[i] & mask) !== (cidr.network[i] & mask)) {
+    if (((ipBytes[i] ?? 0) & mask) !== ((cidr.network[i] ?? 0) & mask)) {
       return false;
     }
   }
@@ -176,7 +182,7 @@ export function isPrivateIp(ip: string): boolean {
   }
 
   // Try IPv6 (including IPv6-mapped IPv4)
-  let ipBytes: Uint8Array;\
+  let ipBytes: Uint8Array;
   try {
     ipBytes = ipv6ToBytes(ip);
   } catch {
@@ -243,7 +249,7 @@ export async function assertUrlAllowed(url: string): Promise<SsrfCheckResult> {
   // Resolve DNS (both A and AAAA)
   let allIps: string[] = [];
   try {
-    const [v4Results, v6Results] = await Promise.allSettled([\
+    const [v4Results, v6Results] = await Promise.allSettled([
       dns.resolve4(hostname),
       dns.resolve6(hostname),
     ]);
@@ -254,7 +260,7 @@ export async function assertUrlAllowed(url: string): Promise<SsrfCheckResult> {
     if (v6Results.status === 'fulfilled') {
       allIps.push(...v6Results.value);
     }
-  } catch (err) {\
+  } catch (err) {
     logger.warn({ hostname, err }, 'DNS resolution failed');
     return { allowed: false, reason: `DNS resolution failed for ${hostname}` };
   }

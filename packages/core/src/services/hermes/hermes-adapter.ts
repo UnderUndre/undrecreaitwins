@@ -7,6 +7,9 @@
  * (building prompts, mapping updates, fallback) lives in hermes-executor.ts.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AppError } from '@undrecreaitwins/shared';
 import pino from 'pino';
 
@@ -113,6 +116,8 @@ export class AcpClient {
   private sessionId: string | null = null;
   private initialized = false;
   private dead = false;
+  /** Throwaway Hermes profile dir (HERMES_HOME) for BYOK injection; cleaned on kill(). */
+  private profileDir: string | null = null;
 
   /** Check if the process is dead. */
   public isDead(): boolean {
@@ -172,6 +177,14 @@ export class AcpClient {
       }
     }
     this.dead = true;
+    if (this.profileDir) {
+      try {
+        rmSync(this.profileDir, { recursive: true, force: true });
+      } catch (err) {
+        logger.warn({ err, profileDir: this.profileDir }, 'Failed to clean hermes profile dir');
+      }
+      this.profileDir = null;
+    }
   }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────
@@ -188,14 +201,36 @@ export class AcpClient {
       ...(config.extraEnv || {}),
     } as Record<string, string | undefined>;
 
-    // Strategy B: inject BYOK effective config as env vars for the spawned hermes process
+    // Strategy B — BYOK injection via a throwaway Hermes profile (HERMES_HOME).
+    //
+    // Verified against hermes-agent v0.15.1 source: the model loader resolves
+    // provider/base_url/api_key from config.yaml (`model.{provider,base_url,default}`)
+    // + OPENAI_API_KEY, NOT from ad-hoc HERMES_BASE_URL/HERMES_API_KEY/HERMES_MODEL_ID
+    // (those names exist only in shell-tool env-passthrough). So we materialise a
+    // per-process profile dir with a config.yaml carrying the effective provider, point
+    // HERMES_HOME at it, and pass the key via env only (never written to disk).
+    // Minimal-config sufficiency + temperature/max_tokens placement are gated by T003.
     if (config.effectiveConfig) {
-      env.HERMES_PROVIDER = 'custom';
-      env.HERMES_BASE_URL = config.effectiveConfig.baseUrl;
-      env.HERMES_API_KEY = config.effectiveConfig.apiKey;
-      env.HERMES_MODEL_ID = config.effectiveConfig.modelId;
-      env.HERMES_TEMPERATURE = String(config.effectiveConfig.temperature ?? '');
-      env.HERMES_MAX_TOKENS = String(config.effectiveConfig.maxTokens ?? '');
+      const { baseUrl, apiKey, modelId, temperature, maxTokens } = config.effectiveConfig;
+      this.profileDir = mkdtempSync(join(tmpdir(), 'hermes-prof-'));
+      // JSON.stringify → valid double-quoted YAML scalar (defends against value injection).
+      const yamlLines = [
+        'model:',
+        '  provider: "custom"',
+        `  base_url: ${JSON.stringify(baseUrl)}`,
+        `  default: ${JSON.stringify(modelId)}`,
+      ];
+      if (typeof temperature === 'number' && Number.isFinite(temperature)) {
+        yamlLines.push(`  temperature: ${temperature}`);
+      }
+      if (typeof maxTokens === 'number' && Number.isFinite(maxTokens)) {
+        yamlLines.push(`  max_tokens: ${maxTokens}`);
+      }
+      writeFileSync(join(this.profileDir, 'config.yaml'), yamlLines.join('\n') + '\n', { mode: 0o600 });
+
+      env.HERMES_HOME = this.profileDir;
+      env.OPENAI_API_KEY = apiKey; // key stays in env only — never persisted to the profile
+      env.OPENAI_BASE_URL = baseUrl; // belt-and-suspenders for OpenAI-SDK tool clients
     }
 
     this.child = spawn(config.command, config.args, {

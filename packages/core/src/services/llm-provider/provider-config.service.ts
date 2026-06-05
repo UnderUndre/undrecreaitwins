@@ -9,7 +9,7 @@
  */
 
 import { eq, and } from 'drizzle-orm';
-import type { PgDatabase } from 'drizzle-orm/postgres-js';
+/* db type imported as `any` — follows resolution.ts pattern */
 import pino from 'pino';
 import {
   llmProviderConfig,
@@ -180,7 +180,7 @@ export class ConfigNotFoundError extends Error {
 
 export class ProviderConfigService {
   constructor(
-    private readonly db: PgDatabase<Record<string, unknown>>,
+    private readonly db: typeof import('../../db.js').db,
   ) {}
 
   // ── Tenant default ────────────────────────────────────────────────────
