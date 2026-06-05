@@ -13,12 +13,14 @@ import { EmbeddingService } from './embedding-service.js';
 import { LangfuseService } from './langfuse-service.js';
 import { withTenantContext } from '../db.js';
 import { conversations, messages, usageEvents } from '../models/index.js';
-import { ServiceUnavailableError, NotFoundError } from '@undrecreaitwins/shared';
+import { ServiceUnavailableError, NotFoundError, AppError } from '@undrecreaitwins/shared';
 import type { PersonaTraits, ModelPreferences, StreamChunk, FunnelSelectionMetadata } from '@undrecreaitwins/shared';
 
 interface ChatRequest {
   tenantId: string;
   personaSlug: string;
+  personaId?: string;
+  conversationId?: string;
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
   stream?: boolean;
   streamOptions?: { include_usage?: boolean };
@@ -82,9 +84,11 @@ export class ChatService {
       throw new ServiceUnavailableError('Chat', 'No messages provided');
     }
 
-    const persona = await personaRepo.getBySlug(request.tenantId, request.personaSlug) as unknown as PersonaRow;
+    const persona = request.personaId 
+      ? await personaRepo.getById(request.tenantId, request.personaId) as unknown as PersonaRow
+      : await personaRepo.getBySlug(request.tenantId, request.personaSlug) as unknown as PersonaRow;
     if (!persona) {
-      throw new NotFoundError('Persona', request.personaSlug);
+      throw new NotFoundError('Persona', request.personaId || request.personaSlug);
     }
 
     const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
@@ -111,7 +115,7 @@ export class ChatService {
        };
     }
 
-    const conversationId = await this.findOrCreateConversation(
+    const conversationId = request.conversationId || await this.findOrCreateConversation(
       request.tenantId,
       persona.id,
       request.messages[0]?.content || '',
@@ -119,116 +123,126 @@ export class ChatService {
       request.source,
     );
 
-    // Funnel Processing
-    const funnelResult = await funnelRuntime.processMessage(
-      request.tenantId,
-      persona.id,
-      conversationId,
-      sanitizedUserMessage
-    );
+    try {
+      // Funnel Processing
+      const funnelResult = await funnelRuntime.processMessage(
+        request.tenantId,
+        persona.id,
+        conversationId,
+        sanitizedUserMessage
+      );
 
-    if (funnelResult.scriptedReply) {
+      if (funnelResult.scriptedReply) {
+        await this.persistMessages(
+          request.tenantId,
+          conversationId,
+          request.messages,
+          funnelResult.scriptedReply,
+        );
+
+        return {
+          id: randomUUID(),
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: 'script-funnel-1.0',
+          choices: [{
+            index: 0,
+            message: { role: 'assistant', content: funnelResult.scriptedReply },
+            finish_reason: 'stop',
+          }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          metadata: {
+            conversation_id: conversationId,
+            funnel: funnelResult.metadata,
+          },
+        };
+      }
+
+      const systemPrompt = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage);
+      const allMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+        { role: 'system', content: systemPrompt },
+        ...request.messages,
+      ];
+
+      const lettaNamespace = `tenant_${request.tenantId}_persona_${persona.id}_conv_${conversationId}`;
+      let lettaContext = '';
+      let degradedMode = false;
+      if (letta.isAvailable()) {
+        try {
+          const memory = await letta.getMemory(lettaNamespace);
+          lettaContext = memory.map((m: { content: string }) => m.content).join('\n');
+        } catch {
+          degradedMode = true;
+        }
+      } else {
+        degradedMode = true;
+      }
+
+      if (lettaContext) {
+        allMessages.push({ role: 'system', content: `Memory context:\n${lettaContext}` });
+      }
+
+      const startTime = Date.now();
+      const llmResponse = await llm.complete({
+        messages: allMessages,
+        temperature: request.temperature ?? persona.modelPreferences?.temperature,
+        maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+        model: persona.modelPreferences?.model,
+        tenantId: request.tenantId,
+        personaId: persona.id,
+      });
+      const latencyMs = Date.now() - startTime;
+
+      // FR-001: Response validation (post-generation)
+      const finalContent = await validatorPipeline.validateResponse(llmResponse.content, {
+        tenantId: request.tenantId,
+        personaId: persona.id,
+        conversationId,
+        rawUserMessage: lastUserMessage
+      });
+
       await this.persistMessages(
         request.tenantId,
         conversationId,
         request.messages,
-        funnelResult.scriptedReply,
+        finalContent,
+      );
+
+      await this.emitUsageEvent(
+        request.tenantId,
+        persona.id,
+        conversationId,
+        llmResponse.model,
+        llmResponse.usage,
+        latencyMs,
+        allMessages,
+        finalContent,
       );
 
       return {
         id: randomUUID(),
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model: 'script-funnel-1.0',
+        model: llmResponse.model,
         choices: [{
           index: 0,
-          message: { role: 'assistant', content: funnelResult.scriptedReply },
-          finish_reason: 'stop',
+          message: { role: 'assistant', content: llmResponse.content },
+          finish_reason: llmResponse.finishReason === 'length' ? 'length' : (llmResponse.finishReason === 'content_filter' ? 'content_filter' : 'stop'),
         }],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        usage: llmResponse.usage,
         metadata: {
           conversation_id: conversationId,
+          ...(degradedMode && { degraded_mode: true }),
           funnel: funnelResult.metadata,
         },
       };
-    }
-
-    const systemPrompt = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage);
-    const allMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: systemPrompt },
-      ...request.messages,
-    ];
-
-    const lettaNamespace = `tenant_${request.tenantId}_persona_${persona.id}_conv_${conversationId}`;
-    let lettaContext = '';
-    let degradedMode = false;
-    if (letta.isAvailable()) {
-      try {
-        const memory = await letta.getMemory(lettaNamespace);
-        lettaContext = memory.map((m: { content: string }) => m.content).join('\n');
-      } catch {
-        degradedMode = true;
+    } catch (err) {
+      if (err instanceof AppError) {
+        err.context.conversationId = conversationId;
+        err.context.personaId = persona.id;
       }
-    } else {
-      degradedMode = true;
+      throw err;
     }
-
-    if (lettaContext) {
-      allMessages.push({ role: 'system', content: `Memory context:\n${lettaContext}` });
-    }
-
-    const startTime = Date.now();
-    const llmResponse = await llm.complete({
-      messages: allMessages,
-      temperature: request.temperature ?? persona.modelPreferences?.temperature,
-      maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
-      model: persona.modelPreferences?.model,
-    });
-    const latencyMs = Date.now() - startTime;
-
-    // FR-001: Response validation (post-generation)
-    const finalContent = await validatorPipeline.validateResponse(llmResponse.content, {
-      tenantId: request.tenantId,
-      personaId: persona.id,
-      conversationId,
-      rawUserMessage: lastUserMessage
-    });
-
-    await this.persistMessages(
-      request.tenantId,
-      conversationId,
-      request.messages,
-      finalContent,
-    );
-
-    await this.emitUsageEvent(
-      request.tenantId,
-      persona.id,
-      conversationId,
-      llmResponse.model,
-      llmResponse.usage,
-      latencyMs,
-      allMessages,
-      finalContent,
-    );
-
-    return {
-      id: randomUUID(),
-      object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
-      model: llmResponse.model,
-      choices: [{
-        index: 0,
-        message: { role: 'assistant', content: llmResponse.content },
-        finish_reason: llmResponse.finishReason === 'length' ? 'length' : (llmResponse.finishReason === 'content_filter' ? 'content_filter' : 'stop'),
-      }],
-      usage: llmResponse.usage,
-      metadata: {
-        conversation_id: conversationId,
-        ...(degradedMode && { degraded_mode: true }),
-        funnel: funnelResult.metadata,
-      },
-    };
   }
 
   async *completeStream(

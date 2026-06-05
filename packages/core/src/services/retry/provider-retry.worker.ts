@@ -1,41 +1,13 @@
-/**
- * ⚠️ NOT WIRED — SCAFFOLDING ONLY. US2 durable-retry is DEFERRED (2026-06-04).
- *
- * This module compiles but is ORPHANED: nothing calls `enqueueProviderRetry`, nothing
- * starts `ProviderRetryWorker`, and `on('completed')` ONLY logs — there is NO outbound
- * delivery, so a successfully-retried answer is never sent back to the user. Wiring the
- * enqueue path as-is would REGRESS the 010 thin-completion fallback
- * (degraded-answer-now → no-answer-ever). Do NOT assume "no message loss" works.
- *
- * To finish US2 see the Y follow-up:
- *   specs/011-llm-configuration/followup-Y-durable-retry.md
- * It needs: delivery context (conversationId + channel) in RunAgentTurnInput→RetryJobPayload,
- * a "queued" RunAgentTurnResult contract (caller must not send now), worker
- * delivery-on-success via the engine outbound channel, THEN enqueue + worker-start + backoff-cap.
- *
- * ── original (aspirational) description ──
- * provider-retry.worker.ts — BullMQ durable-retry on provider failure (009/011).
- *
- * US2: Provider outage on the prod path never loses a message
- *      and never silently swaps model.
- *
- * - Enqueue on UPSTREAM_* (prod reply-path)
- * - Exponential backoff (5s → ~2min cap)
- * - Re-resolve + re-decrypt per attempt (honors key rotation + config changes)
- * - Same provider, no silent model-swap
- * - Window exhaustion → dead-letter + operator alert (T014)
- * - Sandbox/interactive path: synchronous typed error, no enqueue
- */
-
-import { Worker, Queue, type Job } from 'bullmq';
-import { AppError } from '@undrecreaitwins/shared';
-import { resolveEffectiveConfig } from '../llm-provider/resolution.js';
-import { decryptApiKey, KmsUnavailableError } from '../llm-provider/crypto.js';
-import { assertUrlAllowed } from '../llm-provider/ssrf-guard.js';
-import { db } from '../../db.js';
+import { Worker, Queue, type Job, UnrecoverableError } from 'bullmq';
+import { AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
+import { ChatService, type ChatResponse } from '../chat-service.js';
+import { ChannelTransport } from '../channel-transport.js';
 import pino from 'pino';
 
 const logger = pino({ name: 'provider-retry-worker' });
+
+const chatService = new ChatService();
+const transport = new ChannelTransport();
 
 // ---------------------------------------------------------------------------
 // Queue configuration
@@ -67,6 +39,18 @@ export interface RetryJobPayload {
   tenantId: string;
   /** Persona (assistant) ID — for resolution scope */
   personaId: string;
+  /** Persona slug — for calling ChatService.complete */
+  personaSlug: string;
+  /** Conversation ID — for calling ChatService.complete */
+  conversationId: string;
+  /** Channel type */
+  channelType: 'telegram' | 'whatsapp';
+  /** Channel chat ID (externalUserId) */
+  chatId: string;
+  /** Peer ID (e.g. for logging) */
+  peerId: string;
+  /** Original channel message ID */
+  originalMessageId: string;
   /** The original user message to retry */
   userMessage: string;
   /** System prompt for the turn */
@@ -75,7 +59,7 @@ export interface RetryJobPayload {
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   /** Budget for the retry turn */
   budget: {
-    maxTokens: number;
+    maxTokens?: number;
     maxExecutionMs?: number;
   };
   /** Original error that triggered the retry */
@@ -126,17 +110,10 @@ export async function enqueueProviderRetry(
 ): Promise<string> {
   const queue = getRetryQueue();
 
-  // Intended backoff cap — NOT currently enforced: BullMQ's `exponential` strategy below is
-  // UNCAPPED and will exceed MAX_BACKOFF_MS on later attempts. The real cap (a custom
-  // backoffStrategy honoring MAX_BACKOFF_MS) is part of the Y follow-up; this only documents intent.
-  const intendedCapMs = Math.min(INITIAL_BACKOFF_MS * Math.pow(BACKOFF_MULTIPLIER, DEFAULT_MAX_ATTEMPTS - 1), MAX_BACKOFF_MS);
-  logger.debug({ INITIAL_BACKOFF_MS, BACKOFF_MULTIPLIER, MAX_BACKOFF_MS, intendedCapMs }, 'backoff config (cap NOT enforced — deferred to Y)');
-
   const job = await queue.add('provider-retry', payload, {
     attempts: DEFAULT_MAX_ATTEMPTS,
     backoff: {
-      type: 'exponential',
-      delay: INITIAL_BACKOFF_MS,
+      type: 'custom-exponential',
     },
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 50 },
@@ -172,16 +149,13 @@ const RETRYABLE_ERROR_CODES = [
   'acp_process_error',
   'stream_timeout',
   'acp_aborted',
+  'service_unavailable', // Added for ServiceUnavailableError
 ];
 
 const RETRYABLE_HTTP_STATUS = [429, 500, 502, 503, 504];
 
 export function isRetryableProviderError(err: unknown): boolean {
   if (err instanceof AppError) {
-    // KMS failures are retryable
-    if (err instanceof KmsUnavailableError) return true;
-
-    // ACP process errors are retryable
     const code = err.code ?? '';
     if (RETRYABLE_ERROR_CODES.includes(code)) return true;
     if (code.startsWith('acp_')) return true;
@@ -193,10 +167,10 @@ export function isRetryableProviderError(err: unknown): boolean {
 
   if (err instanceof Error) {
     const name = err.name;
-    const code = (err as any).code ?? '';
+    const code = 'code' in err ? String(err.code) : '';
     if (RETRYABLE_ERROR_CODES.includes(code)) return true;
     if (name === 'TimeoutError') return true;
-    if (name === 'AbortError') return false; // User abort — don't retry
+    if (name === 'AbortError') return false;
   }
 
   return false;
@@ -252,97 +226,34 @@ async function moveToDeadLetter(job: Job<RetryJobPayload>, reason: string): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Core retry logic — re-resolve + re-decrypt per attempt
+// Core retry logic — use ChatService.complete for full pipeline integration
 // ---------------------------------------------------------------------------
 
 async function executeRetryAttempt(
   payload: RetryJobPayload,
-  attempt: number,
-): Promise<{ content: string; model: string; usage: RetryJobResult['usage'] }> {
-  // 1. Re-resolve effective config (fresh — honors config changes + key rotation)
-  const effective = await resolveEffectiveConfig(db, payload.tenantId, payload.personaId);
-
-  let baseUrl: string;
-  let apiKey: string;
-  let model: string;
-
-  if (effective.source !== 'platform' && effective.config) {
-    // 2. Re-decrypt key (fresh — honors rotation)
-    apiKey = await decryptApiKey(effective.config.apiKeyCiphertext, effective.config.apiKeyRef);
-    baseUrl = effective.config.baseUrl;
-    model = effective.config.modelId;
-
-    // 3. SSRF re-check on every attempt (DNS may have changed)
-    const ssrfResult = await assertUrlAllowed(baseUrl);
-    if (!ssrfResult.allowed) {
-      throw new AppError(
-        `baseUrl SSRF check failed on retry: ${ssrfResult.reason}`,
-        400,
-        'retry_ssrf_blocked',
-      );
-    }
-  } else {
-    // No custom config — fall back to platform defaults
-    baseUrl = process.env.LLM_PROVIDER_URL || 'http://localhost:4000';
-    apiKey = process.env.LLM_API_KEY || '';
-    model = process.env.LLM_DEFAULT_MODEL || 'gpt-4o';
-  }
-
+  _attempt: number,
+): Promise<ChatResponse> {
   logger.info(
     {
       tenantId: payload.tenantId,
       personaId: payload.personaId,
       sourcePath: payload.sourcePath,
-      attempt,
-      source: effective.source,
-      model,
+      conversationId: payload.conversationId,
     },
-    'executeRetryAttempt: re-resolved config for attempt',
+    'executeRetryAttempt: re-running via ChatService',
   );
 
-  // 4. Execute the LLM call — thin-completion style (direct fetch)
-  //    Agentic path re-enters via HermesExecutor which handles its own pooling.
-  const messages = [
-    ...(payload.conversationHistory || []).map(m => ({ role: m.role, content: m.content })),
-    { role: 'user' as const, content: payload.userMessage },
-  ];
-
-  // Note: Using native fetch here as we already validated SSRF above.
-  // In a real retry loop, we might want to reuse ssrfSafeFetch for extra safety.
-  const response = await fetch(`${baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey && { Authorization: `Bearer ${apiKey}` }),
-    },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'system', content: payload.systemPrompt }, ...messages],
-      max_tokens: payload.budget.maxTokens,
-    }),
-    signal: AbortSignal.timeout(payload.budget.maxExecutionMs || 30000),
+  return chatService.complete({
+    tenantId: payload.tenantId,
+    personaSlug: payload.personaSlug,
+    personaId: payload.personaId,
+    conversationId: payload.conversationId,
+    messages: [
+      ...payload.conversationHistory,
+      { role: 'user', content: payload.userMessage },
+    ],
+    ...(payload.budget.maxTokens != null && { maxTokens: payload.budget.maxTokens }),
   });
-
-  if (!response.ok) {
-    const errBody = await response.text().catch(() => '');
-    throw new AppError(
-      `Provider returned ${response.status}: ${errBody.slice(0, 200)}`,
-      response.status,
-      `upstream_${response.status}`,
-    );
-  }
-
-  const data = await response.json() as {
-    choices: Array<{ message: { content: string }; finish_reason: string }>;
-    model: string;
-    usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-  };
-
-  return {
-    content: data.choices[0]?.message?.content || '',
-    model: data.model,
-    usage: data.usage,
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -362,6 +273,13 @@ export class ProviderRetryWorker {
       QUEUE_NAME,
       async (job: Job<RetryJobPayload>) => {
         const attempt = job.attemptsMade + 1;
+
+        const originalTs = new Date(job.data.originalAttemptAt).getTime();
+        const elapsed = Number.isFinite(originalTs) ? Date.now() - originalTs : 0;
+        if (elapsed >= DEFAULT_RETRY_WINDOW_MS) {
+          throw new UnrecoverableError(`Retry window exhausted after ${elapsed}ms`);
+        }
+
         logger.info(
           {
             jobId: job.id,
@@ -373,25 +291,31 @@ export class ProviderRetryWorker {
           'Processing retry attempt',
         );
 
-        const result = await executeRetryAttempt(job.data, attempt);
+        const response = await executeRetryAttempt(job.data, attempt);
 
         return {
           success: true,
           attemptsUsed: attempt,
-          content: result.content,
-          model: result.model,
-          usage: result.usage,
+          content: response.choices[0]?.message?.content || '',
+          model: response.model,
+          usage: response.usage,
         } satisfies RetryJobResult;
       },
       {
         connection: REDIS_CONFIG,
         concurrency: parseInt(process.env.LLM_RETRY_CONCURRENCY || '5', 10),
+        settings: {
+          backoffStrategy: (attemptsMade: number) => {
+            const delay = INITIAL_BACKOFF_MS * Math.pow(BACKOFF_MULTIPLIER, attemptsMade - 1);
+            return Math.min(delay, MAX_BACKOFF_MS);
+          },
+        },
       },
     );
 
     // ── Event handlers ──────────────────────────────────────────────────
 
-    this.worker.on('completed', (job: Job<RetryJobPayload>, result: RetryJobResult) => {
+    this.worker.on('completed', async (job: Job<RetryJobPayload>, result: RetryJobResult) => {
       logger.info(
         {
           jobId: job.id,
@@ -400,8 +324,23 @@ export class ProviderRetryWorker {
           attemptsUsed: result.attemptsUsed,
           model: result.model,
         },
-        'Retry job completed successfully',
+        'Retry job completed successfully — delivering answer',
       );
+
+      // DELIVER the answer back to the channel (LOAD-BEARING)
+      try {
+        await transport.publish(REDIS_STREAMS.OUTBOUND, {
+          channel_id: job.data.chatId,
+          message_id: job.data.originalMessageId,
+          reply_to: job.data.originalMessageId,
+          content: result.content || '',
+          tenant_id: job.data.tenantId,
+          external_user_id: job.data.peerId,
+        });
+      } catch (err) {
+        logger.error({ err, jobId: job.id }, 'Failed to deliver successfully-retried answer to outbound stream — moving to dead-letter');
+        await moveToDeadLetter(job, `Delivery failed after successful retry: ${err instanceof Error ? err.message : String(err)}`);
+      }
     });
 
     this.worker.on('failed', async (job: Job<RetryJobPayload> | undefined, err: Error) => {
@@ -419,8 +358,8 @@ export class ProviderRetryWorker {
         'Retry attempt failed',
       );
 
-      // Check if this was the final attempt (window exhausted per DEFAULT_RETRY_WINDOW_MS)
-      const elapsed = Date.now() - new Date(job.data.originalAttemptAt).getTime();
+      const originalTs = new Date(job.data.originalAttemptAt).getTime();
+      const elapsed = Number.isFinite(originalTs) ? Date.now() - originalTs : 0;
       const windowExhausted = elapsed >= DEFAULT_RETRY_WINDOW_MS;
       const maxAttempts = job.opts?.attempts ?? DEFAULT_MAX_ATTEMPTS;
       if (job.attemptsMade >= maxAttempts || windowExhausted) {

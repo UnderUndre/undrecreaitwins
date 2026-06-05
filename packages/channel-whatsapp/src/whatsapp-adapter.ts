@@ -85,6 +85,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
       };
 
       await this.transport.publish(REDIS_STREAMS.INBOUND, {
+        channel_type: 'whatsapp',
         channel_id: this.channelId,
         message_id: channelMessage.id,
         persona_slug: this.personaSlug,

@@ -2,7 +2,15 @@ declare interface ErrorConstructorV8 extends ErrorConstructor {
   captureStackTrace(target: object, constructorOpt?: Function): void;
 }
 
+export interface AppErrorContext {
+  conversationId?: string;
+  personaId?: string;
+  [key: string]: unknown;
+}
+
 export class AppError extends Error {
+  public readonly context: AppErrorContext = {};
+
   constructor(
     message: string,
     public readonly statusCode: number,

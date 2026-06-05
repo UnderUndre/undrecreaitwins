@@ -58,6 +58,26 @@
       "types": "./dist/services/channel-transport.d.ts",
       "default": "./dist/services/channel-transport.js"
     },
+    "./services/retry/provider-retry.worker.js": {
+      "types": "./dist/services/retry/provider-retry.worker.d.ts",
+      "default": "./dist/services/retry/provider-retry.worker.js"
+    },
+    "./services/llm-provider/resolution.js": {
+      "types": "./dist/services/llm-provider/resolution.d.ts",
+      "default": "./dist/services/llm-provider/resolution.js"
+    },
+    "./services/llm-provider/crypto.js": {
+      "types": "./dist/services/llm-provider/crypto.d.ts",
+      "default": "./dist/services/llm-provider/crypto.js"
+    },
+    "./services/llm-provider/provider-config.service.js": {
+      "types": "./dist/services/llm-provider/provider-config.service.d.ts",
+      "default": "./dist/services/llm-provider/provider-config.service.js"
+    },
+    "./services/llm-provider/test-connection.js": {
+      "types": "./dist/services/llm-provider/test-connection.d.ts",
+      "default": "./dist/services/llm-provider/test-connection.js"
+    },
     "./middleware/tenant.js": {
       "types": "./dist/middleware/tenant.d.ts",
       "default": "./dist/middleware/tenant.js"
