@@ -77,3 +77,5 @@ Engine (`undrecreaitwins`) owns the **RUNTIME**; Product (`ai-twins`) owns the *
 | 009-reengagement-runtime | 006-reengagement-admin |
 
 Product → engine is **server-to-server** (Bearer + `X-Tenant-ID`, via a Product BFF); engine RLS enforces tenant isolation. Shared tables with singular migration ownership (e.g. `followup_*` for re-engagement) coordinated cross-repo before either side migrates.
+
+- [012-openai-endpoint](../012-openai-endpoint/spec.md): Public OpenAI-compatible endpoint with per-workspace API keys (Runtime).
