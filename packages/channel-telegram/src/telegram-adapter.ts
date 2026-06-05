@@ -42,6 +42,7 @@ export class TelegramAdapter implements ChannelAdapter {
       };
 
       await this.transport.publish(REDIS_STREAMS.INBOUND, {
+        channel_type: 'telegram',
         channel_id: this.channelId,
         message_id: message.id,
         persona_slug: this.personaSlug,

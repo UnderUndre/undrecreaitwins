@@ -1,9 +1,19 @@
 import { Redis } from 'ioredis';
+import pino from 'pino';
 import { ChannelTransport } from './channel-transport.js';
 import { ChatService } from './chat-service.js';
-import { REDIS_STREAMS, DEDUP_TTL_SECONDS } from '@undrecreaitwins/shared';
+import { AppError, REDIS_STREAMS, DEDUP_TTL_SECONDS } from '@undrecreaitwins/shared';
+import { isRetryableProviderError, enqueueProviderRetry } from './retry/provider-retry.worker.js';
 
+const logger = pino({ name: 'channel-orchestrator' });
 const chatService = new ChatService();
+
+const VALID_CHANNEL_TYPES = new Set(['telegram', 'whatsapp']);
+
+function extractChannelType(raw: string | undefined): 'telegram' | 'whatsapp' {
+  if (raw && VALID_CHANNEL_TYPES.has(raw)) return raw as 'telegram' | 'whatsapp';
+  return 'telegram';
+}
 
 export class ChannelOrchestrator {
   private transport: ChannelTransport;
@@ -48,7 +58,51 @@ export class ChannelOrchestrator {
             tenant_id,
             external_user_id,
           });
-        } catch {
+        } catch (err) {
+          if (isRetryableProviderError(err) && err instanceof AppError) {
+            const conversationId = err.context.conversationId;
+            const personaId = err.context.personaId;
+            const channelType = extractChannelType(d['channel_type']);
+
+            if (conversationId && personaId) {
+              await enqueueProviderRetry({
+                tenantId: tenant_id,
+                personaId,
+                personaSlug: persona_slug,
+                conversationId,
+                channelType,
+                chatId: channel_id,
+                peerId: external_user_id,
+                originalMessageId: message_id,
+                userMessage: content,
+                systemPrompt: '',
+                conversationHistory: [],
+                budget: {
+                  maxTokens: response_budget_maxTokens(content),
+                },
+                originalError: {
+                  message: err.message,
+                  code: err.code || 'unknown',
+                },
+                originalAttemptAt: new Date().toISOString(),
+                sourcePath: 'prod',
+              });
+
+              return;
+            }
+
+            logger.warn(
+              {
+                errCode: err.code,
+                hasConversationId: !!conversationId,
+                hasPersonaId: !!personaId,
+                channel_id,
+                message_id,
+              },
+              'Retryable provider error skipped — missing conversationId/personaId context on error',
+            );
+          }
+
           await this.transport.publish(REDIS_STREAMS.OUTBOUND, {
             channel_id,
             message_id,
@@ -65,4 +119,9 @@ export class ChannelOrchestrator {
     await this.transport.disconnect();
     await this.dedupRedis.quit();
   }
+}
+
+function response_budget_maxTokens(content: string): number {
+  const estimated = Math.ceil(content.length * 1.5);
+  return Math.max(estimated, 500);
 }

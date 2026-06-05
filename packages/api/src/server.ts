@@ -15,6 +15,9 @@ import { annotationRoutes } from './routes/annotations.js';
 import { documentRoutes } from './routes/documents.js';
 import { sandboxRoutes } from './routes/sandbox.js';
 import { llmProviderRoutes } from './routes/llm-provider.js';
+import { ProviderRetryWorker } from '@undrecreaitwins/core/services/retry/provider-retry.worker.js';
+
+const retryWorker = new ProviderRetryWorker();
 
 export async function buildServer() {
   const fastify = Fastify({
@@ -101,6 +104,16 @@ export async function start() {
   const server = await buildServer();
   const port = parseInt(process.env.PORT || '8090', 10);
   await server.listen({ port, host: '0.0.0.0' });
+  
+  // Start the durable-retry worker (US2)
+  await retryWorker.start();
+
+  process.on('SIGTERM', async () => {
+    await retryWorker.stop();
+    await server.close();
+    process.exit(0);
+  });
+
   return server;
 }
 
