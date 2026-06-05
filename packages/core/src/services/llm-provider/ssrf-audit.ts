@@ -7,7 +7,8 @@
  * 3. Re-verify-at-injection hook for the reply path
  */
 
-import http from 'node:http';
+import { Agent } from 'undici';
+import type { LookupFunction } from 'node:net';
 import { assertUrlAllowed, createPinnedDnsLookup } from './ssrf-guard.js';
 import pino from 'pino';
 
@@ -41,10 +42,13 @@ export async function ssrfSafeFetch(
     throw new Error('SSRF check passed but no pinned IP returned — internal error');
   }
 
-  // 2. Create pinned DNS lookup via node:http Agent
+  // 2. Pin DNS via an undici Agent — Node's global fetch() honors the `dispatcher` option
+  // (fetch IS undici). The pinned lookup forces the TCP connect to the IP resolved + vetted in
+  // step 1, closing the DNS-rebinding TOCTOU gap. NOTE: a node:http/https Agent does NOT work
+  // here — global fetch silently ignores it (that was the prior SSRF-bypass bug, PR #19 C1).
   const pinnedLookup = createPinnedDnsLookup(ssrfResult.pinnedIp);
-  const agent = new http.Agent({
-    lookup: pinnedLookup as unknown as http.AgentOptions['lookup'],
+  const dispatcher = new Agent({
+    connect: { lookup: pinnedLookup as unknown as LookupFunction },
   });
 
   // 3. Build the actual request URL
@@ -70,12 +74,14 @@ export async function ssrfSafeFetch(
     const response = await fetch(url, {
       ...init,
       signal: timeoutController.signal,
-    } as RequestInit);
+      dispatcher,
+    } as RequestInit & { dispatcher: Agent });
 
     return response;
   } finally {
     clearTimeout(timeoutId);
-    agent.destroy();
+    // Do NOT destroy the dispatcher here — the response body may still be streaming to the
+    // caller (llm-client streaming path). undici reaps idle connections via keep-alive timeout.
   }
 }
 

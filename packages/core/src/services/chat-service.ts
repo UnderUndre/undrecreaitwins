@@ -36,7 +36,7 @@ interface ChatResponse {
   choices: Array<{
     index: number;
     message: { role: 'assistant'; content: string };
-    finish_reason: 'stop' | 'length';
+    finish_reason: 'stop' | 'length' | 'content_filter';
   }>;
   usage: {
     prompt_tokens: number;
@@ -220,7 +220,7 @@ export class ChatService {
       choices: [{
         index: 0,
         message: { role: 'assistant', content: llmResponse.content },
-        finish_reason: (llmResponse.finishReason === 'length' ? 'length' : 'stop'),
+        finish_reason: llmResponse.finishReason === 'length' ? 'length' : (llmResponse.finishReason === 'content_filter' ? 'content_filter' : 'stop'),
       }],
       usage: llmResponse.usage,
       metadata: {

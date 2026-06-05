@@ -126,9 +126,11 @@ export async function enqueueProviderRetry(
 ): Promise<string> {
   const queue = getRetryQueue();
 
-  // Calculate capped backoff: delay * multiplier^(attempt-1), capped at MAX_BACKOFF_MS
-  const cappedBackoff = Math.min(INITIAL_BACKOFF_MS * Math.pow(BACKOFF_MULTIPLIER, DEFAULT_MAX_ATTEMPTS - 1), MAX_BACKOFF_MS);
-  logger.debug({ INITIAL_BACKOFF_MS, BACKOFF_MULTIPLIER, MAX_BACKOFF_MS, cappedBackoff }, 'backoff configuration');
+  // Intended backoff cap — NOT currently enforced: BullMQ's `exponential` strategy below is
+  // UNCAPPED and will exceed MAX_BACKOFF_MS on later attempts. The real cap (a custom
+  // backoffStrategy honoring MAX_BACKOFF_MS) is part of the Y follow-up; this only documents intent.
+  const intendedCapMs = Math.min(INITIAL_BACKOFF_MS * Math.pow(BACKOFF_MULTIPLIER, DEFAULT_MAX_ATTEMPTS - 1), MAX_BACKOFF_MS);
+  logger.debug({ INITIAL_BACKOFF_MS, BACKOFF_MULTIPLIER, MAX_BACKOFF_MS, intendedCapMs }, 'backoff config (cap NOT enforced — deferred to Y)');
 
   const job = await queue.add('provider-retry', payload, {
     attempts: DEFAULT_MAX_ATTEMPTS,
@@ -424,6 +426,11 @@ export class ProviderRetryWorker {
       if (job.attemptsMade >= maxAttempts || windowExhausted) {
         logger.warn({ DEAD_LETTER_QUEUE_NAME, windowExhausted, elapsed, DEFAULT_RETRY_WINDOW_MS }, 'moving to dead-letter queue');
         await moveToDeadLetter(job, `Window exhausted after ${job.attemptsMade} attempts${windowExhausted ? ' (time window)' : ''}: ${err.message}`);
+        // Halt further BullMQ retries — esp. window-exhausted-but-attempts-remain, which would
+        // otherwise keep retrying AND duplicate into the dead-letter queue. NOTE: discard() in the
+        // 'failed' handler is best-effort; the robust fix (throw UnrecoverableError / check the
+        // window inside the processor) is part of the Y follow-up.
+        await job.discard();
       }
     });
   }

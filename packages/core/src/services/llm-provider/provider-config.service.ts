@@ -180,7 +180,7 @@ export class ConfigNotFoundError extends Error {
 
 export class ProviderConfigService {
   constructor(
-    private readonly db: any,
+    private readonly db: typeof import('../../db.js').db,
   ) {}
 
   // ── Tenant default ────────────────────────────────────────────────────

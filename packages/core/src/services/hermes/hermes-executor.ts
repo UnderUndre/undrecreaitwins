@@ -110,7 +110,7 @@ export class HermesExecutor {
     // (HERMES_HOME + config.yaml `model.{provider,base_url,default}` + OPENAI_API_KEY env).
     // We pass the structured effective config — NOT ad-hoc HERMES_* env names, which the
     // Hermes model loader does not read (verified against hermes-agent v0.15.1 source).
-    let effectiveConfigForSpawn: { baseUrl: string; apiKey: string; modelId: string } | undefined;
+    let effectiveConfigForSpawn: { baseUrl: string; apiKey: string; modelId: string; temperature?: number | null; maxTokens?: number | null } | undefined;
     let configHash: string | null = null;
     let model = input.persona.modelPreferences?.model ?? 'default';
 
@@ -121,6 +121,8 @@ export class HermesExecutor {
           baseUrl: effective.config.baseUrl,
           apiKey,
           modelId: effective.config.modelId,
+          temperature: effective.config.temperature,
+          maxTokens: effective.config.maxTokens,
         };
         model = effective.config.modelId;
         configHash = createHash('sha256')

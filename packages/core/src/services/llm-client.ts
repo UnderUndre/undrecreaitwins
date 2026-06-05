@@ -1,5 +1,6 @@
 import { ServiceUnavailableError, AppError } from '@undrecreaitwins/shared';
 import type { StreamChunk } from '@undrecreaitwins/shared';
+import { randomUUID } from 'node:crypto';
 import { db } from '../db.js';
 import { resolveEffectiveConfig } from './llm-provider/resolution.js';
 import { decryptApiKey } from './llm-provider/crypto.js';
@@ -186,7 +187,7 @@ export class LLMClient {
             try {
               const data = JSON.parse(trimmed.slice(6));
               const chunk: StreamChunk = {
-                id: data.id ?? crypto.randomUUID(),
+                id: data.id ?? randomUUID(),
                 object: 'chat.completion.chunk',
                 created: data.created ?? Math.floor(Date.now() / 1000),
                 model: data.model ?? model,

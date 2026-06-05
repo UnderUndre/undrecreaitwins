@@ -211,7 +211,7 @@ export class AcpClient {
     // HERMES_HOME at it, and pass the key via env only (never written to disk).
     // Minimal-config sufficiency + temperature/max_tokens placement are gated by T003.
     if (config.effectiveConfig) {
-      const { baseUrl, apiKey, modelId, maxTokens } = config.effectiveConfig;
+      const { baseUrl, apiKey, modelId, temperature, maxTokens } = config.effectiveConfig;
       this.profileDir = mkdtempSync(join(tmpdir(), 'hermes-prof-'));
       // JSON.stringify → valid double-quoted YAML scalar (defends against value injection).
       const yamlLines = [
@@ -220,6 +220,9 @@ export class AcpClient {
         `  base_url: ${JSON.stringify(baseUrl)}`,
         `  default: ${JSON.stringify(modelId)}`,
       ];
+      if (typeof temperature === 'number' && Number.isFinite(temperature)) {
+        yamlLines.push(`  temperature: ${temperature}`);
+      }
       if (typeof maxTokens === 'number' && Number.isFinite(maxTokens)) {
         yamlLines.push(`  max_tokens: ${maxTokens}`);
       }
