@@ -155,7 +155,7 @@ export function trackDecryption(keyRef: string): void {
 
   // Prune timestamps older than 1 minute
   const oneMinuteAgo = now - 60_000;
-  while (decryptionTimestamps.length > 0 && decryptionTimestamps[0] < oneMinuteAgo) {
+  while (decryptionTimestamps.length > 0 && (decryptionTimestamps[0] ?? 0) < oneMinuteAgo) {
     decryptionTimestamps.shift();
   }
 

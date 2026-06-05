@@ -220,7 +220,7 @@ export class ChatService {
       choices: [{
         index: 0,
         message: { role: 'assistant', content: llmResponse.content },
-        finish_reason: llmResponse.finishReason,
+        finish_reason: (llmResponse.finishReason === 'length' ? 'length' : 'stop'),
       }],
       usage: llmResponse.usage,
       metadata: {

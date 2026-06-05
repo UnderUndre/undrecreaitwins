@@ -19,7 +19,12 @@ description: "Task list — Per-Assistant LLM Provider Configuration (Runtime / 
 
 **⚠️ Sync barrier — no user-story work until done. Includes the empirical gate.**
 
-- [x] T003 [BE] **Gate T000-LLM**: spike Hermes ACP `session/new` per-session model/provider/base_url override (research D1); record outcome → Strategy A (override) vs B (pool-by-config) in research.md
+- [x] T003 [BE] **Gate T000-LLM — PASSED 2026-06-04: the BYOK provider is actually CONSUMED by Hermes.** *(Earlier the shipped adapter injected dead `HERMES_BASE_URL/HERMES_API_KEY/HERMES_MODEL_ID` env names → silent no-op; corrected to HERMES_HOME profile + config.yaml + `OPENAI_API_KEY`.)* **Evidence:**
+    1. ✅ `rg "HERMES_BASE_URL|HERMES_API_KEY|HERMES_MODEL_ID" <hermes-agent>` → hits ONLY in shell-tool env-passthrough, NOT the model loader.
+    2. ✅ `HERMES_HOME=<profile>` (config.yaml `model.{provider:custom,base_url,default}`) + `hermes -z` one-shot → **capture proxy received `POST /v1/chat/completions model=gate-test-model`** at the configured `base_url` (NOT the `~/.hermes` default); `hermes config show` reflects the injected model.
+    3. ✅ **Model-only `config.yaml` is sufficient** (Hermes probes `/v1/models` then completes; no extra keys needed).
+    4. ⚠️ OPEN (small follow-up): `temperature` field placement in Hermes config not yet confirmed/wired — adapter writes `max_tokens` (docs-valid), `temperature` unwired.
+   Strategy **B locked** (HERMES_HOME profile). ACP per-session override (A) not needed — B verified end-to-end.
 - [x] T003b [BE] **(Conditional — if T003 = Strategy B)** Pool-keyed-by-config warm-pool manager: hash effective config → pool key; `MAX_DISTINCT_CONFIGS_PER_TENANT = 8` (env-tunable); LRU eviction on idle TTL (15 min); rejection on save if limit reached. Gated by T003 outcome. **Blocks T010 if Strategy B.**
 - [x] T004 [DB] Drizzle schema `llm_provider_config` + `tenant_llm_default` (data-model.md) with `UNIQUE(personaId)`/`UNIQUE(tenantId)`, `version` optimistic-lock col; generate reviewable migration `.sql` (no direct apply — Standing Order 5)
 - [x] T005 [BE] Crypto module `crypto.ts` — KMS-envelope encrypt/decrypt, decrypt-only-at-injection (research D2), typed errors (KMS failure triggers BullMQ retry), no plaintext logging
@@ -45,15 +50,17 @@ description: "Task list — Per-Assistant LLM Provider Configuration (Runtime / 
 
 ---
 
-## Phase 4: User Story 2 - Durable-retry, no model-swap (P1)
+## Phase 4: User Story 2 - Durable-retry, no model-swap (P1) — ⚠️ DEFERRED → `followup-Y-durable-retry.md`
 
-**Goal**: provider outage on the prod path never loses a message and never silently swaps model.
-**Independent Test**: break the provider → turn enqueues + retries same provider; restore → completes; exhaust window → dead-letter + alert.
+> **DESCOPED from 011 MVP (2026-06-04).** `provider-retry.worker.ts` compiles but is **orphaned scaffolding** — nothing enqueues/starts it, and it has **no outbound delivery** (a retried answer is only logged, never sent to the user). Wiring it as-is would **regress** the 010 thin-completion fallback (degraded-answer-now → no-answer-ever). US2 ("no message loss") does **NOT** work; it is split into the **Y follow-up** (`followup-Y-durable-retry.md`). 011 MVP ships on the verified injection core (US1, gate T003 PASSED).
 
-- [X] T013 [BE] [US2] BullMQ `provider-retry.worker.ts` — enqueue on `UPSTREAM_*` (prod path), exponential backoff, re-resolve + re-decrypt per attempt, **same provider**; refine 010 FR-009 (no thin-completion swap); **Key rotation**: retry always uses current effective config.
-- [X] T014 [BE] [US2] Dead-letter + operator alert on window exhaustion; keep sandbox/interactive path synchronous (typed error + manual retry, no enqueue)
+**Goal (Y)**: provider outage on the prod path never loses a message and never silently swaps model.
+**Independent Test (Y)**: break the provider → turn enqueues + retries same provider; restore → completes **and delivers**; exhaust window → dead-letter + alert.
 
-**Checkpoint**: zero message loss, zero silent model-swap
+- [ ] T013 [BE] [US2] **DEFERRED (Y)** — BullMQ `provider-retry.worker.ts` worker logic exists (backoff/dead-letter/re-resolve) but is ORPHANED: not enqueued, not started, no delivery-on-success. See `followup-Y-durable-retry.md`.
+- [ ] T014 [BE] [US2] **DEFERRED (Y)** — dead-letter + operator-alert wiring; sandbox stays synchronous. Blocked on the Y delivery work.
+
+**Checkpoint (Y)**: zero message loss, zero silent model-swap — *not met in 011 MVP (deferred)*.
 
 ---
 

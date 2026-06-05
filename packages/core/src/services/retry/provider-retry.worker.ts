@@ -1,4 +1,19 @@
 /**
+ * ⚠️ NOT WIRED — SCAFFOLDING ONLY. US2 durable-retry is DEFERRED (2026-06-04).
+ *
+ * This module compiles but is ORPHANED: nothing calls `enqueueProviderRetry`, nothing
+ * starts `ProviderRetryWorker`, and `on('completed')` ONLY logs — there is NO outbound
+ * delivery, so a successfully-retried answer is never sent back to the user. Wiring the
+ * enqueue path as-is would REGRESS the 010 thin-completion fallback
+ * (degraded-answer-now → no-answer-ever). Do NOT assume "no message loss" works.
+ *
+ * To finish US2 see the Y follow-up:
+ *   specs/011-llm-configuration/followup-Y-durable-retry.md
+ * It needs: delivery context (conversationId + channel) in RunAgentTurnInput→RetryJobPayload,
+ * a "queued" RunAgentTurnResult contract (caller must not send now), worker
+ * delivery-on-success via the engine outbound channel, THEN enqueue + worker-start + backoff-cap.
+ *
+ * ── original (aspirational) description ──
  * provider-retry.worker.ts — BullMQ durable-retry on provider failure (009/011).
  *
  * US2: Provider outage on the prod path never loses a message
@@ -110,6 +125,10 @@ export async function enqueueProviderRetry(
   payload: RetryJobPayload,
 ): Promise<string> {
   const queue = getRetryQueue();
+
+  // Calculate capped backoff: delay * multiplier^(attempt-1), capped at MAX_BACKOFF_MS
+  const cappedBackoff = Math.min(INITIAL_BACKOFF_MS * Math.pow(BACKOFF_MULTIPLIER, DEFAULT_MAX_ATTEMPTS - 1), MAX_BACKOFF_MS);
+  logger.debug({ INITIAL_BACKOFF_MS, BACKOFF_MULTIPLIER, MAX_BACKOFF_MS, cappedBackoff }, 'backoff configuration');
 
   const job = await queue.add('provider-retry', payload, {
     attempts: DEFAULT_MAX_ATTEMPTS,
@@ -398,10 +417,13 @@ export class ProviderRetryWorker {
         'Retry attempt failed',
       );
 
-      // Check if this was the final attempt (window exhausted)
+      // Check if this was the final attempt (window exhausted per DEFAULT_RETRY_WINDOW_MS)
+      const elapsed = Date.now() - new Date(job.data.originalAttemptAt).getTime();
+      const windowExhausted = elapsed >= DEFAULT_RETRY_WINDOW_MS;
       const maxAttempts = job.opts?.attempts ?? DEFAULT_MAX_ATTEMPTS;
-      if (job.attemptsMade >= maxAttempts) {
-        await moveToDeadLetter(job, `Window exhausted after ${job.attemptsMade} attempts: ${err.message}`);
+      if (job.attemptsMade >= maxAttempts || windowExhausted) {
+        logger.warn({ DEAD_LETTER_QUEUE_NAME, windowExhausted, elapsed, DEFAULT_RETRY_WINDOW_MS }, 'moving to dead-letter queue');
+        await moveToDeadLetter(job, `Window exhausted after ${job.attemptsMade} attempts${windowExhausted ? ' (time window)' : ''}: ${err.message}`);
       }
     });
   }

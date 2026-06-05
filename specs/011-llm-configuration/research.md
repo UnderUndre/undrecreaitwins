@@ -2,18 +2,15 @@
 
 Phase 0 — resolve unknowns from Technical Context. Decisions feed data-model, contracts, tasks.
 
-## D1 — Hermes ACP per-session model/provider override (GATE T000-LLM) 🔬
+## D1 — How the BYOK provider reaches Hermes (GATE T000-LLM) 🔬 — RESOLVED (Strategy B, verified mechanism)
 
-**Decision**: Treat as an **empirical gate** before locking the injection strategy — same discipline as 010 T000a/T000c/T000d. Spike: open an ACP `session/new` against a pooled `hermes-agent` and attempt a per-session model/provider/base_url override; observe whether it takes effect without restarting the process.
+**Decision**: Inject per-spawn via a **throwaway Hermes profile**. The ACP adapter `mkdtempSync`'s a temp dir, writes a minimal `config.yaml` (`model.{provider:custom, base_url, default}`), points **`HERMES_HOME`** at it, and passes the key via **`OPENAI_API_KEY`** env (never written to disk); cleaned in `kill()`. The warm-pool keys by configHash (Strategy B). Implemented in `hermes-adapter.ts` + `hermes-executor.ts` (2026-06-04).
 
-**Rationale**: Hermes docs confirm `model.provider: custom` + `base_url` + key + `temperature`/`max_tokens` at config/CLI level, and a `/model` per-session command in interactive mode, but are **silent on ACP/headless per-session override**. The whole injection design forks on this answer; guessing risks a rebuild.
+**Why NOT ad-hoc env vars (corrects the first implementation)**: the shipped code injected `HERMES_BASE_URL`/`HERMES_API_KEY`/`HERMES_MODEL_ID` — **Hermes' model loader does not read those**. Verified 2026-06-04 against hermes-agent v0.15.1 source: those names appear ONLY in shell-tool env-passthrough; provider/base_url/api_key are resolved from `config.yaml` `model.*` + `OPENAI_API_KEY` (`acp_adapter/server.py:1895`, `auxiliary_client.py:1289`, `acp_adapter/auth.py:23`). Ad-hoc names = **silent no-op** (Hermes falls back to `~/.hermes/config.yaml`). `config.yaml model.{default,provider,base_url}` is the authoritative channel — it matches the real `~/.hermes/config.yaml` schema; precedence is CLI > config.yaml > .env > defaults.
 
-**Outcome routing**:
-- **Gate PASS** → **Strategy A**: per-session ACP override on a shared warm process (cleanest; warm-pool preserved).
-- **Gate FAIL** → **Strategy B**: pool **keyed by provider-config** (one warm process per distinct config; reuse by config). Bounded — few distinct providers per deployment.
-- **Rejected — Strategy C**: ephemeral spawn per turn (env injection). Collapses warm-pool → blows p95 budget (010 NFR). Last resort only.
+**Why profile-config over ACP per-session override (old Strategy A)**: `hermes acp --help` exposes no `--model`/`--provider`/`--base-url`; per-session provider override via ACP `session/new` is unconfirmed. The HERMES_HOME-profile path relies only on **confirmed** mechanisms (HERMES_HOME is real — used across 12+ source files; config.yaml schema verified). Old Strategy C (pure `OPENAI_*` env, no config) is insufficient — Hermes' own provider resolution reads config, not just the OpenAI-SDK env.
 
-**Alternatives considered**: persistent Hermes profile-per-assistant (`HERMES_HOME=~/.hermes/profiles/<assistantId>`) — rejected: thousands of stateful home dirs in multi-tenant SaaS, lifecycle/GC burden, and the T000d cross-session-state hazard. Profile-per-**config** collapses into Strategy B if needed.
+**Residual (→ gate T003)**: minimal-config sufficiency + `temperature`/`max_tokens` field placement must be confirmed against a capture proxy before the gate passes. Adapter currently writes `max_tokens` only when provided; `temperature` is unwired pending field confirmation.
 
 ## D2 — API key encryption at rest
 
