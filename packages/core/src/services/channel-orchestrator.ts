@@ -78,7 +78,7 @@ export class ChannelOrchestrator {
                 systemPrompt: '',
                 conversationHistory: [],
                 budget: {
-                  maxTokens: response_budget_maxTokens(content),
+                  maxTokens: undefined,
                 },
                 originalError: {
                   message: err.message,
@@ -119,9 +119,4 @@ export class ChannelOrchestrator {
     await this.transport.disconnect();
     await this.dedupRedis.quit();
   }
-}
-
-function response_budget_maxTokens(content: string): number {
-  const estimated = Math.ceil(content.length * 1.5);
-  return Math.max(estimated, 500);
 }

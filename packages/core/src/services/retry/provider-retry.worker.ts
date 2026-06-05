@@ -59,7 +59,7 @@ export interface RetryJobPayload {
   conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
   /** Budget for the retry turn */
   budget: {
-    maxTokens: number;
+    maxTokens?: number;
     maxExecutionMs?: number;
   };
   /** Original error that triggered the retry */
@@ -252,7 +252,7 @@ async function executeRetryAttempt(
       ...payload.conversationHistory,
       { role: 'user', content: payload.userMessage },
     ],
-    maxTokens: payload.budget.maxTokens,
+    ...(payload.budget.maxTokens != null && { maxTokens: payload.budget.maxTokens }),
   });
 }
 

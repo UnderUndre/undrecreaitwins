@@ -108,11 +108,14 @@ export async function start() {
   // Start the durable-retry worker (US2)
   await retryWorker.start();
 
-  process.on('SIGTERM', async () => {
+  const shutdown = async () => {
     await retryWorker.stop();
     await server.close();
     process.exit(0);
-  });
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 
   return server;
 }
