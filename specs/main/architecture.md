@@ -33,6 +33,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | LLM gateway | OmniRoute (orchestra) / OpenAI-compatible | `LLM_PROVIDER_URL` |
 | Doc parsing | **officeParser** (TS-native) | PDF/DOCX/TXT |
 | AI execution (agentic) | self-host **hermes-agent** (MIT) + **Honcho** working-memory | agentic turns (010); engine = orchestrator + guardrail; **supersedes Letta** for memory |
+| Per-assistant LLM provider | **BYOK** custom OpenAI-compatible per assistant / tenant-default (011) | injected into Hermes via a throwaway `HERMES_HOME` profile (config.yaml + `OPENAI_API_KEY`); key encrypted at rest; `base_url` SSRF-pinned (undici dispatcher) |
 
 ## 3. Core Service Patterns
 
@@ -61,6 +62,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | 008-agent-builder | Annotation→few-shot feedback loop + doc RAG + Langfuse adoption; builder/sandbox **FE delegated to Product** (010) |
 | 009-reengagement-runtime | Dormant-conversation scanner + hook delivery (BullMQ scan + DB-status-claim worker + Redis Streams); idempotent, anti-spam |
 | 010-hermes-executor | **Hermes** as agentic LLM backend (Topology C hybrid; always-agent for non-scripted; real write-actions; self-host MIT). Engine = orchestrator + SoR + guardrail (validators / tool-gateway / anti-spam / metering); Honcho working-memory + Postgres SoR |
+| 011-llm-configuration | **Per-assistant BYOK LLM provider** (custom OpenAI-compatible: `base_url` + encrypted key + model + temperature/max_tokens). Resolves `assistant → tenant → platform`; injected into Hermes per spawn via a throwaway `HERMES_HOME` profile (`config.yaml` model.* + `OPENAI_API_KEY` env, never on disk; verified vs hermes-agent v0.15.1); `base_url` SSRF-guarded (DNS-resolve-and-pin via undici dispatcher); key encrypted at rest. Admin UI = Product (`ai-twins/011`). **Live path = thin completion** (`LLMClient.complete`); the agentic executor (`runAgentTurn`) is not yet wired. Durable-retry (US2) **deferred** → `specs/011-llm-configuration/followup-Y-durable-retry.md` |
 
 ## 6. Cross-repo boundary (runtime ↔ admin)
 
