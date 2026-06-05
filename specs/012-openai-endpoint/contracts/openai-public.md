@@ -1,4 +1,4 @@
-﻿# Public OpenAI Endpoint Contract
+# Public OpenAI Endpoint Contract
 
 ## Base URL
 https://api.aitwins.ai (Public)
@@ -14,4 +14,4 @@ Returns OpenAI-compatible model list of workspace assistants.
 
 ### 2. Chat Completions
 POST /v1/chat/completions
-Standard OpenAI request body. model field must be sst_<slug>.
+Standard OpenAI request body. model field must be asst_<slug>.
