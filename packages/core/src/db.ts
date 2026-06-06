@@ -3,7 +3,7 @@ import postgres from 'postgres';
 import * as schema from './models/index.js';
 import { sql } from 'drizzle-orm';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://undre:undre@localhost:5432/twinengine';
+const connectionString = process.env.DATABASE_URL || 'postgresql://undre:changeme@localhost:5433/twinengine';
 
 const client = postgres(connectionString, {
   max: 20,

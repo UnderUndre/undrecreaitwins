@@ -62,6 +62,10 @@
       "types": "./dist/services/retry/provider-retry.worker.d.ts",
       "default": "./dist/services/retry/provider-retry.worker.js"
     },
+    "./services/api-key.service.js": {
+      "types": "./dist/services/api-key.service.d.ts",
+      "default": "./dist/services/api-key.service.js"
+    },
     "./services/llm-provider/resolution.js": {
       "types": "./dist/services/llm-provider/resolution.d.ts",
       "default": "./dist/services/llm-provider/resolution.js"

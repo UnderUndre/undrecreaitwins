@@ -23,6 +23,7 @@ export {
 export { agentRuns } from './agent-runs.js';
 export { actionAudit } from './action-audit.js';
 export { llmProviderConfig, tenantLlmDefault } from './llm-provider.js';
+export { workspaceApiKeys } from './api-key.js';
 
 export {
   tenantsRelations,
