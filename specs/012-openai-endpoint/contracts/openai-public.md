@@ -4,7 +4,7 @@
 https://api.aitwins.ai (Public)
 
 ## Authentication
-Authorization: Bearer sk-aitw-...
+Authorization: Bearer sk-aitw_...
 
 ## Endpoints
 

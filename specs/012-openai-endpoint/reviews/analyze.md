@@ -1,7 +1,7 @@
 # SpecKit Analyze: 012-openai-endpoint (Engine)
 
 **Reviewer**: analyze (Claude self-consistency)
-**Reviewed at**: 2026-06-05T18:40:00Z
+**Reviewed at**: 2026-06-05T18:55:00Z
 **Commit**: (uncommitted)
 **Artifacts**: spec.md, plan.md, tasks.md, research.md, data-model.md, quickstart.md, contracts/openai-public.md
 
@@ -47,7 +47,7 @@
 ```yaml
 verdict: PASS
 reviewer: analyze
-reviewed_at: 2026-06-05T18:40:00Z
+reviewed_at: 2026-06-05T18:55:00Z
 commit: (uncommitted)
 critical_count: 0
 high_count: 0

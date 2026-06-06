@@ -15,9 +15,22 @@ import { annotationRoutes } from './routes/annotations.js';
 import { documentRoutes } from './routes/documents.js';
 import { sandboxRoutes } from './routes/sandbox.js';
 import { llmProviderRoutes } from './routes/llm-provider.js';
+import { authPublicPlugin } from './middleware/auth-public.js';
+import { publicModelsRoute } from './routes/v1/openai/models.js';
+import { publicChatRoute } from './routes/v1/openai/chat.js';
 import { ProviderRetryWorker } from '@undrecreaitwins/core/services/retry/provider-retry.worker.js';
 
 const retryWorker = new ProviderRetryWorker();
+
+const PUBLIC_API_KEY_PREFIX = 'sk-aitw_';
+const PUBLIC_ROUTES = new Set(['/v1/models', '/v1/chat/completions']);
+
+function isPublicApiKeyRequest(request: { url: string; headers: Record<string, string | string[] | undefined> }): boolean {
+  const url = request.url.split('?')[0]!;
+  if (!PUBLIC_ROUTES.has(url)) return false;
+  const authHeader = request.headers.authorization as string | undefined;
+  return !!authHeader?.startsWith(`Bearer ${PUBLIC_API_KEY_PREFIX}`);
+}
 
 export async function buildServer() {
   const fastify = Fastify({
@@ -54,6 +67,7 @@ export async function buildServer() {
 
   fastify.addHook('onRequest', async (request) => {
     if (request.url === '/v1/health') return;
+    if (isPublicApiKeyRequest(request)) return;
     const tenantId = request.headers['x-tenant-id'] as string | undefined;
     const tenantClaim = request.headers['x-tenant-claim'] as string | undefined;
     let resolvedTenantId: string | undefined;
@@ -76,6 +90,7 @@ export async function buildServer() {
 
   fastify.addHook('onRequest', async (request) => {
     if (request.url === '/v1/health') return;
+    if (isPublicApiKeyRequest(request)) return;
     const authMode = process.env.TWIN_AUTH_MODE || 'standalone';
     if (authMode === 'gateway') return;
     const staticToken = process.env.TWIN_AUTH_STATIC_TOKEN;
@@ -91,11 +106,17 @@ export async function buildServer() {
   });
 
   await fastify.register(personaRoutes);
-  await fastify.register(chatCompletionsRoutes);
+  await fastify.register(chatCompletionsRoutes, { prefix: '/internal' });
   await fastify.register(annotationRoutes);
   await fastify.register(documentRoutes);
   await fastify.register(sandboxRoutes);
   await fastify.register(llmProviderRoutes);
+
+  await fastify.register(async (publicApi) => {
+    await publicApi.register(authPublicPlugin);
+    await publicApi.register(publicModelsRoute);
+    await publicApi.register(publicChatRoute);
+  });
 
   return fastify;
 }
