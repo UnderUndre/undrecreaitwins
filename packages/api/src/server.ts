@@ -106,15 +106,17 @@ export async function buildServer() {
   });
 
   await fastify.register(personaRoutes);
-  await fastify.register(chatCompletionsRoutes);
+  await fastify.register(chatCompletionsRoutes, { prefix: '/internal' });
   await fastify.register(annotationRoutes);
   await fastify.register(documentRoutes);
   await fastify.register(sandboxRoutes);
   await fastify.register(llmProviderRoutes);
 
-  await fastify.register(authPublicPlugin);
-  await fastify.register(publicModelsRoute);
-  await fastify.register(publicChatRoute);
+  await fastify.register(async (publicApi) => {
+    await publicApi.register(authPublicPlugin);
+    await publicApi.register(publicModelsRoute);
+    await publicApi.register(publicChatRoute);
+  });
 
   return fastify;
 }

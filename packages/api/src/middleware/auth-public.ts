@@ -6,6 +6,13 @@ const RATE_LIMIT_MAX_REQUESTS = 60;
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [keyId, entry] of rateLimitMap.entries()) {
+    if (now > entry.resetAt) rateLimitMap.delete(keyId);
+  }
+}, 60_000).unref();
+
 function checkRateLimit(keyId: string): boolean {
   const now = Date.now();
   const entry = rateLimitMap.get(keyId);

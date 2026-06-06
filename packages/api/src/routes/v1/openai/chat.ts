@@ -147,7 +147,7 @@ async function handlePublicStream(
   const cleanupListeners = () => {
     request.raw.off('close', onClientDisconnect);
     if (activeDrainListener) {
-      request.raw.off('drain', activeDrainListener);
+      reply.raw.off('drain', activeDrainListener);
       activeDrainListener = null;
     }
   };
