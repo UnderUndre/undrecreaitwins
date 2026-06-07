@@ -77,8 +77,8 @@ export async function runHermesPreflight(): Promise<PreflightResult> {
     logger.info({ resolvedCommand: parsed.cmd, protocolVersion: version }, 'Hermes preflight passed');
     return { ok: true, resolvedCommand: parsed.cmd, acpProtocolVersion: version };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('ENOENT') || message.includes('not found')) {
+    const code = err && typeof err === 'object' && 'code' in err ? (err as any).code : undefined;
+    if (code === 'ENOENT') {
       return {
         ok: false,
         error: {

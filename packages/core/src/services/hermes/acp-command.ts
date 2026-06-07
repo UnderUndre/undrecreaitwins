@@ -39,8 +39,12 @@ function shellSplit(input: string): string[] {
       if (ch === '"') {
         inDouble = false;
       } else if (ch === '\\' && i + 1 < input.length) {
-        const next = input[i + 1];
-        if (next !== undefined) current += next;
+        const next = input[i + 1]!;
+        if (next === '"' || next === '\\') {
+          current += next;
+        } else {
+          current += '\\' + next;
+        }
         i++;
       } else {
         current += ch;

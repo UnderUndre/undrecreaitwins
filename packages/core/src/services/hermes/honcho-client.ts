@@ -61,7 +61,8 @@ export class HonchoClient {
       if (statusCode >= 400 && statusCode < 500) return 'permanent';
       if (statusCode >= 500) return 'transient';
     }
-    if (err instanceof TypeError && (err.message.includes('fetch') || err.message.includes('ECONNREFUSED'))) {
+    const code = err && typeof err === 'object' ? ((err as any).code || (err as any).cause?.code) : undefined;
+    if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND') {
       return 'transient';
     }
     return 'transient';
@@ -222,13 +223,16 @@ export class HonchoClient {
       const peerKey = this.peerId(personaId, externalUserId);
       await this.ensureSessionEntity(tenantId, peerKey, sessionId);
 
-      await this.doFetch(
+      const res = await this.doFetch(
         `/workspaces/${encodeURIComponent(tenantId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
           method: 'POST',
           body: JSON.stringify({ content, role }),
         },
       );
+      if (!res.ok) {
+        throw new Error(`Honcho addMessage failed with status ${res.status}`);
+      }
     } catch (err) {
       const cls = this.classifyError(err);
       this.signalDegraded(cls, { tenantId, personaId, sessionId, err });
