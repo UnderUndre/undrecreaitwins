@@ -20,7 +20,7 @@ This feature makes these gaps explicit, fail-loud where they should, and closed.
 ## Clarifications
 
 ### Session 2026-06-07
-- **Q: Engine deployment model?** → **Both.** Ship a reproducible engine **container image** (new `packages/api/Dockerfile`, Node + Python, Hermes CLI on PATH) for prod-like one-command deploy, **and** keep a documented/verifiable **host prerequisite** path for local dev (today's venv). (resolves FR-004)
+- **Q: Engine deployment model?** → **Both.** Ship a reproducible engine **container image** (converted `packages/api/Dockerfile`, Node + Python, Hermes CLI on PATH) for prod-like one-command deploy, **and** keep a documented/verifiable **host prerequisite** path for local dev (today's venv). (resolves FR-004)
 - **Q: Existing Honcho data on v3 cutover?** → **Disposable/fresh.** Honcho is reconstructible from the SoR (spec 010 §c); no data of record lives only there. Start clean on cutover, no data migration. (resolves FR-010)
 - **Q: Version pinning?** → **Pin exact.** Hermes `0.15.1`; the Honcho client targets `v3.0.9` (matching the deployed image tag). No floating ranges. (resolves FR-011)
 - **Q: Worker/channel Dockerfiles in scope?** → **No.** Engine + Hermes + Honcho memory only; worker/channel Dockerfiles belong to a separate "containerize the stack" feature. (sets scope boundary)

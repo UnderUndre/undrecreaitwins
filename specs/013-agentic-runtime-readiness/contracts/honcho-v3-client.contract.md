@@ -42,9 +42,9 @@ Naive get-or-create of workspace+peer+session before **every** memory op is a 3�
 |---|---|---|
 | connect refused / timeout / 5xx | `transient` | `logger.warn({err,...},'honcho degraded (transient)')` + `honcho_degraded` metric; return empty/no-op |
 | 404 on `/v3` path, 4xx schema mismatch, version mismatch | `permanent` | `logger.error({err,...},'honcho API mismatch')` + raise **`/v1/health.checks.honcho_memory`** + `honcho_degraded`; return empty/no-op |
+| success | — | return data |
 
 > `409`/already-exists is **NOT** an error class — it is handled as success (GET existing) per Identity resolution above.
-| success | — | return data |
 
 **Invariant**: a honcho failure NEVER throws into the turn (FR-006). The only loud-but-non-fatal path is the permanent-mismatch readiness flag.
 
