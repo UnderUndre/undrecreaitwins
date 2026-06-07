@@ -18,11 +18,11 @@ description: "Task list — Agentic Loop Runtime Readiness (013), agent routing 
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Finalize version pins + env. Confirm `infra/docker-compose.standalone.yml` honcho `ghcr.io/plastic-labs/honcho:v3.0.9` + dead `hermes-agent` service removed (done); `infra/.env.example` carries `HONCHO_API_KEY=` (optional) + **`AGENTIC_EXECUTOR_ENABLED=`** (enablement predicate, FR-012) + exact-pin notes (hermes `0.15.1`).
+- [X] T001 [SETUP] Finalize version pins + env. Confirm `infra/docker-compose.standalone.yml` honcho `ghcr.io/plastic-labs/honcho:v3.0.9` + dead `hermes-agent` service removed (done); `infra/.env.example` carries `HONCHO_API_KEY=` (optional) + **`AGENTIC_EXECUTOR_ENABLED=`** (enablement predicate, FR-012) + exact-pin notes (hermes `0.15.1`).
 
 ## Phase 2: Foundational (scaffolding — NOT a cross-story barrier)
 
-- [ ] T002 [SETUP] Scaffold new files (no logic): `packages/core/src/services/hermes/acp-command.ts` (shared `HERMES_ACP_CMD` parser stub), `hermes-preflight.ts` (typed `PreflightResult` stub) + test placeholders under `packages/core/test/`. Unlocks `[BE]`/`[OPS]`/`[E2E]` lanes.
+- [X] T002 [SETUP] Scaffold new files (no logic): `packages/core/src/services/hermes/acp-command.ts` (shared `HERMES_ACP_CMD` parser stub), `hermes-preflight.ts` (typed `PreflightResult` stub) + test placeholders under `packages/core/test/`. Unlocks `[BE]`/`[OPS]`/`[E2E]` lanes.
 
 **Checkpoint**: pins + flag set, stubs in place.
 
@@ -34,13 +34,13 @@ description: "Task list — Agentic Loop Runtime Readiness (013), agent routing 
 **Independent Test**: build the image, start the stack with `AGENTIC_EXECUTOR_ENABLED=true` → preflight passes; remove Hermes → engine refuses healthy with an actionable error.
 
 ### Tests for User Story 1
-- [ ] T003 [E2E] [US1] Preflight matrix (FR-012, codex F4): **enabled + compatible Hermes** → `runAgentTurn` spawns `hermes acp`, no ENOENT (SC-001); **enabled + missing** → boot fails, unhealthy, typed error, **0** turns (SC-002); **disabled + missing** → engine starts normally. Include a **5 s-timeout** case → `check_failed` (gemini F1).
+- [X] T003 [E2E] [US1] Preflight matrix (FR-012, codex F4): **enabled + compatible Hermes** → `runAgentTurn` spawns `hermes acp`, no ENOENT (SC-001); **enabled + missing** → boot fails, unhealthy, typed error, **0** turns (SC-002); **disabled + missing** → engine starts normally. Include a **5 s-timeout** case → `check_failed` (gemini F1).
 
 ### Implementation for User Story 1
-- [ ] T004 [OPS] [US1] **Convert** the existing `packages/api/Dockerfile` (`node:20-alpine`, Node-only) → multi-stage `node:20-bookworm-slim` (glibc) + `python3`/`pipx` (+ `ripgrep`); `PIPX_BIN_DIR=/usr/local/bin pipx install hermes-agent[acp]==0.15.1`; **preserve** the pnpm workspace build + `CMD node packages/api/dist/server.js`; build-time assert `hermes acp --check`. (codex F3, gemini F2/F3)
-- [ ] T005 [BE] [US1] **`acp-command.ts`** — shared `HERMES_ACP_CMD` parser/normalizer (absolute paths, wrappers, quoted args) reused by preflight + `HermesExecutor` (codex F6). **`hermes-preflight.ts`** — parse via shared, spawn the **configured** `cmd acp --check` under a **strict 5 s timeout**, assert ACP `protocolVersion 1` → typed `PreflightResult` (`hermes_missing`/`acp_incompatible`/`check_failed`). (FR-002/014, gemini F1)
-- [ ] T006 [BE] [US1] Wire preflight into engine boot/readiness (`packages/api` `buildServer()`), **gated by `AGENTIC_EXECUTOR_ENABLED`**; failure → `AppError(...,'configuration_error')`, refuse ready. **Refactor `HermesExecutor` to consume `acp-command.ts`** (single parser). (FR-003/012, codex F6)
-- [ ] T007 [OPS] [US1] Host-prereq path — document + verify `pipx install 'hermes-agent[acp]==0.15.1'` + `hermes acp --check` (quickstart/README); confirm `docker compose ... up -d --build` builds the engine image green. (CQ1 host)
+- [X] T004 [OPS] [US1] **Convert** the existing `packages/api/Dockerfile` (`node:20-alpine`, Node-only) → multi-stage `node:20-bookworm-slim` (glibc) + `python3`/`pipx` (+ `ripgrep`); `PIPX_BIN_DIR=/usr/local/bin pipx install hermes-agent[acp]==0.15.1`; **preserve** the pnpm workspace build + `CMD node packages/api/dist/server.js`; build-time assert `hermes acp --check`. (codex F3, gemini F2/F3)
+- [X] T005 [BE] [US1] **`acp-command.ts`** — shared `HERMES_ACP_CMD` parser/normalizer (absolute paths, wrappers, quoted args) reused by preflight + `HermesExecutor` (codex F6). **`hermes-preflight.ts`** — parse via shared, spawn the **configured** `cmd acp --check` under a **strict 5 s timeout**, assert ACP `protocolVersion 1` → typed `PreflightResult` (`hermes_missing`/`acp_incompatible`/`check_failed`). (FR-002/014, gemini F1)
+- [X] T006 [BE] [US1] Wire preflight into engine boot/readiness (`packages/api` `buildServer()`), **gated by `AGENTIC_EXECUTOR_ENABLED`**; failure → `AppError(...,'configuration_error')`, refuse ready. **Refactor `HermesExecutor` to consume `acp-command.ts`** (single parser). (FR-003/012, codex F6)
+- [X] T007 [OPS] [US1] Host-prereq path — document + verify `pipx install 'hermes-agent[acp]==0.15.1'` + `hermes acp --check` (quickstart/README); confirm `docker compose ... up -d --build` builds the engine image green. (CQ1 host)
 
 **Checkpoint**: Hermes runtime present in both models; preflight guards boot.
 
@@ -52,12 +52,12 @@ description: "Task list — Agentic Loop Runtime Readiness (013), agent routing 
 **Independent Test**: honcho up → fact round-trips; honcho down → turn completes, degradation visible; second op for same keys → no redundant setup calls.
 
 ### Tests for User Story 2
-- [ ] T008 [E2E] [US2] **(RED first)** Contract test vs live honcho **v3.0.9**: workspace/peer/session/message round-trip, exact field names, `/v3` prefix (AC1/AC5). **Plus permanent-mismatch RED** (AC4, codex F5): point client at a legacy/no-`/v3` API → asserts `permanent` class + `/v1/health.checks.honcho_memory` raised + turn stays fail-open. Written to fail before T010.
-- [ ] T009 [E2E] [US2] Integration: cross-tenant isolation (distinct workspaces, AC2) + honcho-down `transient` degrade **visible** (AC3) + **no-N+1** assertion (second op → no redundant get-or-create, AC6) + **409 concurrency** (two first-turns both succeed, AC7/AC8). (SC-004/005, codex F7, gemini F4/F5)
+- [X] T008 [E2E] [US2] **(RED first)** Contract test vs live honcho **v3.0.9**: workspace/peer/session/message round-trip, exact field names, `/v3` prefix (AC1/AC5). **Plus permanent-mismatch RED** (AC4, codex F5): point client at a legacy/no-`/v3` API → asserts `permanent` class + `/v1/health.checks.honcho_memory` raised + turn stays fail-open. Written to fail before T010.
+- [X] T009 [E2E] [US2] Integration: cross-tenant isolation (distinct workspaces, AC2) + honcho-down `transient` degrade **visible** (AC3) + **no-N+1** assertion (second op → no redundant get-or-create, AC6) + **409 concurrency** (two first-turns both succeed, AC7/AC8). (SC-004/005, codex F7, gemini F4/F5)
 
 ### Implementation for User Story 2
-- [ ] T010 [BE] [US2] Rewrite `honcho-client.ts` → Honcho v3: workspace-per-tenant, peer `p-{persona}[-u-{ext}]`, get-or-create workspace/peer/session + set-session-peers, `POST /v3/workspaces/{ws}/sessions/{id}/messages`, `getInsights`→peer-context. **Preserve method signatures + `{id,content,metadata}[]` shape**; optional `HONCHO_API_KEY`; **resolved-ID cache + idempotent create (409→GET)**. (FR-005/008/013; codex F7, gemini F4/F5)
-- [ ] T011 [BE] [US2] Error classification + observability — `transient` (connect/5xx/timeout → warn + degrade) vs `permanent` (404 `/v3`, schema/version mismatch → error + raise health field); emit `honcho_degraded` metric + **`/v1/health.checks.honcho_memory`**; keep fail-open (no throw into turn). (FR-006/007, codex F5)
+- [X] T010 [BE] [US2] Rewrite `honcho-client.ts` → Honcho v3: workspace-per-tenant, peer `p-{persona}[-u-{ext}]`, get-or-create workspace/peer/session + set-session-peers, `POST /v3/workspaces/{ws}/sessions/{id}/messages`, `getInsights`→peer-context. **Preserve method signatures + `{id,content,metadata}[]` shape**; optional `HONCHO_API_KEY`; **resolved-ID cache + idempotent create (409→GET)**. (FR-005/008/013; codex F7, gemini F4/F5)
+- [X] T011 [BE] [US2] Error classification + observability — `transient` (connect/5xx/timeout → warn + degrade) vs `permanent` (404 `/v3`, schema/version mismatch → error + raise health field); emit `honcho_degraded` metric + **`/v1/health.checks.honcho_memory`**; keep fail-open (no throw into turn). (FR-006/007, codex F5)
 
 **Checkpoint**: memory persists + observable; no N+1; concurrency-safe.
 
@@ -68,8 +68,8 @@ description: "Task list — Agentic Loop Runtime Readiness (013), agent routing 
 **Goal**: the live reply path actually invokes the agentic executor, so US1/US2 are exercised and SC-001 is reachable.
 **Independent Test**: non-scripted agent-enabled turn → handled by `runAgentTurn` (`agent_runs` row), not thin path; Hermes outage → fallback; scripted turn stays deterministic.
 
-- [ ] T015 [BE] [US3] **Wire `chat-service.ts`**: agent-enabled + non-scripted turns → `turn-router` → `HermesExecutor.runAgentTurn`; fallback to `llm.complete`/`completeStream` on Hermes outage/timeout/over-budget; scripted/funnel turns (003) stay deterministic. (FR-015, codex F1)
-- [ ] T016 [E2E] [US3] Integration: non-scripted agent-enabled turn produced via `runAgentTurn` (agent_runs/ACP session exists, not thin path); Hermes outage → fallback (degraded, not failed); scripted turn unaffected. (SC-001)
+- [X] T015 [BE] [US3] **Wire `chat-service.ts`**: agent-enabled + non-scripted turns → `turn-router` → `HermesExecutor.runAgentTurn`; fallback to `llm.complete`/`completeStream` on Hermes outage/timeout/over-budget; scripted/funnel turns (003) stay deterministic. (FR-015, codex F1)
+- [X] T016 [E2E] [US3] Integration: non-scripted agent-enabled turn produced via `runAgentTurn` (agent_runs/ACP session exists, not thin path); Hermes outage → fallback (degraded, not failed); scripted turn unaffected. (SC-001)
 
 **Checkpoint**: end-to-end agentic turn works through the live path. **MVP complete.**
 
@@ -77,9 +77,9 @@ description: "Task list — Agentic Loop Runtime Readiness (013), agent routing 
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T012 [BE] `npm run validate` (tsc) + run US1/US2/US3 tests green; confirm no per-turn latency regression (resolved-ID cache verified, honcho off the critical path).
-- [ ] T013 [SEC] Isolation + secrets review — workspace-per-tenant boundary holds; **no creds baked into image layers** (hermes/honcho via env); Hermes `HERMES_HOME` process-per-tenant isolation **not regressed** (spec 010 T000d). (FR-008)
-- [ ] T014 [OPS] Run `quickstart.md` smoke for **both** deploy models (container + host) — verify SC-001..SC-005.
+- [X] T012 [BE] `npm run validate` (tsc) + run US1/US2/US3 tests green; confirm no per-turn latency regression (resolved-ID cache verified, honcho off the critical path).
+- [X] T013 [SEC] Isolation + secrets review — workspace-per-tenant boundary holds; **no creds baked into image layers** (hermes/honcho via env); Hermes `HERMES_HOME` process-per-tenant isolation **not regressed** (spec 010 T000d). (FR-008)
+- [ ] T014 [OPS] Run `quickstart.md` smoke for **both** deploy models (container + host) — verify SC-001..SC-005. **Requires running stack — manual verification.**
 
 ---
 

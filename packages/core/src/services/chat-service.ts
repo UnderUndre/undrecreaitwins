@@ -15,6 +15,8 @@ import { withTenantContext } from '../db.js';
 import { conversations, messages, usageEvents } from '../models/index.js';
 import { ServiceUnavailableError, NotFoundError, AppError } from '@undrecreaitwins/shared';
 import type { PersonaTraits, ModelPreferences, StreamChunk, FunnelSelectionMetadata } from '@undrecreaitwins/shared';
+import { routeTurn } from './hermes/turn-router.js';
+import { HermesExecutor } from './hermes/hermes-executor.js';
 
 interface ChatRequest {
   tenantId: string;
@@ -65,6 +67,7 @@ type PersonaRow = {
   version: number;
   annotationSimilarityThreshold: number;
   hasAnnotations: boolean;
+  agentEnabled?: boolean;
 };
 
 const personaRepo = new PersonaRepository();
@@ -77,6 +80,21 @@ const funnelRuntime = new FunnelRuntime(funnelRepo, (config) => new FragmentScor
 const embeddingService = new EmbeddingService();
 const annotationService = new AnnotationService(embeddingService);
 const langfuseService = new LangfuseService();
+
+let hermesExecutor: HermesExecutor | undefined;
+function getHermesExecutor(): HermesExecutor | undefined {
+  if (process.env.AGENTIC_EXECUTOR_ENABLED !== 'true') return undefined;
+  try {
+    if (!hermesExecutor) hermesExecutor = new HermesExecutor();
+    return hermesExecutor;
+  } catch {
+    return undefined;
+  }
+}
+
+function isHermesHealthy(): boolean {
+  return !!getHermesExecutor();
+}
 
 export class ChatService {
   async complete(request: ChatRequest): Promise<ChatResponse> {
@@ -153,6 +171,61 @@ export class ChatService {
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
           metadata: {
             conversation_id: conversationId,
+            funnel: funnelResult.metadata,
+          },
+        };
+      }
+
+      const routing = routeTurn({
+        hasActiveFunnel: !!funnelResult.metadata,
+        agentEnabled: !!persona.agentEnabled,
+        hermesHealthy: isHermesHealthy(),
+      });
+
+      if (routing.kind === 'agentic') {
+        const executor = getHermesExecutor()!;
+        const agentResult = await executor.runAgentTurn({
+          tenantId: request.tenantId,
+          persona: persona as any,
+          sessionId: conversationId,
+          userMessage: sanitizedUserMessage,
+          context: {
+            conversationHistory: request.messages
+              .filter(m => m.role === 'user' || m.role === 'assistant')
+              .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          },
+          budget: {
+            maxLoopIterations: 20,
+            maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
+            maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
+          },
+        });
+
+        await this.persistMessages(
+          request.tenantId,
+          conversationId,
+          request.messages,
+          agentResult.answer,
+        );
+
+        return {
+          id: randomUUID(),
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: persona.modelPreferences?.model || 'agent',
+          choices: [{
+            index: 0,
+            message: { role: 'assistant', content: agentResult.answer },
+            finish_reason: 'stop',
+          }],
+          usage: {
+            prompt_tokens: 0,
+            completion_tokens: agentResult.usage.tokensUsed,
+            total_tokens: agentResult.usage.tokensUsed,
+          },
+          metadata: {
+            conversation_id: conversationId,
+            ...(agentResult.fallbackUsed && { degraded_mode: true }),
             funnel: funnelResult.metadata,
           },
         };
@@ -332,6 +405,62 @@ export class ChatService {
         systemPrompt: '',
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
         metadata: { funnel: funnelResult.metadata }
+      };
+    }
+
+    const streamingRouting = routeTurn({
+      hasActiveFunnel: !!funnelResult.metadata,
+      agentEnabled: !!persona.agentEnabled,
+      hermesHealthy: isHermesHealthy(),
+    });
+
+    if (streamingRouting.kind === 'agentic') {
+      const executor = getHermesExecutor()!;
+      const agentResult = await executor.runAgentTurn({
+        tenantId: request.tenantId,
+        persona: persona as any,
+        sessionId: conversationId,
+        userMessage: sanitizedUserMessage,
+        context: {
+          conversationHistory: request.messages
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        },
+        budget: {
+          maxLoopIterations: 20,
+          maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
+          maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
+        },
+      });
+
+      await this.persistMessages(
+        request.tenantId,
+        conversationId,
+        request.messages,
+        agentResult.answer,
+      );
+
+      const agentChunk: StreamChunk = {
+        id: randomUUID(),
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: persona.modelPreferences?.model || 'agent',
+        choices: [{
+          index: 0,
+          delta: { content: agentResult.answer },
+          finish_reason: 'stop',
+        }],
+      };
+      yield agentChunk;
+
+      return {
+        completed: true,
+        content: agentResult.answer,
+        conversationId,
+        personaId: persona.id,
+        systemPrompt: '',
+        usage: { prompt_tokens: 0, completion_tokens: agentResult.usage.tokensUsed, total_tokens: agentResult.usage.tokensUsed },
+        metadata: { funnel: funnelResult.metadata },
       };
     }
 

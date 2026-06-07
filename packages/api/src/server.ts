@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { errorHandler } from '@undrecreaitwins/core/middleware/error-handler.js';
 import { healthCheck as dbHealthCheck } from '@undrecreaitwins/core/db.js';
-import { UnauthorizedError, ForbiddenError } from '@undrecreaitwins/shared';
+import { UnauthorizedError, ForbiddenError, AppError } from '@undrecreaitwins/shared';
 import { createHash } from 'crypto';
 import { db } from '@undrecreaitwins/core/db.js';
 import { tenants, apiTokens } from '@undrecreaitwins/core/models/index.js';
@@ -19,6 +19,8 @@ import { authPublicPlugin } from './middleware/auth-public.js';
 import { publicModelsRoute } from './routes/v1/openai/models.js';
 import { publicChatRoute } from './routes/v1/openai/chat.js';
 import { ProviderRetryWorker } from '@undrecreaitwins/core/services/retry/provider-retry.worker.js';
+import { runHermesPreflight, type PreflightResult } from '@undrecreaitwins/core/services/hermes/hermes-preflight.js';
+import { setDegradationSignal } from '@undrecreaitwins/core/services/hermes/honcho-client.js';
 
 const retryWorker = new ProviderRetryWorker();
 
@@ -32,7 +34,39 @@ function isPublicApiKeyRequest(request: { url: string; headers: Record<string, s
   return !!authHeader?.startsWith(`Bearer ${PUBLIC_API_KEY_PREFIX}`);
 }
 
+let cachedPreflightResult: PreflightResult | undefined;
+let honchoMemoryStatus: 'ok' | 'degraded' | 'error' = 'ok';
+
+export function getHonchoMemoryStatus(): 'ok' | 'degraded' | 'error' {
+  return honchoMemoryStatus;
+}
+
+export function setHonchoMemoryStatus(status: 'ok' | 'degraded' | 'error'): void {
+  honchoMemoryStatus = status;
+}
+
+export function getPreflightResult(): PreflightResult | undefined {
+  return cachedPreflightResult;
+}
+
 export async function buildServer() {
+  cachedPreflightResult = await runHermesPreflight();
+  if (!cachedPreflightResult.ok) {
+    throw new AppError(
+      cachedPreflightResult.error.message,
+      500,
+      'configuration_error',
+    );
+  }
+
+  setDegradationSignal((cls) => {
+    if (cls === 'permanent') {
+      honchoMemoryStatus = 'error';
+    } else {
+      honchoMemoryStatus = honchoMemoryStatus === 'error' ? 'error' : 'degraded';
+    }
+  });
+
   const fastify = Fastify({
     logger: {
       level: process.env.LOG_LEVEL || 'info',
@@ -54,12 +88,23 @@ export async function buildServer() {
 
   fastify.get('/v1/health', async () => {
     const dbOk = await dbHealthCheck();
+    const checks: Record<string, string> = {
+      database: dbOk ? 'ok' : 'error',
+    };
+
+    if (cachedPreflightResult?.ok && cachedPreflightResult.acpProtocolVersion > 0) {
+      checks.hermes_runtime = 'ok';
+    }
+
+    if (honchoMemoryStatus !== 'ok') {
+      checks.honcho_memory = honchoMemoryStatus;
+    }
+
+    const allOk = dbOk && (honchoMemoryStatus === 'ok');
     return {
-      status: dbOk ? 'ok' : 'degraded',
+      status: allOk ? 'ok' : 'degraded',
       version: process.env.npm_package_version || '0.0.0',
-      checks: {
-        database: dbOk ? 'ok' : 'error',
-      },
+      checks,
     };
   });
 
@@ -126,7 +171,6 @@ export async function start() {
   const port = parseInt(process.env.PORT || '8090', 10);
   await server.listen({ port, host: '0.0.0.0' });
   
-  // Start the durable-retry worker (US2)
   await retryWorker.start();
 
   const shutdown = async () => {

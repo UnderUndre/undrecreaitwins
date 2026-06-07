@@ -11,7 +11,7 @@ TypeScript · Fastify · PostgreSQL + **pgvector** · Redis (BullMQ + Streams) �
 ```bash
 # 1) Set env in infra/.env — at minimum:
 #    DATABASE_URL, REDIS_URL, LLM_PROVIDER_URL, LLM_API_KEY, EMBEDDINGS_URL
-#    (agentic, spec 010) HERMES_ACP_CMD, ENGINE_MCP_SECRET, ENGINE_MCP_PORT, HONCHO_URL
+#    (agentic, spec 010/013) HERMES_ACP_CMD, ENGINE_MCP_SECRET, ENGINE_MCP_PORT, HONCHO_URL, AGENTIC_EXECUTOR_ENABLED
 # 2) Bring up the self-contained stack:
 docker compose -f infra/docker-compose.standalone.yml up -d
 # API health → http://localhost:8090/v1/health
@@ -26,7 +26,8 @@ docker compose -f infra/docker-compose.standalone.yml up -d
 The engine calls Hermes by **spawning it as a subprocess over stdio (ACP)** — it is *not* a network service, so there is nothing to "connect to". To run Hermes natively instead of from the bundled `hermes-agent` container, point `HERMES_ACP_CMD` at a locally-installed binary:
 
 ```bash
-# 1) Install hermes-agent locally (NousResearch/hermes-agent), verify ACP mode:
+# 1) Install hermes-agent locally with ACP support, verify:
+pipx install 'hermes-agent[acp]==0.15.1'
 hermes acp --check                     # checks ACP deps + adapter imports, then exits
 
 # 2) Point the engine at the local binary. On Windows use an ABSOLUTE path — the engine
