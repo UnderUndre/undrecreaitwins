@@ -9,6 +9,7 @@ export interface Persona {
   createdAt: Date;
   updatedAt: Date;
   version: number;
+  agentEnabled?: boolean;
 }
 
 export interface PersonaTraits {

@@ -12,6 +12,7 @@ import { LLMClient } from '../llm-client.js';
 import { AcpClient, type SessionUpdate, type AcpMcpServerEntry } from './hermes-adapter.js';
 import { makeHttpMcpServer, type McpServerConfig, type HttpMcpTransport } from './mcp-server.js';
 import type { ToolAllowEntry } from './tool-gateway.js';
+import { parseAcpCommand } from './acp-command.js';
 import { db } from '../../db.js';
 import { resolveEffectiveConfig } from '../llm-provider/resolution.js';
 import { decryptApiKey } from '../llm-provider/crypto.js';
@@ -89,10 +90,9 @@ export class HermesExecutor {
       throw new AppError('HERMES_ACP_CMD is required', 500, 'configuration_error');
     }
 
-    // Split into command + args
-    const parts = acpCmd.split(/\s+/);
-    this.acpCmd = parts[0]!;
-    this.acpArgs = parts.length > 1 ? parts.slice(1) : ['acp', '--accept-hooks'];
+    const parsed = parseAcpCommand(acpCmd);
+    this.acpCmd = parsed.cmd;
+    this.acpArgs = parsed.args;
 
     this.fallbackClient = new LLMClient();
 

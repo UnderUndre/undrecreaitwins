@@ -8,5 +8,9 @@ export { checkBudget, validateOutput, extractFinalAnswer } from './guardrail.js'
 export type { GuardrailConfig, GuardrailResult } from './guardrail.js';
 export { AgentLifecycle } from './agent-lifecycle.js';
 export type { AgentState } from './agent-lifecycle.js';
-export { HonchoClient } from './honcho-client.js';
-export type { HonchoInsight } from './honcho-client.js';
+export { HonchoClient, setDegradationSignal } from './honcho-client.js';
+export type { HonchoInsight, DegradationSignal } from './honcho-client.js';
+export { runHermesPreflight } from './hermes-preflight.js';
+export type { PreflightResult, PreflightError, PreflightOk, PreflightFail } from './hermes-preflight.js';
+export { parseAcpCommand } from './acp-command.js';
+export type { AcpCommandResult } from './acp-command.js';

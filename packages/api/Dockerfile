@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 RUN corepack enable
 WORKDIR /app
 
@@ -24,8 +24,16 @@ RUN pnpm --filter @undrecreaitwins/shared run build && \
     pnpm --filter @undrecreaitwins/training run build && \
     pnpm --filter @undrecreaitwins/api run build
 
-FROM node:20-alpine AS runner
+FROM node:20-bookworm-slim AS runner
 WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 python3-pip python3-venv pipx ripgrep && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV PIPX_BIN_DIR=/usr/local/bin
+RUN pipx install 'hermes-agent[acp]==0.15.1' && \
+    hermes acp --check
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages/shared ./packages/shared
