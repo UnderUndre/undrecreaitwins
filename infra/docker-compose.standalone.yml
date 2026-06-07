@@ -86,7 +86,10 @@ services:
     restart: unless-stopped
 
   honcho:
-    image: nousresearch/honcho:latest
+    # Plastic Labs project — NOT nousresearch. v3 API; honcho-client.ts still
+    # targets the v1/v2 apps/users surface → memory degrades to no-op until the
+    # client is migrated to v3 workspaces/peers (graceful by design).
+    image: ghcr.io/plastic-labs/honcho:v3.0.9
     ports:
       - "${HONCHO_PORT:-8083}:8080"
     environment:
@@ -96,18 +99,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  hermes-agent:
-    image: nousresearch/hermes-agent:v0.7.0
-    ports:
-      - "${HERMES_PORT:-8084}:8080"
-    environment:
-      HONCHO_URL: http://honcho:8080
-      LLM_PROVIDER_URL: ${LLM_PROVIDER_URL}
-      LLM_API_KEY: ${LLM_API_KEY}
-    depends_on:
-      honcho:
-        condition: service_started
-    restart: unless-stopped
+  # NOTE: hermes-agent is NOT a service. Per spec 010 research §i, it's a local
+  # CLI (`hermes acp`, JSON-RPC over stdio) the engine spawns as a subprocess,
+  # process-per-tenant (T000d: native memory is process-global → cross-tenant
+  # leak otherwise). The binary must be on PATH inside the engine image; it is
+  # driven via HERMES_ACP_CMD, not reached over HTTP.
 
   # ── Optional: one-shot migration runner ────────────────────────────────
 
@@ -143,7 +139,6 @@ services:
       REDIS_URL: redis://redis:6379
       EMBEDDINGS_URL: http://tei-embed:80
       RERANK_URL: http://tei-rerank:80
-      HERMES_BASE_URL: http://hermes-agent:8080
       HONCHO_URL: http://honcho:8080
       DOTENV_CONFIG_AUTOLOAD: "false"
       TWIN_AUTH_STATIC_TOKEN: "${TWIN_AUTH_STATIC_TOKEN:-twin-engine-secret-token}"
@@ -152,8 +147,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      hermes-agent:
-        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/v1/health"]
       interval: 15s
