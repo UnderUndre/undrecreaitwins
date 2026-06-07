@@ -135,6 +135,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
       REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
       EMBEDDINGS_URL: http://tei-embed:80
       RERANK_URL: http://tei-rerank:80
       HONCHO_URL: http://honcho:8080
@@ -161,6 +162,7 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
       REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
       EMBEDDINGS_URL: http://tei-embed:80
       RERANK_URL: http://tei-rerank:80
       DOTENV_CONFIG_AUTOLOAD: "false"
