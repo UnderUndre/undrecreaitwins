@@ -4,14 +4,14 @@
 
 ## Trigger
 
-Runs once at engine startup, **before** the server reports ready/healthy. Gated to the agentic path: only enforced when the agentic executor is enabled (so a deploy with agents off isn't blocked by a missing Hermes).
+Runs once at engine startup, **before** the server reports ready/healthy. Governed by an explicit predicate **`AGENTIC_EXECUTOR_ENABLED`** (a single documented config in compose/host — NOT inferred from persona data): when true the preflight is enforced; when false it is skipped and the engine starts normally (so an agents-off deploy isn't blocked by a missing Hermes). (codex F4)
 
 ## Procedure
 
-1. Read `HERMES_ACP_CMD` (already required by `HermesExecutor`); split into `cmd` + `args`.
+1. Parse `HERMES_ACP_CMD` with a **shared parser/normalizer reused by `HermesExecutor`** (NOT an ad-hoc local split) → `{cmd, args}`. The normalizer handles absolute paths, wrappers, and quoted args so preflight checks the **same** executable the runtime spawns. (codex F6)
 2. Resolve `cmd` on PATH. Unresolvable → fail `hermes_missing`.
-3. Run `hermes acp --check` (verified OK in spec 010 §i) with a short timeout.
-   - non-zero exit / timeout → fail `check_failed`.
+3. Spawn the **configured** `cmd` with `acp --check` (verified OK in spec 010 §i) under a **strict 5 s timeout**.
+   - non-zero exit OR timeout → fail `check_failed` — MUST never block boot. (gemini F1)
 4. Assert the reported ACP `protocolVersion` is compatible with the adapter (`protocolVersion 1`).
    - mismatch → fail `acp_incompatible`.
 5. All pass → `{ ok: true, resolvedCommand, acpProtocolVersion }`.
@@ -36,4 +36,6 @@ On `ok: false` the engine MUST throw `AppError(message, 500, 'configuration_erro
 - **AC1**: correctly provisioned runtime (container or host) → preflight passes, engine ready. (SC-001)
 - **AC2**: `hermes` absent / unresolvable → engine fails at boot with an actionable typed error; **0** turns attempted. (SC-002, FR-003)
 - **AC3**: incompatible Hermes (ACP protocol mismatch) → `acp_incompatible` at boot, not mid-conversation. (FR-002)
-- **AC4**: agents-disabled deploy → preflight skipped, engine starts normally.
+- **AC4**: `AGENTIC_EXECUTOR_ENABLED=false` (or the deploy default) → preflight skipped, engine starts normally. Conversely enabled+missing Hermes → fail (AC2); enabled+compatible → pass (AC1). (codex F4 test matrix)
+- **AC5**: a hung `hermes acp --check` → `check_failed` within ~5 s; boot never hangs. (gemini F1)
+- **AC6**: `HERMES_ACP_CMD` with an absolute path / quoted args → preflight checks the same executable the executor spawns (shared parser). (codex F6)

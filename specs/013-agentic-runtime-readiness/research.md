@@ -38,15 +38,15 @@ Hermes-agent is a Python CLI; **ACP is an optional extra** (`pip install -e '.[a
 
 ## (f) Engine image strategy — Node + Python in one image
 
-The engine is Node/TS; hermes is Python; the engine **spawns `hermes` as a subprocess in the same runtime** (process-per-tenant, spec 010 T000d). So the image must carry **both** runtimes. **Decision**: base `node:20-bookworm-slim`; apt-add `python3` + `pipx` (+ `ripgrep`); `pipx install hermes-agent[acp]==0.15.1`; build the TS workspace; entrypoint = engine. Multi-stage to keep the final image lean. *(Python-base + add-Node rejected: the engine is the long-running process; bolting the Node toolchain on is heavier.)*
+The engine is Node/TS; hermes is Python; the engine **spawns `hermes` as a subprocess in the same runtime** (process-per-tenant, spec 010 T000d). So the image must carry **both** runtimes. **Decision** *(updated after review — the existing `packages/api/Dockerfile` is `node:20-alpine`/musl, Node-only)*: **convert** it to `node:20-bookworm-slim` (glibc → Python wheels for hermes' deps install without musl build pain); apt-add `python3` + `pipx` (+ `ripgrep`); `PIPX_BIN_DIR=/usr/local/bin pipx install hermes-agent[acp]==0.15.1` so `hermes` lands on a **global** PATH (the runner runs as a non-root user — gemini F3); **preserve** the multi-stage pnpm workspace build + `CMD node packages/api/dist/server.js`. Python = **3.11** (bookworm default; pipx/hermes work fine — gemini F2). *(Alpine/musl rejected: native-extension build pain. Python-base+add-Node rejected: engine is the long-running process. `uv` is a viable faster alternative — noted; pipx is baseline.)*
 
 ## (g) Preflight — fail fast, not on the first turn
 
-`HermesExecutor` validates only `HERMES_ACP_CMD` **presence** (constructor), never that the binary **resolves**; `spawn` ENOENT surfaces on the first user turn. **Decision**: add a **startup preflight** (engine boot / readiness) that (1) resolves `HERMES_ACP_CMD[0]` and runs `hermes acp --check` (verified OK in 010 §i), asserting ACP `protocolVersion` compatibility; (2) on failure throws a typed `configuration_error` → engine refuses ready/healthy. The same preflight catches a missing **host** install in the dev deployment model. (FR-003)
+`HermesExecutor` validates only `HERMES_ACP_CMD` **presence** (constructor), never that the binary **resolves**; `spawn` ENOENT surfaces on the first user turn. **Decision**: add a **startup preflight** governed by `AGENTIC_EXECUTOR_ENABLED` (FR-012) that (1) parses `HERMES_ACP_CMD` via a **parser shared with `HermesExecutor`** (`acp-command.ts`) — not a hardcoded `hermes` — so it checks the *same* executable the runtime spawns (codex F6); (2) spawns the configured `cmd acp --check` (verified OK in 010 §i) under a **strict 5 s timeout** — a hang → `check_failed`, never blocking boot (gemini F1); (3) asserts ACP `protocolVersion 1`; (4) on failure throws a typed `configuration_error` → engine refuses ready/healthy. The same preflight catches a missing **host** install in the dev model. (FR-003/012/014)
 
 ## (h) Memory observability — transient vs permanent
 
-Current honcho calls swallow **all** errors → `[]` (silent no-op). **Decision**: keep graceful degradation (FR-006), **but**: (1) log at `warn` with structured `err`; (2) emit a degradation signal (`honcho_degraded` metric + readiness/health field); (3) **distinguish a permanent API/version mismatch** (404 on the v3 path, schema mismatch) → surface **louder** (error + readiness flag) from a **transient** outage (connect refused / 5xx → warn + degrade). A version mismatch MUST NOT hide behind the same `catch` that covers a flaky network. (FR-007)
+Current honcho calls swallow **all** errors → `[]` (silent no-op). **Decision**: keep graceful degradation (FR-006), **but**: (1) log at `warn` with structured `err`; (2) emit a degradation signal — `honcho_degraded` metric **and a pinned health field `/v1/health.checks.honcho_memory`** (codex F5); (3) **distinguish a permanent API/version mismatch** (404 on the v3 path, schema mismatch) → surface **louder** (error + raise the health field) from a **transient** outage (connect refused / 5xx → warn + degrade). A version mismatch MUST NOT hide behind the same `catch` that covers a flaky network. (FR-007)
 
 ## (i) Invariants preserved
 
@@ -55,8 +55,18 @@ Current honcho calls swallow **all** errors → `[]` (silent no-op). **Decision*
 - **Fresh cutover** (CQ2/FR-010): on v3 start clean, no data migration.
 - **Process-per-tenant Hermes isolation** (spec 010 T000d): this feature provisions the runtime; it MUST NOT change the pooling/HOME isolation.
 
+## (j) Live-path wiring gap — ⚠ surfaced by review (codex F1)
+
+`ChatService` calls `llm.complete`/`completeStream` directly with **Letta** memory ([chat-service.ts:186]) and never routes through `turn-router`/`HermesExecutor.runAgentTurn` — confirmed (grep: zero turn-router/runAgentTurn refs in chat-service). So US1 (hermes runtime) and US2 (honcho memory, reachable **only** via the executor) are **inert until the live path is wired**. **Decision**: add **US3 / FR-015** — route agent-enabled, non-scripted turns through turn-router → runAgentTurn, fallback to completion on outage; scripted turns stay deterministic (003). Scope (decided 2026-06-08): owned by 013 — it's 010's unfinished wiring, kept here to deliver value.
+
+## (k) Honcho per-turn cost / concurrency — ⚠ surfaced by review (codex F7, gemini F4/F5)
+
+Get-or-create workspace+peer+session before every op = 3× N+1 on the per-turn path; concurrent first-turns race on create (409). **Decision**: in-process cache of resolved IDs (keyed tenant/peer/session, bounded) + **idempotent create (409→GET)**. Cache best-effort (stale → re-resolve, never fail a turn).
+
 ## Open items carried to tasks
 
 - [b] Verify honcho v3.0.9 self-host auth default → adjust `HONCHO_API_KEY` handling.
 - [a/c] Contract-test exact v3 field names + `/v3` prefix against the running image.
 - [f] Confirm hermes `[acp]` extra needs no Node at runtime (only Python) in the image.
+- [j] Confirm the live-path gating predicate (turn-router) without breaking 003 scripted determinism.
+- [k] Pick cache impl (Map vs LRU) + TTL; confirm honcho 409 semantics on duplicate workspace/peer.
