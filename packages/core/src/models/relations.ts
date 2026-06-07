@@ -15,6 +15,7 @@ import { conversationFunnelStates } from './conversation-funnel-states.js';
 import { validatorConfigs, validatorRuns } from './validators.js';
 import { documents, documentChunks } from './documents.js';
 import { annotations } from './annotations.js';
+import { evalRuns, evalResults } from './eval-runs.js';
 
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   personas: many(personas),
@@ -28,6 +29,8 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   validatorRuns: many(validatorRuns),
   documents: many(documents),
   annotations: many(annotations),
+  evalRuns: many(evalRuns),
+  evalResults: many(evalResults),
 }));
 
 export const personasRelations = relations(personas, ({ one, many }) => ({
@@ -241,5 +244,24 @@ export const annotationsRelations = relations(annotations, ({ one }) => ({
   persona: one(personas, {
     fields: [annotations.personaId],
     references: [personas.id],
+  }),
+}));
+
+export const evalRunsRelations = relations(evalRuns, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [evalRuns.tenantId],
+    references: [tenants.id],
+  }),
+  results: many(evalResults),
+}));
+
+export const evalResultsRelations = relations(evalResults, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [evalResults.tenantId],
+    references: [tenants.id],
+  }),
+  run: one(evalRuns, {
+    fields: [evalResults.runId],
+    references: [evalRuns.id],
   }),
 }));

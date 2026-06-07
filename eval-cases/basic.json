@@ -1,0 +1,27 @@
+[
+  {
+    "name": "default-greeting",
+    "personaSlug": "test-persona",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Say hello and explain what you can help with."
+      }
+    ],
+    "assertions": [
+      {
+        "type": "min_length",
+        "value": 10
+      },
+      {
+        "type": "not_contains",
+        "value": "I cannot help"
+      },
+      {
+        "type": "similarity",
+        "expected": "Hello, I can help answer questions and work through tasks.",
+        "threshold": 0.2
+      }
+    ]
+  }
+]

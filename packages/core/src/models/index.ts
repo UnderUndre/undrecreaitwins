@@ -14,6 +14,8 @@ export { conversationFunnelStates } from './conversation-funnel-states.js';
 export { documents, documentChunks } from './documents.js';
 export { annotations } from './annotations.js';
 export { followupRules, followupAttempts } from './followups.js';
+export { evalRuns, evalResults } from './eval-runs.js';
+export type { EvalAssertionResult } from './eval-runs.js';
 export {
   validatorConfigs,
   validatorRuns,
@@ -39,4 +41,6 @@ export {
   documentsRelations,
   documentChunksRelations,
   annotationsRelations,
+  evalRunsRelations,
+  evalResultsRelations,
 } from './relations.js';

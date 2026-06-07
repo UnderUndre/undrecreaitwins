@@ -34,6 +34,26 @@
       "types": "./dist/services/chat-service.d.ts",
       "default": "./dist/services/chat-service.js"
     },
+    "./services/eval-runner.js": {
+      "types": "./dist/services/eval-runner.d.ts",
+      "default": "./dist/services/eval-runner.js"
+    },
+    "./services/eval-repository.js": {
+      "types": "./dist/services/eval-repository.d.ts",
+      "default": "./dist/services/eval-repository.js"
+    },
+    "./services/eval-case-loader.js": {
+      "types": "./dist/services/eval-case-loader.d.ts",
+      "default": "./dist/services/eval-case-loader.js"
+    },
+    "./services/eval-assertions.js": {
+      "types": "./dist/services/eval-assertions.d.ts",
+      "default": "./dist/services/eval-assertions.js"
+    },
+    "./services/eval-types.js": {
+      "types": "./dist/services/eval-types.d.ts",
+      "default": "./dist/services/eval-types.js"
+    },
     "./services/embedding-service.js": {
       "types": "./dist/services/embedding-service.d.ts",
       "default": "./dist/services/embedding-service.js"
