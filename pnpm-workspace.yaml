@@ -1,2 +1,4 @@
 packages:
   - "packages/*"
+overrides:
+  dotenv: "16.4.7"

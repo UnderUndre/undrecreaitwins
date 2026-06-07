@@ -91,7 +91,7 @@ export async function runHermesPreflight(): Promise<PreflightResult> {
       ok: false,
       error: {
         code: 'check_failed',
-        message: `Hermes preflight failed: ${message}`,
+        message: `Hermes preflight failed: ${err instanceof Error ? err.message : String(err)}`,
       },
     };
   }

@@ -121,6 +121,14 @@
     "./models/annotations.js": {
       "types": "./dist/models/annotations.d.ts",
       "default": "./dist/models/annotations.js"
+    },
+    "./services/hermes/hermes-preflight.js": {
+      "types": "./dist/services/hermes/hermes-preflight.d.ts",
+      "default": "./dist/services/hermes/hermes-preflight.js"
+    },
+    "./services/hermes/honcho-client.js": {
+      "types": "./dist/services/hermes/honcho-client.d.ts",
+      "default": "./dist/services/hermes/honcho-client.js"
     }
   },
   "scripts": {

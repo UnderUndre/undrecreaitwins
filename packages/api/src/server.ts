@@ -59,7 +59,7 @@ export async function buildServer() {
     );
   }
 
-  setDegradationSignal((cls) => {
+  setDegradationSignal((cls: 'transient' | 'permanent') => {
     if (cls === 'permanent') {
       honchoMemoryStatus = 'error';
     } else {

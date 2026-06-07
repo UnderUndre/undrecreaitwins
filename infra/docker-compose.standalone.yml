@@ -86,17 +86,15 @@ services:
     restart: unless-stopped
 
   honcho:
-    # Plastic Labs project — NOT nousresearch. v3 API; honcho-client.ts still
-    # targets the v1/v2 apps/users surface → memory degrades to no-op until the
-    # client is migrated to v3 workspaces/peers (graceful by design).
     image: ghcr.io/plastic-labs/honcho:v3.0.9
     ports:
       - "${HONCHO_PORT:-8083}:8080"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
+      DB_CONNECTION_URI: postgresql+psycopg://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
     depends_on:
       postgres:
         condition: service_healthy
+    command: ["sh", "-c", "alembic upgrade head && fastapi run --host 0.0.0.0 src/main.py"]
     restart: unless-stopped
 
   # NOTE: hermes-agent is NOT a service. Per spec 010 research §i, it's a local
