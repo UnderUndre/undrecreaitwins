@@ -24,6 +24,7 @@ export { agentRuns } from './agent-runs.js';
 export { actionAudit } from './action-audit.js';
 export { llmProviderConfig, tenantLlmDefault } from './llm-provider.js';
 export { workspaceApiKeys } from './api-key.js';
+export { mcpCatalogEntry, assistantMcpBinding, mcpScopeEnum, mcpTransportEnum } from './mcp-catalog-entry.js';
 
 export {
   tenantsRelations,
@@ -43,4 +44,6 @@ export {
   documentsRelations,
   documentChunksRelations,
   annotationsRelations,
+  mcpCatalogEntryRelations,
+  assistantMcpBindingRelations,
 } from './relations.js';

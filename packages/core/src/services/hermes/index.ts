@@ -14,3 +14,7 @@ export { runHermesPreflight } from './hermes-preflight.js';
 export type { PreflightResult, PreflightError, PreflightOk, PreflightFail } from './hermes-preflight.js';
 export { parseAcpCommand } from './acp-command.js';
 export type { AcpCommandResult } from './acp-command.js';
+export { mcpConnect, mcpListTools, mcpCallTool, McpClientError } from './mcp-client.js';
+export type { McpCatalogEntryRow, DiscoveredTool, McpCallResult } from './mcp-client.js';
+export { buildBrokeredTools, invalidateCache } from './mcp-broker.js';
+export type { BrokerResult, BrokerHealth, BindingRow } from './mcp-broker.js';

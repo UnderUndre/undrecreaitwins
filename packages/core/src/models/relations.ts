@@ -15,6 +15,7 @@ import { conversationFunnelStates } from './conversation-funnel-states.js';
 import { validatorConfigs, validatorRuns } from './validators.js';
 import { documents, documentChunks } from './documents.js';
 import { annotations } from './annotations.js';
+import { mcpCatalogEntry, assistantMcpBinding } from './mcp-catalog-entry.js';
 
 export const tenantsRelations = relations(tenants, ({ many }) => ({
   personas: many(personas),
@@ -28,6 +29,7 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   validatorRuns: many(validatorRuns),
   documents: many(documents),
   annotations: many(annotations),
+  mcpCatalogEntries: many(mcpCatalogEntry),
 }));
 
 export const personasRelations = relations(personas, ({ one, many }) => ({
@@ -241,5 +243,28 @@ export const annotationsRelations = relations(annotations, ({ one }) => ({
   persona: one(personas, {
     fields: [annotations.personaId],
     references: [personas.id],
+  }),
+}));
+
+export const mcpCatalogEntryRelations = relations(mcpCatalogEntry, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [mcpCatalogEntry.tenantId],
+    references: [tenants.id],
+  }),
+  bindings: many(assistantMcpBinding),
+}));
+
+export const assistantMcpBindingRelations = relations(assistantMcpBinding, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [assistantMcpBinding.tenantId],
+    references: [tenants.id],
+  }),
+  persona: one(personas, {
+    fields: [assistantMcpBinding.personaId],
+    references: [personas.id],
+  }),
+  catalogEntry: one(mcpCatalogEntry, {
+    fields: [assistantMcpBinding.catalogEntryId],
+    references: [mcpCatalogEntry.id],
   }),
 }));
