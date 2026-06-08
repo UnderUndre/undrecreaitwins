@@ -129,6 +129,18 @@
     "./services/hermes/honcho-client.js": {
       "types": "./dist/services/hermes/honcho-client.d.ts",
       "default": "./dist/services/hermes/honcho-client.js"
+    },
+    "./services/hermes/mcp-client.js": {
+      "types": "./dist/services/hermes/mcp-client.d.ts",
+      "default": "./dist/services/hermes/mcp-client.js"
+    },
+    "./services/hermes/mcp-broker.js": {
+      "types": "./dist/services/hermes/mcp-broker.d.ts",
+      "default": "./dist/services/hermes/mcp-broker.js"
+    },
+    "./services/llm-provider/index.js": {
+      "types": "./dist/services/llm-provider/index.d.ts",
+      "default": "./dist/services/llm-provider/index.js"
     }
   },
   "scripts": {

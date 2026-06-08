@@ -2,6 +2,9 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { withTenantContext } from '@undrecreaitwins/core/db.js';
 import { mcpCatalogEntry, assistantMcpBinding } from '@undrecreaitwins/core/models/index.js';
+
+type CatalogRow = typeof mcpCatalogEntry.$inferSelect;
+type BindingRow = typeof assistantMcpBinding.$inferSelect;
 import { encryptApiKey, assertUrlAllowed } from '@undrecreaitwins/core/services/llm-provider/index.js';
 import { mcpListTools, type McpCatalogEntryRow } from '@undrecreaitwins/core/services/hermes/mcp-client.js';
 import { invalidateCache } from '@undrecreaitwins/core/services/hermes/mcp-broker.js';
@@ -51,42 +54,42 @@ const putBindingsSchema = z.object({
 });
 
 function toRow(row: unknown): McpCatalogEntryRow {
-  const r = row as Record<string, unknown>;
+  const r = row as CatalogRow;
   return {
     id: r.id as string,
-    tenantId: r.tenant_id as string,
+    tenantId: r.tenantId as string,
     scope: (r.scope as string) as 'tenant' | 'platform',
     name: r.name as string,
     transport: (r.transport as string) as 'http' | 'stdio',
     url: (r.url as string) ?? null,
     command: (r.command as string) ?? null,
     args: (r.args as unknown[]) ?? null,
-    authCiphertext: (r.auth_ciphertext as string) ?? null,
-    authRef: (r.auth_ref as string) ?? null,
-    toolsInclude: (r.tools_include as string[]) ?? null,
-    toolsExclude: (r.tools_exclude as string[]) ?? null,
-    timeoutMs: (r.timeout_ms as number) ?? 30000,
-    tlsVerify: (r.tls_verify as boolean) ?? true,
+    authCiphertext: (r.authCiphertext as string) ?? null,
+    authRef: (r.authRef as string) ?? null,
+    toolsInclude: (r.toolsInclude as string[]) ?? null,
+    toolsExclude: (r.toolsExclude as string[]) ?? null,
+    timeoutMs: (r.timeoutMs as number) ?? 30000,
+    tlsVerify: (r.tlsVerify as boolean) ?? true,
     enabled: (r.enabled as boolean) ?? true,
   };
 }
 
-function sanitize(entry: Record<string, unknown>): Record<string, unknown> {
+function sanitize(entry: CatalogRow): Record<string, unknown> {
   return {
     id: entry.id,
-    tenant_id: entry.tenant_id,
+    tenant_id: entry.tenantId,
     scope: entry.scope,
     name: entry.name,
     transport: entry.transport,
     url: entry.url,
-    has_auth: !!(entry.auth_ciphertext),
-    tools_include: entry.tools_include,
-    tools_exclude: entry.tools_exclude,
-    timeout_ms: entry.timeout_ms,
-    tls_verify: entry.tls_verify,
+    has_auth: !!(entry.authCiphertext),
+    tools_include: entry.toolsInclude,
+    tools_exclude: entry.toolsExclude,
+    timeout_ms: entry.timeoutMs,
+    tls_verify: entry.tlsVerify,
     enabled: entry.enabled,
-    created_at: entry.created_at,
-    updated_at: entry.updated_at,
+    created_at: entry.createdAt,
+    updated_at: entry.updatedAt,
   };
 }
 
@@ -103,7 +106,7 @@ export const mcpCatalogRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/v1/mcp/catalog', async (request) => {
     return withTenantContext(request.tenantId, async (tx) => {
       const rows = await tx.select().from(mcpCatalogEntry);
-      return { data: rows.map(r => sanitize(r as Record<string, unknown>)) };
+      return { data: rows.map(r => sanitize(r)) };
     });
   });
 
@@ -152,10 +155,10 @@ export const mcpCatalogRoutes: FastifyPluginAsync = async (fastify) => {
         authCiphertext,
         authRef,
       }).returning();
-    });
+    }) as [CatalogRow];
 
     reply.status(201);
-    return sanitize(row as Record<string, unknown>);
+    return sanitize(row);
   });
 
   // ── PATCH /v1/mcp/catalog/:id ─────────────────────────────────────────
@@ -177,19 +180,19 @@ export const mcpCatalogRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    const updateData: Record<string, unknown> = { updated_at: new Date() };
+    const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (body.name !== undefined) updateData.name = body.name;
     if (body.url !== undefined) updateData.url = body.url;
-    if (body.timeout_ms !== undefined) updateData.timeout_ms = body.timeout_ms;
-    if (body.tls_verify !== undefined) updateData.tls_verify = body.tls_verify;
+    if (body.timeout_ms !== undefined) updateData.timeoutMs = body.timeout_ms;
+    if (body.tls_verify !== undefined) updateData.tlsVerify = body.tls_verify;
     if (body.enabled !== undefined) updateData.enabled = body.enabled;
-    if (body.tools_include !== undefined) updateData.tools_include = body.tools_include;
-    if (body.tools_exclude !== undefined) updateData.tools_exclude = body.tools_exclude;
+    if (body.tools_include !== undefined) updateData.toolsInclude = body.tools_include;
+    if (body.tools_exclude !== undefined) updateData.toolsExclude = body.tools_exclude;
 
     if (body.auth && Object.keys(body.auth).length > 0) {
       const encrypted = await encryptApiKey(JSON.stringify(body.auth));
-      updateData.auth_ciphertext = encrypted.ciphertext;
-      updateData.auth_ref = encrypted.keyRef;
+      updateData.authCiphertext = encrypted.ciphertext;
+      updateData.authRef = encrypted.keyRef;
     }
 
     const [row] = await withTenantContext(request.tenantId, async (tx) => {
@@ -202,7 +205,7 @@ export const mcpCatalogRoutes: FastifyPluginAsync = async (fastify) => {
     });
 
     invalidateCache(id);
-    return sanitize(row as Record<string, unknown>);
+    return sanitize(row);
   });
 
   // ── DELETE /v1/mcp/catalog/:id ────────────────────────────────────────
@@ -251,11 +254,11 @@ export const mcpCatalogRoutes: FastifyPluginAsync = async (fastify) => {
       const rows = await tx.select().from(assistantMcpBinding)
         .where(eq(assistantMcpBinding.personaId, personaId));
       return {
-        bindings: rows.map(r => ({
-          id: (r as Record<string, unknown>).id,
-          catalog_entry_id: (r as Record<string, unknown>).catalog_entry_id,
-          enabled: (r as Record<string, unknown>).enabled,
-          tool_overrides: (r as Record<string, unknown>).tool_overrides,
+        bindings: rows.map((r: BindingRow) => ({
+          id: r.id,
+          catalog_entry_id: r.catalogEntryId,
+          enabled: r.enabled,
+          tool_overrides: r.toolOverrides,
         })),
       };
     });
@@ -290,11 +293,11 @@ export const mcpCatalogRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       return {
-        bindings: inserted.map(r => ({
-          id: (r as Record<string, unknown>).id,
-          catalog_entry_id: (r as Record<string, unknown>).catalog_entry_id,
-          enabled: (r as Record<string, unknown>).enabled,
-          tool_overrides: (r as Record<string, unknown>).tool_overrides,
+        bindings: inserted.map((r: BindingRow) => ({
+          id: r.id,
+          catalog_entry_id: r.catalogEntryId,
+          enabled: r.enabled,
+          tool_overrides: r.toolOverrides,
         })),
       };
     });

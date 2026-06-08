@@ -390,7 +390,7 @@ export class HermesExecutor {
         const bindingRows = await tx.select().from(assistantMcpBinding)
           .where(eq(assistantMcpBinding.personaId, personaId));
 
-        const entryIds = bindingRows.map(b => (b as Record<string, unknown>).catalog_entry_id as string);
+        const entryIds = bindingRows.map(b => (b as Record<string, unknown>).catalogEntryId as string);
         if (entryIds.length === 0) return { bindings: [], entries: [] };
 
         const entryRows = await tx.select().from(mcpCatalogEntry)
@@ -405,19 +405,19 @@ export class HermesExecutor {
 
       const entryRows = entries.map((e: Record<string, unknown>) => ({
         id: e.id as string,
-        tenantId: e.tenant_id as string,
+        tenantId: e.tenantId as string,
         scope: e.scope as 'tenant' | 'platform',
         name: e.name as string,
         transport: e.transport as 'http' | 'stdio',
         url: (e.url as string) ?? null,
         command: (e.command as string) ?? null,
         args: (e.args as unknown[]) ?? null,
-        authCiphertext: (e.auth_ciphertext as string) ?? null,
-        authRef: (e.auth_ref as string) ?? null,
-        toolsInclude: (e.tools_include as string[]) ?? null,
-        toolsExclude: (e.tools_exclude as string[]) ?? null,
-        timeoutMs: (e.timeout_ms as number) ?? 30000,
-        tlsVerify: (e.tls_verify as boolean) ?? true,
+        authCiphertext: (e.authCiphertext as string) ?? null,
+        authRef: (e.authRef as string) ?? null,
+        toolsInclude: (e.toolsInclude as string[]) ?? null,
+        toolsExclude: (e.toolsExclude as string[]) ?? null,
+        timeoutMs: (e.timeoutMs as number) ?? 30000,
+        tlsVerify: (e.tlsVerify as boolean) ?? true,
         enabled: (e.enabled as boolean) ?? true,
       }));
 

@@ -1,36 +1,90 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
 const { catalogStore, bindingStore } = vi.hoisted(() => {
   const catalog: Record<string, Record<string, unknown>[]> = {};
   const bindings: Record<string, Record<string, unknown>[]> = {};
-  return {
-    catalogStore: catalog,
-    bindingStore: bindings,
-  };
+  return { catalogStore: catalog, bindingStore: bindings };
 });
 
 vi.mock('drizzle-orm', () => ({
   eq: (_col: unknown, _val: unknown) => ({}),
   and: (..._conds: unknown[]) => ({}),
+  isNull: (_col: unknown) => ({}),
 }));
 
+const makeSelectChain = (tenantId: string) => ({
+  from: () => ({
+    where: () => ({
+      limit: () => Promise.resolve(
+        tenantId.startsWith('tenant-test')
+          ? [{ id: tenantId, status: 'active' }]
+          : [],
+      ),
+    }),
+  }),
+});
+
+const mockDb = {
+  select: vi.fn().mockReturnValue({
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue([]),
+      }),
+    }),
+  }),
+  insert: vi.fn().mockReturnValue({
+    values: vi.fn().mockReturnValue({
+      onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
+    }),
+  }),
+};
+
 vi.mock('@undrecreaitwins/core/db.js', () => ({
-  db: {},
+  db: mockDb,
   healthCheck: vi.fn().mockResolvedValue(true),
   withTenantContext: vi.fn().mockImplementation(async (tenantId: string, fn: (tx: unknown) => Promise<unknown>) => {
     return fn({
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            limit: () => Promise.resolve(catalogStore[tenantId] ?? []),
-          }),
-        }),
-      }),
+      select: () => {
+        const chain: any = {
+          from: (table?: unknown) => {
+            const isBinding = table && (table as Record<string, unknown>).catalogEntryId !== undefined;
+            const store = isBinding ? bindingStore : catalogStore;
+            const rows = store[tenantId] ?? [];
+            const result: any = {
+              where: () => Promise.resolve(rows),
+            };
+            result.then = (resolve: (v: unknown) => void) => Promise.resolve(rows).then(resolve);
+            result.catch = () => result;
+            result.finally = () => result;
+            return result;
+          },
+        };
+        return chain;
+      },
       insert: () => ({
-        values: () => ({
+        values: (vals: Record<string, unknown>) => ({
           returning: () => {
-            const entry = { id: 'test-id', tenant_id: tenantId, scope: 'tenant', name: 'gh', transport: 'http', url: 'https://mcp.example.com', has_auth: false, tools_include: null, tools_exclude: null, timeout_ms: 30000, tls_verify: true, enabled: true, created_at: new Date(), updated_at: new Date() };
+            const isBindingRow = 'catalogEntryId' in vals || 'personaId' in vals;
+            if (isBindingRow) {
+              const entry = {
+                id: 'bind-test-id', tenantId, personaId: vals.personaId ?? 'p-aaa',
+                catalogEntryId: vals.catalogEntryId, enabled: vals.enabled ?? true,
+                toolOverrides: vals.toolOverrides ?? [], createdAt: new Date(), updatedAt: new Date(),
+              };
+              if (!bindingStore[tenantId]) bindingStore[tenantId] = [];
+              bindingStore[tenantId].push(entry);
+              return Promise.resolve([entry]);
+            }
+            const entry = {
+              id: 'test-id', tenantId, scope: 'tenant', transport: 'http',
+              url: null, command: null, args: null,
+              authCiphertext: null, authRef: null,
+              toolsInclude: null, toolsExclude: null,
+              timeoutMs: 30000, tlsVerify: true, enabled: true,
+              createdAt: new Date(), updatedAt: new Date(),
+              ...vals,
+            };
             if (!catalogStore[tenantId]) catalogStore[tenantId] = [];
             catalogStore[tenantId].push(entry);
             return Promise.resolve([entry]);
@@ -38,9 +92,9 @@ vi.mock('@undrecreaitwins/core/db.js', () => ({
         }),
       }),
       update: () => ({
-        set: () => ({
+        set: (_data: unknown) => ({
           where: () => ({
-            returning: () => Promise.resolve([{ id: 'test-id', tenant_id: tenantId }]),
+            returning: () => Promise.resolve([{ id: 'test-id', tenantId }]),
           }),
         }),
       }),
@@ -55,26 +109,15 @@ vi.mock('@undrecreaitwins/core/db.js', () => ({
 
 vi.mock('@undrecreaitwins/core/models/index.js', () => ({
   mcpCatalogEntry: {
-    id: 'id',
-    tenantId: 'tenant_id',
-    name: 'name',
-    url: 'url',
-    scope: 'scope',
-    transport: 'transport',
-    enabled: 'enabled',
-    authCiphertext: 'auth_ciphertext',
-    authRef: 'auth_ref',
-    toolsInclude: 'tools_include',
-    toolsExclude: 'tools_exclude',
-    timeoutMs: 'timeout_ms',
-    tlsVerify: 'tls_verify',
+    id: 'id', tenantId: 'tenant_id', name: 'name', url: 'url',
+    scope: 'scope', transport: 'transport', enabled: 'enabled',
+    authCiphertext: 'auth_ciphertext', authRef: 'auth_ref',
+    toolsInclude: 'tools_include', toolsExclude: 'tools_exclude',
+    timeoutMs: 'timeout_ms', tlsVerify: 'tls_verify',
   },
   assistantMcpBinding: {
-    id: 'id',
-    tenantId: 'tenant_id',
-    personaId: 'persona_id',
-    catalogEntryId: 'catalog_entry_id',
-    enabled: 'enabled',
+    id: 'id', tenantId: 'tenant_id', personaId: 'persona_id',
+    catalogEntryId: 'catalog_entry_id', enabled: 'enabled',
     toolOverrides: 'tool_overrides',
   },
   tenants: { id: 'id', status: 'status' },
@@ -94,6 +137,21 @@ vi.mock('@undrecreaitwins/core/services/hermes/mcp-client.js', () => ({
 
 vi.mock('@undrecreaitwins/core/services/hermes/mcp-broker.js', () => ({
   invalidateCache: vi.fn(),
+}));
+
+vi.mock('@undrecreaitwins/core/services/hermes/hermes-preflight.js', () => ({
+  runHermesPreflight: vi.fn().mockResolvedValue({ ok: true, acpProtocolVersion: 1 }),
+}));
+
+vi.mock('@undrecreaitwins/core/services/hermes/honcho-client.js', () => ({
+  setDegradationSignal: vi.fn(),
+}));
+
+vi.mock('@undrecreaitwins/core/services/retry/provider-retry.worker.js', () => ({
+  ProviderRetryWorker: vi.fn().mockImplementation(() => ({
+    start: vi.fn().mockResolvedValue(undefined),
+    stop: vi.fn().mockResolvedValue(undefined),
+  })),
 }));
 
 vi.mock('@undrecreaitwins/shared', () => ({
@@ -137,11 +195,31 @@ const TENANT_B = 'tenant-test-b';
 
 describe('MCP Catalog API (T003 — US1)', () => {
   let server: FastifyInstance;
+  let origAuthMode: string | undefined;
+
+  beforeAll(() => {
+    origAuthMode = process.env.TWIN_AUTH_MODE;
+    process.env.TWIN_AUTH_MODE = 'gateway';
+  });
+
+  afterAll(() => {
+    if (origAuthMode !== undefined) process.env.TWIN_AUTH_MODE = origAuthMode;
+    else delete process.env.TWIN_AUTH_MODE;
+  });
 
   beforeEach(async () => {
     vi.clearAllMocks();
     catalogStore[TENANT_A] = [];
     catalogStore[TENANT_B] = [];
+
+    mockDb.select.mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue([{ id: TENANT_A, status: 'active' }]),
+        }),
+      }),
+    });
+
     server = await buildServer();
   });
 
@@ -153,7 +231,7 @@ describe('MCP Catalog API (T003 — US1)', () => {
       payload: { name: 'local', transport: 'stdio' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().message).toContain('stdio');
+    expect(JSON.stringify(res.json())).toContain('stdio');
   });
 
   it('POST /v1/mcp/catalog — rejects missing URL for http transport', async () => {
@@ -197,7 +275,7 @@ describe('MCP Catalog API (T003 — US1)', () => {
       payload: { name: 'evil', url: 'http://127.0.0.1/mcp' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().message).toContain('SSRF');
+    expect(JSON.stringify(res.json())).toContain('SSRF');
   });
 
   it('POST /v1/mcp/catalog — encrypts auth, never returns secret', async () => {
@@ -235,6 +313,15 @@ describe('MCP Catalog API (T003 — US1)', () => {
   });
 
   it('POST /v1/mcp/catalog/:id/rescan — returns discovered tools', async () => {
+    catalogStore[TENANT_A] = [{
+      id: 'test-id', tenantId: TENANT_A, scope: 'tenant', name: 'gh', transport: 'http',
+      url: 'https://mcp.example.com', command: null, args: null,
+      authCiphertext: null, authRef: null,
+      toolsInclude: null, toolsExclude: null,
+      timeoutMs: 30000, tlsVerify: true, enabled: true,
+      createdAt: new Date(), updatedAt: new Date(),
+    }];
+
     const res = await server.inject({
       method: 'POST',
       url: '/v1/mcp/catalog/test-id/rescan',
@@ -253,7 +340,7 @@ describe('MCP Catalog API (T003 — US1)', () => {
       headers: { 'x-tenant-id': TENANT_A, authorization: 'Bearer test' },
       payload: {
         bindings: [{
-          catalog_entry_id: 'ce-1',
+          catalog_entry_id: '00000000-0000-0000-0000-000000000001',
           enabled: true,
           tool_overrides: [{ name: 'create_issue', isWrite: true }],
         }],

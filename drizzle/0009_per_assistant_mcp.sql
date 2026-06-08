@@ -58,16 +58,17 @@ CREATE INDEX "assistant_mcp_binding_tenant_idx" ON "assistant_mcp_binding" USING
 CREATE INDEX "assistant_mcp_binding_persona_idx" ON "assistant_mcp_binding" USING btree ("persona_id");
 
 -- ─── Cross-tenant guard: binding↔entry must share tenant_id ─────────────────
--- This CHECK prevents a bug in the API layer from inserting a binding whose
--- catalog_entry belongs to a different tenant (opencode F5 / gemini).
+-- Postgres forbids subqueries in CHECK constraints ("cannot use subquery in check
+-- constraint"). Enforce via a COMPOSITE FK to the UNIQUE (id, tenant_id) index on
+-- mcp_catalog_entry (gemini) — a binding referencing a different-tenant entry is
+-- then impossible at the DB layer (opencode F5). The plain catalog_entry_id FK
+-- above still gives ON DELETE CASCADE; this adds the tenant-match leg.
 
 ALTER TABLE "assistant_mcp_binding"
-  ADD CONSTRAINT "binding_entry_same_tenant"
-  CHECK (
-    "tenant_id" = (
-      SELECT "tenant_id" FROM "mcp_catalog_entry" WHERE "id" = "catalog_entry_id"
-    )
-  );
+  ADD CONSTRAINT "binding_entry_same_tenant_fk"
+  FOREIGN KEY ("catalog_entry_id", "tenant_id")
+  REFERENCES "mcp_catalog_entry" ("id", "tenant_id")
+  ON DELETE CASCADE;
 
 -- ─── RLS ─────────────────────────────────────────────────────────────────────
 
