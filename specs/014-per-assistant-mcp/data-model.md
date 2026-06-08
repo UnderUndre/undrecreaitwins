@@ -5,7 +5,7 @@ Two new Postgres tables (tenant-scoped + RLS) + runtime entities. Reviewed `.sql
 ## Tables
 
 ### `mcp_catalog_entry` (tenant-scoped, RLS)
-A vetted MCP server an admin registered.
+An MCP server an admin registered.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -37,7 +37,7 @@ Which catalog entries an assistant uses + per-tool overrides.
 | `created_at`/`updated_at` | timestamptz | |
 
 > CASCADE everywhere (codex-review lesson from PR #24): deleting a tenant/persona/entry must not orphan bindings.
-> **Tenant-match** (opencode F5): CHECK / composite-FK `binding.tenant_id = catalog_entry.tenant_id` — a binding may only reference a same-tenant entry; the broker query JOINs on `tenant_id` (don't trust RLS alone).
+> **Tenant-match** (opencode F5): composite-FK `(tenant_id, catalog_entry_id) → mcp_catalog_entry(tenant_id, id)` — enforces existence AND same-tenant in one FK. **Requires `UNIQUE (tenant_id, id)` on `mcp_catalog_entry`** (Postgres needs a unique on the referenced columns — gemini). Broker also JOINs on `tenant_id` (don't trust RLS alone).
 
 ## Runtime entities (not persisted)
 

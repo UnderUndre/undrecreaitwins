@@ -15,7 +15,7 @@ At session build, for persona P (tenant T):
 2. For each entry: `listTools` via **TTL cache** (key = entry id; refresh on expiry/rescan) — no per-turn N+1 (FR-013). Multi-entry cache-miss discovery runs **concurrently** (`Promise.allSettled`, bounded), not sequentially (gemini F3 / opencode F6); invalidate an entry's cache on a call-time `tool not found`/`invalid params` (drift, opencode F8).
 3. Apply server `tools_include/exclude` + binding `tool_overrides`.
 4. For each surviving tool, synthesize a `ToolDefinition`:
-   - `name = mcp_<entryName>_<tool>` (namespaced, FR-010)
+   - `name = mcp_<entryName>_<tool>` (namespaced, FR-010); **reject or deterministically truncate** if the synthesized name would exceed the LLM limit (≤64 chars, provider regex) — never send a raw over-limit name (gemini)
    - `isWriteAction` / `requiresConfirmation` from binding override; **un-annotated default = `isWriteAction:true, requiresConfirmation:true`** (write-treatment until classified — opencode F2)
    - `handler = (args, ctx) => mcpClient.callTool(entry, tool, args)`
 5. Inject these into the **same** `EngineMcpServer` tool set as native tools.
@@ -29,7 +29,7 @@ At session build, for persona P (tenant T):
 - Tenant isolation: a persona only sees its own tenant's entries — broker query **JOINs on `tenant_id`** (+ DB CHECK `binding.tenant_id=entry.tenant_id`), not RLS alone. (FR-008, opencode F5)
 
 ## Acceptance
-- **AC1**: persona bound to a vetted MCP → its tool appears (namespaced) and a call is audited + permission-checked like native; un-bound server unreachable. (SC-001)
+- **AC1**: persona bound to a registered MCP → its tool appears (namespaced) and a call is audited + permission-checked like native; un-bound server unreachable. (SC-001)
 - **AC2**: a write-annotated external tool → reserve→execute→finalize + audit; double-call replayed not re-executed. (FR-011)
 - **AC3**: bound MCP down → tools omitted, turn completes, `mcp_broker_degraded` emitted. (SC-002)
 - **AC4**: second turn for same persona → `tools/list` served from cache (≤1 discovery / TTL window). (SC-005)

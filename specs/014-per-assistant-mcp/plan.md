@@ -5,7 +5,7 @@
 
 ## Summary
 
-Give each assistant extra external tools via MCP **without breaking 010's gateway-as-sole-authority**. The engine becomes an MCP **client** to vetted external servers, **brokers** their tools through its own MCP gateway (allow-list + per-tenant permission + audit + full write-action treatment), and never hands the agent a raw external `mcpServers` entry. Config is a tenant-scoped catalog + per-assistant bindings; secrets encrypted (011 KMS) and URLs SSRF-pinned (011 dispatcher).
+Give each assistant extra external tools via MCP **without breaking 010's gateway-as-sole-authority**. The engine becomes an MCP **client** to registered external servers, **brokers** their tools through its own MCP gateway (allow-list + per-tenant permission + audit + full write-action treatment), and never hands the agent a raw external `mcpServers` entry. Config is a tenant-scoped catalog + per-assistant bindings; secrets encrypted (011 KMS) and URLs SSRF-pinned (011 dispatcher).
 
 ## Technical Context
 

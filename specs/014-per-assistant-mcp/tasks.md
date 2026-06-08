@@ -22,7 +22,7 @@ description: "Task list — Per-Assistant MCP Servers (014), agent routing + dep
 
 ## Phase 2: Foundational (blocking — shared by US1 + US2)
 
-- [ ] T002 [DB] Models `mcp-catalog-entry.ts` + `assistant-mcp-binding.ts` (tenant-scoped, **RLS**, **ON DELETE CASCADE**, unique `(tenant,name)` / `(persona,entry)`; stdio columns gated to `scope='platform'`; **CHECK / composite-FK `binding.tenant_id = entry.tenant_id`** — opencode F5) → re-export in `models/index.ts` + relations; **reviewed `.sql` migration** (RLS + indexes + journal entry), Standing Order #5. **Blocks all stories.**
+- [ ] T002 [DB] Models `mcp-catalog-entry.ts` + `assistant-mcp-binding.ts` (tenant-scoped, **RLS**, **ON DELETE CASCADE**, unique `(tenant,name)` / `(persona,entry)`; stdio columns gated to `scope='platform'`; **composite-FK `(tenant_id,catalog_entry_id) → catalog(tenant_id,id)` + UNIQUE `(tenant_id,id)` on catalog** (FK target — Postgres; opencode F5/gemini)) → re-export in `models/index.ts` + relations; **reviewed `.sql` migration** (RLS + indexes + journal entry), Standing Order #5. **Blocks all stories.**
 
 **Checkpoint**: schema + migration ready.
 
@@ -30,7 +30,7 @@ description: "Task list — Per-Assistant MCP Servers (014), agent routing + dep
 
 ## Phase 3: User Story 1 — Catalog + binding config (Priority: P1)
 
-**Goal**: tenant-admin registers vetted HTTP MCP servers and binds them to an assistant; secrets encrypted, SSRF-pinned, tenant-isolated.
+**Goal**: tenant-admin registers HTTP MCP servers and binds them to an assistant; secrets encrypted, SSRF-pinned, tenant-isolated.
 **Independent Test**: CRUD a catalog entry + bind to a persona via API; secret never returned; private-IP url rejected; cross-tenant 404.
 
 ### Tests for User Story 1
@@ -99,14 +99,14 @@ T010a → T010b
 T010a + T010b → T006
 T009 → T011
 T010a + T011 → T012
-T004 + T009 → T013
+T004 + T006 → T013
 T006 + T011 → T014
 
 ### Self-validation
 - All IDs present (T001–T009, T010a, T010b, T011–T014); T010 split per opencode F3/analyze F2. ✔
 - No cycles; T009→T010a closes the missing-edge gap (opencode F4/analyze F1). ✔
 - Fan-in `+`, fan-out `,`; no chained arrows on one line. ✔
-- `[E2E]`/`[SEC]` depend on impl (T007 after T008; T006 after T010a+T010b; T013 after T004+T009). ✔
+- `[E2E]`/`[SEC]` depend on impl (T007 after T008; T006 after T010a+T010b; T013 after T004+T006 — SEC reviews the fully-integrated broker, gemini). ✔
 - T002 blocks all stories (shared schema). ✔
 
 ```mermaid
@@ -124,7 +124,7 @@ graph LR
     T010a & T010b --> T006
     T009 --> T011
     T010a & T011 --> T012
-    T004 & T009 --> T013
+    T004 & T006 --> T013
     T006 & T011 --> T014
 ```
 
@@ -140,7 +140,7 @@ graph LR
 | 4 | [BE] US2 | T008 → T009 → T010a → T010b | T002 |
 | 5 | [BE] US3 | T011 | T009 |
 | 6 | [E2E] | T003 ; T006 ; T007 ; T012 | impl |
-| 7 | [SEC] | T013 | T004 + T009 |
+| 7 | [SEC] | T013 | T004 + T006 |
 | 8 | [BE] polish | T014 | T006 + T011 |
 
 ---
@@ -153,7 +153,7 @@ graph LR
 | [DB] | 1 | T001 |
 | [BE] | 8 | T002 |
 | [E2E] | 4 | impl ready |
-| [SEC] | 1 | T004 + T009 |
+| [SEC] | 1 | T004 + T006 |
 
 **Critical Path**: T001 → T002 → T008 → T009 → T010a → T010b → T006 → T014 (8)
 
