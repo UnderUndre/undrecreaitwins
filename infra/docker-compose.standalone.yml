@@ -25,8 +25,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-twinengine}
       POSTGRES_USER: ${POSTGRES_USER:-undre}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-undre}
+      HONCHO_DB: ${HONCHO_DB:-honcho}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./init-honcho-db.sh:/docker-entrypoint-initdb.d/init-honcho-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-undre} -d ${POSTGRES_DB:-twinengine}"]
       interval: 10s
@@ -90,11 +92,11 @@ services:
     ports:
       - "${HONCHO_PORT:-8083}:8080"
     environment:
-      DB_CONNECTION_URI: postgresql+psycopg://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
+      DB_CONNECTION_URI: postgresql+psycopg://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${HONCHO_DB:-honcho}
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-c", "alembic upgrade head && fastapi run --host 0.0.0.0 src/main.py"]
+    command: ["sh", "-c", "alembic upgrade head && exec fastapi run --host 0.0.0.0 src/main.py"]
     restart: unless-stopped
 
   # NOTE: hermes-agent is NOT a service. Per spec 010 research §i, it's a local
@@ -147,7 +149,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8090/v1/health"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/v1/health').then(r=>{process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 5

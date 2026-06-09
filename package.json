@@ -6,6 +6,8 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "pnpm -r run build",
+    "compose:standalone": "docker compose -f infra/docker-compose.standalone.yml up -d --build",
+    "compose:orchestra": "docker compose -f infra/docker-compose.with-orchestra up -d --build",
     "test": "pnpm -r run test",
     "test:unit": "pnpm -r run test:unit",
     "test:integration": "pnpm -r run test:integration",
