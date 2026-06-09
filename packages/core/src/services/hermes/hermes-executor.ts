@@ -12,10 +12,15 @@ import { LLMClient } from '../llm-client.js';
 import { AcpClient, type SessionUpdate, type AcpMcpServerEntry } from './hermes-adapter.js';
 import { makeHttpMcpServer, type McpServerConfig, type HttpMcpTransport } from './mcp-server.js';
 import type { ToolAllowEntry } from './tool-gateway.js';
+import { registerTool } from './tool-gateway.js';
+import { buildBrokeredTools } from './mcp-broker.js';
+import type { BindingRow } from './mcp-broker.js';
+import { mcpCatalogEntry, assistantMcpBinding } from '../../models/index.js';
 import { parseAcpCommand } from './acp-command.js';
-import { db } from '../../db.js';
+import { db, withTenantContext } from '../../db.js';
 import { resolveEffectiveConfig } from '../llm-provider/resolution.js';
 import { decryptApiKey } from '../llm-provider/crypto.js';
+import { eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import pino from 'pino';
 
@@ -169,7 +174,9 @@ export class HermesExecutor {
     try {
       // ── Start engine MCP server ───────────────────────────────────────
       const allowlist = this.getToolAllowlist(input.persona);
-      mcpServer = await this.startMcpServer(input.tenantId, input.persona.id, allowlist);
+      const brokerResult = await this.loadBrokeredTools(input.tenantId, input.persona.id);
+      const mergedAllowlist = [...allowlist, ...brokerResult.allowlistEntries];
+      mcpServer = await this.startMcpServer(input.tenantId, input.persona.id, mergedAllowlist);
 
       // ── ACP turn (Pooling Logic) ──────────────────────────────────────
       // Definite-assignment: every branch below assigns acpClient before use
@@ -371,6 +378,67 @@ export class HermesExecutor {
       return raw as ToolAllowEntry[];
     }
     return [];
+  }
+
+  private async loadBrokeredTools(tenantId: string, personaId: string): Promise<{
+    tools: import('./tool-gateway.js').ToolDefinition[];
+    allowlistEntries: Array<{ id: string; isWrite: boolean; requiresConfirmation: boolean }>;
+    health: Array<{ entryId: string; entryName: string; status: string; reason?: string; toolCount: number }>;
+  }> {
+    try {
+      const { bindings, entries } = await withTenantContext(tenantId, async (tx) => {
+        const bindingRows = await tx.select().from(assistantMcpBinding)
+          .where(eq(assistantMcpBinding.personaId, personaId));
+
+        const entryIds = bindingRows.map(b => (b as Record<string, unknown>).catalogEntryId as string);
+        if (entryIds.length === 0) return { bindings: [], entries: [] };
+
+        const entryRows = await tx.select().from(mcpCatalogEntry)
+          .where(eq(mcpCatalogEntry.tenantId, tenantId));
+
+        return { bindings: bindingRows as unknown as BindingRow[], entries: entryRows };
+      });
+
+      if (bindings.length === 0) {
+        return { tools: [], allowlistEntries: [], health: [] };
+      }
+
+      const entryRows = entries.map((e: Record<string, unknown>) => ({
+        id: e.id as string,
+        tenantId: e.tenantId as string,
+        scope: e.scope as 'tenant' | 'platform',
+        name: e.name as string,
+        transport: e.transport as 'http' | 'stdio',
+        url: (e.url as string) ?? null,
+        command: (e.command as string) ?? null,
+        args: (e.args as unknown[]) ?? null,
+        authCiphertext: (e.authCiphertext as string) ?? null,
+        authRef: (e.authRef as string) ?? null,
+        toolsInclude: (e.toolsInclude as string[]) ?? null,
+        toolsExclude: (e.toolsExclude as string[]) ?? null,
+        timeoutMs: (e.timeoutMs as number) ?? 30000,
+        tlsVerify: (e.tlsVerify as boolean) ?? true,
+        enabled: (e.enabled as boolean) ?? true,
+      }));
+
+      const result = await buildBrokeredTools(tenantId, personaId, bindings, entryRows);
+
+      for (const tool of result.tools) {
+        registerTool(tool);
+      }
+
+      if (result.health.some(h => h.status === 'degraded')) {
+        logger.warn(
+          { health: result.health.filter(h => h.status === 'degraded') },
+          'MCP broker: some entries degraded',
+        );
+      }
+
+      return result;
+    } catch (err) {
+      logger.warn({ err, tenantId, personaId }, 'Broker loading failed — proceeding with native tools only');
+      return { tools: [], allowlistEntries: [], health: [] };
+    }
   }
 
   private buildPromptText(

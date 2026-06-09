@@ -18,11 +18,11 @@ description: "Task list — Per-Assistant MCP Servers (014), agent routing + dep
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Scaffold `packages/core/src/services/hermes/{mcp-client,mcp-broker}.ts` (typed stubs) + confirm 011 KMS decrypt + SSRF dispatcher are importable from core; add a route placeholder. Unlocks lanes.
+- [X] T001 [SETUP] Scaffold `packages/core/src/services/hermes/{mcp-client,mcp-broker}.ts` (typed stubs) + confirm 011 KMS decrypt + SSRF dispatcher are importable from core; add a route placeholder. Unlocks lanes.
 
 ## Phase 2: Foundational (blocking — shared by US1 + US2)
 
-- [ ] T002 [DB] Models `mcp-catalog-entry.ts` + `assistant-mcp-binding.ts` (tenant-scoped, **RLS**, **ON DELETE CASCADE**, unique `(tenant,name)` / `(persona,entry)`; stdio columns gated to `scope='platform'`; **composite-FK `(tenant_id,catalog_entry_id) → catalog(tenant_id,id)` + UNIQUE `(tenant_id,id)` on catalog** (FK target — Postgres; opencode F5/gemini)) → re-export in `models/index.ts` + relations; **reviewed `.sql` migration** (RLS + indexes + journal entry), Standing Order #5. **Blocks all stories.**
+- [X] T002 [DB] Models `mcp-catalog-entry.ts` + `assistant-mcp-binding.ts` (tenant-scoped, **RLS**, **ON DELETE CASCADE**, unique `(tenant,name)` / `(persona,entry)`; stdio columns gated to `scope='platform'`; **composite-FK `(tenant_id,catalog_entry_id) → catalog(tenant_id,id)` + UNIQUE `(tenant_id,id)` on catalog** (FK target — Postgres; opencode F5/gemini)) → re-export in `models/index.ts` + relations; **reviewed `.sql` migration** (RLS + indexes + journal entry), Standing Order #5. **Blocks all stories.**
 
 **Checkpoint**: schema + migration ready.
 
@@ -34,11 +34,11 @@ description: "Task list — Per-Assistant MCP Servers (014), agent routing + dep
 **Independent Test**: CRUD a catalog entry + bind to a persona via API; secret never returned; private-IP url rejected; cross-tenant 404.
 
 ### Tests for User Story 1
-- [ ] T003 [E2E] [US1] API integration (mocked SSRF/KMS): catalog CRUD tenant-scoped; **POST private-IP url → rejected** (SC-004); secret never in GET/logs (FR-003); **tenant `transport:'stdio'` → ValidationError** (FR-006); cross-tenant access → 404 (SC-003); bindings PUT round-trips.
+- [X] T003 [E2E] [US1] API integration (mocked SSRF/KMS): catalog CRUD tenant-scoped; **POST private-IP url → rejected** (SC-004); secret never in GET/logs (FR-003); **tenant `transport:'stdio'` → ValidationError** (FR-006); cross-tenant access → 404 (SC-003); bindings PUT round-trips.
 
 ### Implementation for User Story 1
-- [ ] T004 [BE] [US1] `routes/mcp-catalog.ts` — `/v1/mcp/catalog` CRUD + `/:id/rescan` + `/v1/assistants/:id/mcp` bindings. Inline Zod, typed `AppError`, `withTenantContext(request.tenantId, …)` (**not** raw header — PR #23 lesson). Encrypt `auth` via 011 KMS; SSRF-validate `url` (011) at POST/PATCH; stdio only for platform-admin. **Validate `name` `^[a-z0-9_-]+$` ≤20 chars** (LLM tool-name limit, gemini F2); `tools_include/exclude` = exact-match (opencode F10). (per mcp-catalog-api.contract.md)
-- [ ] T005 [BE] [US1] Register `mcpCatalogRoutes` in `buildServer()` (after middleware).
+- [X] T004 [BE] [US1] `routes/mcp-catalog.ts` — `/v1/mcp/catalog` CRUD + `/:id/rescan` + `/v1/assistants/:id/mcp` bindings. Inline Zod, typed `AppError`, `withTenantContext(request.tenantId, …)` (**not** raw header — PR #23 lesson). Encrypt `auth` via 011 KMS; SSRF-validate `url` (011) at POST/PATCH; stdio only for platform-admin. **Validate `name` `^[a-z0-9_-]+$` ≤20 chars** (LLM tool-name limit, gemini F2); `tools_include/exclude` = exact-match (opencode F10). (per mcp-catalog-api.contract.md)
+- [X] T005 [BE] [US1] Register `mcpCatalogRoutes` in `buildServer()` (after middleware).
 
 **Checkpoint**: config layer live + tenant-isolated.
 
@@ -50,14 +50,14 @@ description: "Task list — Per-Assistant MCP Servers (014), agent routing + dep
 **Independent Test**: bound MCP's tool appears namespaced, a call routes through `executeTool` (audited/permission), a write-annotated tool runs reserve→execute→finalize, an un-bound server is unreachable.
 
 ### Tests for User Story 2
-- [ ] T006 [E2E] [US2] Broker integration (mocked external MCP): brokered tool surfaces as `mcp_<entry>_<tool>`; call goes through `executeTool` (audit + permission, SC-001); **write-annotated tool → reserve→execute→finalize** (FR-011); `<untrusted_tool_result>` fence preserved (FR-009); un-bound server never reachable.
-- [ ] T007 [E2E] [US2] **Smoke** `mcp-client.ts` against **one real HTTP MCP** (research §a): `initialize`/`tools/list`/`tools/call`. Confirms the hand-rolled client before broad use; failure → escalate to SDK (dep-approval).
+- [X] T006 [E2E] [US2] Broker integration (mocked external MCP): brokered tool surfaces as `mcp_<entry>_<tool>`; call goes through `executeTool` (audit + permission, SC-001); **write-annotated tool → reserve→execute→finalize** (FR-011); `<untrusted_tool_result>` fence preserved (FR-009); un-bound server never reachable.
+- [X] T007 [E2E] [US2] **Smoke** `mcp-client.ts` against **one real HTTP MCP** (research §a): `initialize`/`tools/list`/`tools/call`. Confirms the hand-rolled client before broad use; failure → escalate to SDK (dep-approval).
 
 ### Implementation for User Story 2
-- [ ] T008 [BE] [US2] `mcp-client.ts` — minimal JSON-RPC MCP client (`initialize`/`tools/list`/`tools/call` over HTTP) on the **011 SSRF dispatcher pinned to the resolved IP (not re-resolving hostname** — DNS-rebinding, opencode F1), `timeout_ms` bound, **max response size ~1 MB → abort+degrade** (OOM, gemini F4/opencode F11), decrypted auth headers (011 KMS), typed errors, log redaction.
-- [ ] T009 [BE] [US2] `mcp-broker.ts` — load enabled bindings (**JOIN on `tenant_id`**, not RLS alone — opencode F5) → discover via **TTL cache** (key=entry; no N+1; **multi-entry miss = concurrent `Promise.allSettled`** — gemini F3/opencode F6; invalidate on call-time drift — opencode F8) → apply include/exclude + overrides → synthesize `ToolDefinition`s (namespaced; **un-annotated default = `isWrite:true` write-treatment** — opencode F2) → return for injection.
-- [ ] T010a [BE] [US2] **Inject** brokered tools: extend `mcp-server.ts` (accept brokered tools beside native) + `hermes-executor.ts` (build the broker into the `EngineMcpServer` config at session start). **No second `session/new.mcpServers` entry** (FR-004). *(Split from T010 — WRAP atomicity, opencode F3/analyze F2.)*
-- [ ] T010b [BE] [US2] **External write-treatment**: extend `tool-gateway.ts` so a brokered `isWrite` tool runs the existing reserve→execute→finalize + `action_audit` (010 T015). **Engine-side idempotency only** — document that external mutations aren't guaranteed idempotent (best-effort, gemini F1). (FR-011, CQ3)
+- [X] T008 [BE] [US2] `mcp-client.ts` — minimal JSON-RPC MCP client (`initialize`/`tools/list`/`tools/call` over HTTP) on the **011 SSRF dispatcher pinned to the resolved IP (not re-resolving hostname** — DNS-rebinding, opencode F1), `timeout_ms` bound, **max response size ~1 MB → abort+degrade** (OOM, gemini F4/opencode F11), decrypted auth headers (011 KMS), typed errors, log redaction.
+- [X] T009 [BE] [US2] `mcp-broker.ts` — load enabled bindings (**JOIN on `tenant_id`**, not RLS alone — opencode F5) → discover via **TTL cache** (key=entry; no N+1; **multi-entry miss = concurrent `Promise.allSettled`** — gemini F3/opencode F6; invalidate on call-time drift — opencode F8) → apply include/exclude + overrides → synthesize `ToolDefinition`s (namespaced; **un-annotated default = `isWrite:true` write-treatment** — opencode F2) → return for injection.
+- [X] T010a [BE] [US2] **Inject** brokered tools: extend `mcp-server.ts` (accept brokered tools beside native) + `hermes-executor.ts` (build the broker into the `EngineMcpServer` config at session start). **No second `session/new.mcpServers` entry** (FR-004). *(Split from T010 — WRAP atomicity, opencode F3/analyze F2.)*
+- [X] T010b [BE] [US2] **External write-treatment**: extend `tool-gateway.ts` so a brokered `isWrite` tool runs the existing reserve→execute→finalize + `action_audit` (010 T015). **Engine-side idempotency only** — document that external mutations aren't guaranteed idempotent (best-effort, gemini F1). (FR-011, CQ3)
 
 **Checkpoint**: external tools usable through the gateway, end-to-end.
 
@@ -68,8 +68,8 @@ description: "Task list — Per-Assistant MCP Servers (014), agent routing + dep
 **Goal**: flaky external MCP never breaks turns; no N+1; tenant isolation holds; degradation visible.
 **Independent Test**: kill bound MCP → turn completes degraded; second turn hits discovery cache; cross-tenant broker denied.
 
-- [ ] T011 [BE] [US3] Degrade on unreachable/slow entry (omit its tools + `mcp_broker_degraded{entry}` signal, turn proceeds — FR-007); discovery TTL cache + `rescan` invalidation; per-turn broker-health surface.
-- [ ] T012 [E2E] [US3] Resilience + isolation: MCP down → turn completes (SC-002); discovery ≤1/TTL window (SC-005); persona of tenant B cannot broker tenant A's entry (SC-003).
+- [X] T011 [BE] [US3] Degrade on unreachable/slow entry (omit its tools + `mcp_broker_degraded{entry}` signal, turn proceeds — FR-007); discovery TTL cache + `rescan` invalidation; per-turn broker-health surface.
+- [X] T012 [E2E] [US3] Resilience + isolation: MCP down → turn completes (SC-002); discovery ≤1/TTL window (SC-005); persona of tenant B cannot broker tenant A's entry (SC-003).
 
 **Checkpoint**: safe to run in prod.
 
@@ -77,8 +77,8 @@ description: "Task list — Per-Assistant MCP Servers (014), agent routing + dep
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T013 [SEC] Security review — SSRF at registration AND connect **+ DNS-rebinding test (pin-to-IP)** (opencode F1); auth secrets encrypted + never logged; **gateway = sole authority (0 direct un-brokered calls)**; tenant-match (binding↔entry) + RLS isolation (opencode F5); **tool-name-limit** synthesized ≤64 (gemini F2); `<untrusted_tool_result>` fence; stdio platform-only gate; max-payload OOM guard. (FR-003/004/005/008/009/010/014)
-- [ ] T014 [BE] `npm run validate` + run US1/US2/US3 tests green; confirm no per-turn N+1 (cache verified).
+- [X] T013 [SEC] Security review — SSRF at registration AND connect **+ DNS-rebinding test (pin-to-IP)** (opencode F1); auth secrets encrypted + never logged; **gateway = sole authority (0 direct un-brokered calls)**; tenant-match (binding↔entry) + RLS isolation (opencode F5); **tool-name-limit** synthesized ≤64 (gemini F2); `<untrusted_tool_result>` fence; stdio platform-only gate; max-payload OOM guard. (FR-003/004/005/008/009/010/014)
+- [X] T014 [BE] `npm run validate` + run US1/US2/US3 tests green; confirm no per-turn N+1 (cache verified).
 
 > **Cross-repo (NOT in these tasks)**: catalog + per-assistant MCP admin UI in `ai-twins` (next to 011 llm-provider). Engine exposes the API (T004) it drives.
 
