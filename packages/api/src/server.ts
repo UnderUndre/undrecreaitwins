@@ -15,8 +15,8 @@ import { annotationRoutes } from './routes/annotations.js';
 import { documentRoutes } from './routes/documents.js';
 import { sandboxRoutes } from './routes/sandbox.js';
 import { llmProviderRoutes } from './routes/llm-provider.js';
-// 014: import { mcpCatalogRoutes } from './routes/mcp-catalog.js';
 import { mcpCatalogRoutes } from './routes/mcp-catalog.js';
+import { channelRoutes } from './routes/channels.js';
 import { authPublicPlugin } from './middleware/auth-public.js';
 import { publicModelsRoute } from './routes/v1/openai/models.js';
 import { publicChatRoute } from './routes/v1/openai/chat.js';
@@ -159,6 +159,7 @@ export async function buildServer() {
   await fastify.register(sandboxRoutes);
   await fastify.register(llmProviderRoutes);
   await fastify.register(mcpCatalogRoutes);
+  await fastify.register(channelRoutes);
 
   await fastify.register(async (publicApi) => {
     await publicApi.register(authPublicPlugin);

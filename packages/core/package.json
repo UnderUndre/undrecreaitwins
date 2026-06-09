@@ -58,6 +58,18 @@
       "types": "./dist/services/channel-transport.d.ts",
       "default": "./dist/services/channel-transport.js"
     },
+    "./services/channel-rate-limiter.js": {
+      "types": "./dist/services/channel-rate-limiter.d.ts",
+      "default": "./dist/services/channel-rate-limiter.js"
+    },
+    "./services/webhook-signature.js": {
+      "types": "./dist/services/webhook-signature.d.ts",
+      "default": "./dist/services/webhook-signature.js"
+    },
+    "./services/channel-provisioning.js": {
+      "types": "./dist/services/channel-provisioning.d.ts",
+      "default": "./dist/services/channel-provisioning.js"
+    },
     "./services/retry/provider-retry.worker.js": {
       "types": "./dist/services/retry/provider-retry.worker.d.ts",
       "default": "./dist/services/retry/provider-retry.worker.js"

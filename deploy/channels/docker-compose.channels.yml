@@ -1,0 +1,244 @@
+# Multi-Channel Gateway — Docker Compose
+#
+# Each adapter runs as a separate service/process for independent scaling.
+# Credentials are NOT in this file — use Docker secrets or environment file
+# mounted at runtime (see README.md runbook).
+#
+# Usage:
+#   docker compose -f docker-compose.channels.yml up -d
+#
+# Required environment variables (per adapter):
+#   See each service below for required env vars.
+#   Pass via .env file or Docker secrets.
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # =============================================
+  # Phase 1 Channels (completed)
+  # =============================================
+
+  channel-discord:
+    build:
+      context: ../
+      dockerfile: packages/channel-discord/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-discord.env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-slack:
+    build:
+      context: ../
+      dockerfile: packages/channel-slack/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-slack.env
+    ports:
+      - "3100:3100"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-mattermost:
+    build:
+      context: ../
+      dockerfile: packages/channel-mattermost/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-mattermost.env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-dingtalk:
+    build:
+      context: ../
+      dockerfile: packages/channel-dingtalk/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-dingtalk.env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-feishu:
+    build:
+      context: ../
+      dockerfile: packages/channel-feishu/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-feishu.env
+    ports:
+      - "3103:3103"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-wecom:
+    build:
+      context: ../
+      dockerfile: packages/channel-wecom/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-wecom.env
+    ports:
+      - "3104:3104"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  # =============================================
+  # Phase 2 Channels (medium complexity)
+  # =============================================
+
+  channel-matrix:
+    build:
+      context: ../
+      dockerfile: packages/channel-matrix/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-matrix.env
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-email:
+    build:
+      context: ../
+      dockerfile: packages/channel-email/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-email.env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-sms:
+    build:
+      context: ../
+      dockerfile: packages/channel-sms/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-sms.env
+    ports:
+      - "3101:3101"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-webhooks:
+    build:
+      context: ../
+      dockerfile: packages/channel-webhooks/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-webhooks.env
+    ports:
+      - "3102:3102"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-homeassistant:
+    build:
+      context: ../
+      dockerfile: packages/channel-homeassistant/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-homeassistant.env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+volumes:
+  redis-data:

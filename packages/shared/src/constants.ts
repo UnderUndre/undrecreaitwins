@@ -1,4 +1,18 @@
-export const CHANNEL_TYPES = ['telegram', 'whatsapp_evolution'] as const;
+export const CHANNEL_TYPES = [
+  'telegram',
+  'whatsapp_evolution',
+  'discord',
+  'slack',
+  'mattermost',
+  'dingtalk',
+  'feishu',
+  'wecom',
+  'matrix',
+  'email',
+  'sms',
+  'webhook',
+  'homeassistant',
+] as const;
 
 export const TRAINING_SOURCE_TYPES = ['telegram_json', 'whatsapp_txt', 'generic_jsonl'] as const;
 
