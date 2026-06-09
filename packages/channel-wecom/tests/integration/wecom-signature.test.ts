@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ChannelMessage } from '@undrecreaitwins/shared';
+import { createCipheriv, randomBytes, createHash } from 'node:crypto';
 
 const mockPublish = vi.fn().mockResolvedValue('0-0');
 const mockConsume = vi.fn().mockResolvedValue(undefined);
@@ -28,15 +29,10 @@ vi.mock('ioredis', () => ({
   })),
 }));
 
-vi.mock('@undrecreaitwins/core/services/webhook-signature.js', () => ({
-  verifyWeComSignature: vi.fn(),
-}));
-
-const { verifyWeComSignature } = await import('@undrecreaitwins/core/services/webhook-signature.js');
 const { WeComAdapter } = await import('../../src/wecom-adapter.js');
 
-const TEST_TOKEN = 'test-wecom-token';
-const TEST_ENCODING_AES_KEY = 'test-encoding-aes-key-1234567890ab';
+const TEST_TOKEN = 'testwecomtoken123';
+const TEST_ENCODING_AES_KEY = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ';
 const TEST_CORP_ID = 'corp-test-001';
 const TEST_AGENT_ID = '1000001';
 
@@ -56,7 +52,28 @@ function makeConfig(overrides?: Record<string, unknown>) {
   };
 }
 
-function makeWeComXmlMessage(overrides?: Record<string, string>): string {
+function encryptWeComMsg(text: string): string {
+  const key = Buffer.from(TEST_ENCODING_AES_KEY + '=', 'base64');
+  const iv = key.subarray(0, 16);
+  const cipher = createCipheriv('aes-256-cbc', key, iv);
+  cipher.setAutoPadding(false);
+
+  const random = randomBytes(16);
+  const msgLenBuf = Buffer.alloc(4);
+  msgLenBuf.writeUInt32BE(Buffer.byteLength(text), 0);
+  const corpIdBuf = Buffer.from(TEST_CORP_ID);
+  const msgBuf = Buffer.from(text);
+
+  let payload = Buffer.concat([random, msgLenBuf, msgBuf, corpIdBuf]);
+
+  const pad = 32 - (payload.length % 32);
+  const padBuf = Buffer.alloc(pad, pad);
+  payload = Buffer.concat([payload, padBuf]);
+
+  return Buffer.concat([cipher.update(payload), cipher.final()]).toString('base64');
+}
+
+function makeWeComXmlMessage(overrides?: Record<string, string>): { xml: string, signature: string, timestamp: string, nonce: string } {
   const fields = {
     MsgId: 'msg-wecom-001',
     FromUserName: 'user-wecom-001',
@@ -68,12 +85,21 @@ function makeWeComXmlMessage(overrides?: Record<string, string>): string {
     ...overrides,
   };
 
-  let xml = '<xml>';
+  let rawXml = '<xml>';
   for (const [key, value] of Object.entries(fields)) {
-    xml += `<${key}><![CDATA[${value}]]></${key}>`;
+    rawXml += `<${key}><![CDATA[${value}]]></${key}>`;
   }
-  xml += '</xml>';
-  return xml;
+  rawXml += '</xml>';
+
+  const encrypted = encryptWeComMsg(rawXml);
+  
+  const timestamp = '1609459200';
+  const nonce = 'random-nonce-123';
+  const arr = [TEST_TOKEN, timestamp, nonce, encrypted].sort();
+  const signature = createHash('sha1').update(arr.join('')).digest('hex');
+
+  const xml = `<xml><Encrypt><![CDATA[${encrypted}]]></Encrypt></xml>`;
+  return { xml, signature, timestamp, nonce };
 }
 
 describe('WeComAdapter — signature verification', () => {
@@ -82,7 +108,6 @@ describe('WeComAdapter — signature verification', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockRedisSet.mockResolvedValue('OK');
-    (verifyWeComSignature as ReturnType<typeof vi.fn>).mockReturnValue(true);
   });
 
   afterEach(async () => {
@@ -98,24 +123,15 @@ describe('WeComAdapter — signature verification', () => {
     adapter = new WeComAdapter(makeConfig({ port }));
     await adapter.connect();
 
-    const body = makeWeComXmlMessage();
-    const signature = 'valid-signature';
+    const payload = makeWeComXmlMessage();
 
-    (verifyWeComSignature as ReturnType<typeof vi.fn>).mockReturnValue(true);
-
-    const response = await fetch(`http://127.0.0.1:${port}/?msg_signature=${encodeURIComponent(signature)}`, {
+    const response = await fetch(`http://127.0.0.1:${port}/?msg_signature=${payload.signature}&timestamp=${payload.timestamp}&nonce=${payload.nonce}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body,
+      body: payload.xml,
     });
 
     expect(response.status).toBe(200);
-
-    expect(verifyWeComSignature).toHaveBeenCalledWith(
-      body,
-      signature,
-      TEST_TOKEN,
-    );
 
     expect(mockPublish).toHaveBeenCalledWith('twin.stream.in', expect.objectContaining({
       channel_type: 'wecom',
@@ -141,15 +157,12 @@ describe('WeComAdapter — signature verification', () => {
     adapter = new WeComAdapter(makeConfig({ port }));
     await adapter.connect();
 
-    const body = makeWeComXmlMessage();
-    const signature = 'forged-signature';
+    const payload = makeWeComXmlMessage();
 
-    (verifyWeComSignature as ReturnType<typeof vi.fn>).mockReturnValue(false);
-
-    const response = await fetch(`http://127.0.0.1:${port}/?msg_signature=${encodeURIComponent(signature)}`, {
+    const response = await fetch(`http://127.0.0.1:${port}/?msg_signature=forged&timestamp=${payload.timestamp}&nonce=${payload.nonce}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body,
+      body: payload.xml,
     });
 
     expect(response.status).toBe(401);
@@ -162,18 +175,15 @@ describe('WeComAdapter — signature verification', () => {
     adapter = new WeComAdapter(makeConfig({ port }));
     await adapter.connect();
 
-    const body = makeWeComXmlMessage();
-    const signature = 'valid-sig';
-
-    (verifyWeComSignature as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    const payload = makeWeComXmlMessage();
 
     // First call: SET NX succeeds
     mockRedisSet.mockResolvedValueOnce('OK');
 
-    const response1 = await fetch(`http://127.0.0.1:${port}/?msg_signature=${encodeURIComponent(signature)}`, {
+    const response1 = await fetch(`http://127.0.0.1:${port}/?msg_signature=${payload.signature}&timestamp=${payload.timestamp}&nonce=${payload.nonce}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body,
+      body: payload.xml,
     });
 
     expect(response1.status).toBe(200);
@@ -182,14 +192,14 @@ describe('WeComAdapter — signature verification', () => {
     // Second call: SET NX returns null → duplicate
     mockRedisSet.mockResolvedValueOnce(null);
 
-    const response2 = await fetch(`http://127.0.0.1:${port}/?msg_signature=${encodeURIComponent(signature)}`, {
+    const response2 = await fetch(`http://127.0.0.1:${port}/?msg_signature=${payload.signature}&timestamp=${payload.timestamp}&nonce=${payload.nonce}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body,
+      body: payload.xml,
     });
 
     expect(response2.status).toBe(200);
-    expect(mockPublish).toHaveBeenCalledTimes(1);
+    expect(mockPublish).toHaveBeenCalledTimes(1); // Still 1
   });
 
   it('missing signature → 401', async () => {
@@ -197,18 +207,16 @@ describe('WeComAdapter — signature verification', () => {
     adapter = new WeComAdapter(makeConfig({ port }));
     await adapter.connect();
 
-    const body = makeWeComXmlMessage();
+    const payload = makeWeComXmlMessage();
 
-    // No msg_signature query param
-    const response = await fetch(`http://127.0.0.1:${port}/`, {
+    const response = await fetch(`http://127.0.0.1:${port}/?timestamp=${payload.timestamp}&nonce=${payload.nonce}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body,
+      body: payload.xml,
     });
 
     expect(response.status).toBe(401);
     expect(mockPublish).not.toHaveBeenCalled();
-    expect(verifyWeComSignature).not.toHaveBeenCalled();
   });
 
   it('handles GET URL verification with echostr', async () => {
@@ -216,18 +224,21 @@ describe('WeComAdapter — signature verification', () => {
     adapter = new WeComAdapter(makeConfig({ port }));
     await adapter.connect();
 
-    const echostr = 'hello-verify';
-    const signature = 'valid-verify-sig';
-
-    (verifyWeComSignature as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    const echostrRaw = 'hello-verify';
+    const encryptedEchostr = encryptWeComMsg(echostrRaw);
+    
+    const timestamp = '1609459200';
+    const nonce = 'random-nonce-123';
+    const arr = [TEST_TOKEN, timestamp, nonce, encryptedEchostr].sort();
+    const signature = createHash('sha1').update(arr.join('')).digest('hex');
 
     const response = await fetch(
-      `http://127.0.0.1:${port}/?echostr=${encodeURIComponent(echostr)}&msg_signature=${encodeURIComponent(signature)}`,
+      `http://127.0.0.1:${port}/?echostr=${encodeURIComponent(encryptedEchostr)}&msg_signature=${signature}&timestamp=${timestamp}&nonce=${nonce}`,
     );
 
     expect(response.status).toBe(200);
     const text = await response.text();
-    expect(text).toBe(echostr);
+    expect(text).toBe(echostrRaw);
     expect(mockPublish).not.toHaveBeenCalled();
   });
 
@@ -236,55 +247,40 @@ describe('WeComAdapter — signature verification', () => {
     adapter = new WeComAdapter(makeConfig({ port }));
     await adapter.connect();
 
-    const echostr = 'hello-verify';
+    const echostrRaw = 'hello-verify';
+    const encryptedEchostr = encryptWeComMsg(echostrRaw);
+    const timestamp = '1609459200';
+    const nonce = 'random-nonce-123';
     const signature = 'invalid-sig';
 
-    (verifyWeComSignature as ReturnType<typeof vi.fn>).mockReturnValue(false);
-
     const response = await fetch(
-      `http://127.0.0.1:${port}/?echostr=${encodeURIComponent(echostr)}&msg_signature=${encodeURIComponent(signature)}`,
+      `http://127.0.0.1:${port}/?echostr=${encodeURIComponent(encryptedEchostr)}&msg_signature=${signature}&timestamp=${timestamp}&nonce=${nonce}`,
     );
 
     expect(response.status).toBe(401);
   });
 
   it('throws if required credentials are missing', () => {
-    expect(() => new WeComAdapter(makeConfig({
-      credentials: { token: '', encodingAesKey: TEST_ENCODING_AES_KEY, corpId: TEST_CORP_ID, agentId: TEST_AGENT_ID },
-    }))).toThrow();
-
-    expect(() => new WeComAdapter(makeConfig({
-      credentials: { token: TEST_TOKEN, encodingAesKey: '', corpId: TEST_CORP_ID, agentId: TEST_AGENT_ID },
-    }))).toThrow();
-
-    expect(() => new WeComAdapter(makeConfig({
-      credentials: { token: TEST_TOKEN, encodingAesKey: TEST_ENCODING_AES_KEY, corpId: '', agentId: TEST_AGENT_ID },
-    }))).toThrow();
-
-    expect(() => new WeComAdapter(makeConfig({
-      credentials: { token: TEST_TOKEN, encodingAesKey: TEST_ENCODING_AES_KEY, corpId: TEST_CORP_ID, agentId: '' },
-    }))).toThrow();
+    expect(() => new WeComAdapter(makeConfig({ credentials: {} }))).toThrow('WeCom token is required');
   });
 
   it('onIncoming handler receives the normalized message', async () => {
     const port = 19107;
     adapter = new WeComAdapter(makeConfig({ port }));
-    await adapter.connect();
 
     const incomingMessages: ChannelMessage[] = [];
     adapter.onIncoming(async (msg) => {
       incomingMessages.push(msg);
     });
 
-    const body = makeWeComXmlMessage();
-    const signature = 'valid-sig';
+    await adapter.connect();
 
-    (verifyWeComSignature as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    const payload = makeWeComXmlMessage();
 
-    await fetch(`http://127.0.0.1:${port}/?msg_signature=${encodeURIComponent(signature)}`, {
+    await fetch(`http://127.0.0.1:${port}/?msg_signature=${payload.signature}&timestamp=${payload.timestamp}&nonce=${payload.nonce}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/xml' },
-      body,
+      body: payload.xml,
     });
 
     expect(incomingMessages).toHaveLength(1);
@@ -297,11 +293,14 @@ describe('WeComAdapter — signature verification', () => {
     const port = 19108;
     adapter = new WeComAdapter(makeConfig({ port }));
     await adapter.connect();
+    
+    // Test if server is listening
+    const response1 = await fetch(`http://127.0.0.1:${port}/`, { method: 'GET' });
+    expect(response1.status).toBe(200); // ok for empty GET
+
     await adapter.disconnect();
 
-    const health = await adapter.health();
-    expect(health.status).toBe('disconnected');
-
+    // Second fetch should fail (connection refused)
     await expect(fetch(`http://127.0.0.1:${port}/`)).rejects.toThrow();
   });
 

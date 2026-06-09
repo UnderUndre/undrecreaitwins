@@ -1,5 +1,32 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createDecipheriv } from 'node:crypto';
 import type { ChannelAdapter, ChannelMessage, ChannelHealth, ChannelStatus } from '@undrecreaitwins/shared';
+
+function decryptWeComMsg(encryptedMsg: string, encodingAesKey: string, corpId: string): { msg: string, corpId: string } {
+  const key = Buffer.from(encodingAesKey + '=', 'base64');
+  const iv = key.subarray(0, 16);
+  const decipher = createDecipheriv('aes-256-cbc', key, iv);
+  decipher.setAutoPadding(false);
+
+  let decrypted = Buffer.concat([decipher.update(Buffer.from(encryptedMsg, 'base64')), decipher.final()]);
+
+  const pad = decrypted[decrypted.length - 1];
+  if (pad !== undefined && pad >= 1 && pad <= 32) {
+    decrypted = decrypted.subarray(0, decrypted.length - pad);
+  } else {
+    throw new Error('Invalid PKCS7 padding');
+  }
+
+  const msgLen = decrypted.readUInt32BE(16);
+  const msg = decrypted.subarray(20, 20 + msgLen).toString('utf8');
+  const actualCorpId = decrypted.subarray(20 + msgLen).toString('utf8');
+
+  if (actualCorpId !== corpId) {
+    throw new Error(`CorpId mismatch: expected ${corpId}, got ${actualCorpId}`);
+  }
+
+  return { msg, corpId: actualCorpId };
+}
 import { AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
 import { ChannelTransport, type StreamMessage } from '@undrecreaitwins/core/services/channel-transport.js';
 import { channelRateLimiter } from '@undrecreaitwins/core/services/channel-rate-limiter.js';
@@ -121,16 +148,25 @@ export class WeComAdapter implements ChannelAdapter {
     if (req.method === 'GET') {
       const echostr = extractQueryParam(url, 'echostr');
       const msgSignature = extractQueryParam(url, 'msg_signature');
+      const timestamp = extractQueryParam(url, 'timestamp');
+      const nonce = extractQueryParam(url, 'nonce');
 
-      if (echostr && msgSignature) {
-        const valid = verifyWeComSignature(echostr, msgSignature, this.credentials.token);
+      if (echostr && msgSignature && timestamp && nonce) {
+        const valid = verifyWeComSignature(this.credentials.token, timestamp, nonce, echostr, msgSignature);
         if (!valid) {
           res.writeHead(401, { 'Content-Type': 'text/plain' });
           res.end('Invalid signature');
           return;
         }
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end(echostr);
+        try {
+          const decrypted = decryptWeComMsg(echostr, this.credentials.encodingAesKey, this.credentials.corpId);
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          res.end(decrypted.msg);
+        } catch (err) {
+          logger.error({ err }, 'Failed to decrypt echostr');
+          res.writeHead(401, { 'Content-Type': 'text/plain' });
+          res.end('Decrypt error');
+        }
         return;
       }
 
@@ -149,16 +185,29 @@ export class WeComAdapter implements ChannelAdapter {
 
     // WeCom signature is in query params for POST as well
     const msgSignature = extractQueryParam(url, 'msg_signature');
+    const timestamp = extractQueryParam(url, 'timestamp');
+    const nonce = extractQueryParam(url, 'nonce');
 
-    // Signature verification — MUST happen before any publish
-    if (!msgSignature) {
-      logger.warn({ channelId: this.channelId }, 'Missing msg_signature from WeCom webhook');
+    if (!msgSignature || !timestamp || !nonce) {
+      logger.warn({ channelId: this.channelId }, 'Missing query parameters from WeCom webhook');
       res.writeHead(401, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Missing signature' }));
+      res.end(JSON.stringify({ error: 'Missing parameters' }));
       return;
     }
 
-    const valid = verifyWeComSignature(body, msgSignature, this.credentials.token);
+    const encryptMatch = body.match(/<Encrypt><!\[CDATA\[(.*?)\]\]><\/Encrypt>/)
+      ?? body.match(/<Encrypt>(.*?)<\/Encrypt>/);
+    const encryptMsg = encryptMatch?.[1];
+
+    if (!encryptMsg) {
+      logger.warn({ channelId: this.channelId }, 'Missing Encrypt block in WeCom webhook');
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing Encrypt block' }));
+      return;
+    }
+
+    // Signature verification — MUST happen before any publish
+    const valid = verifyWeComSignature(this.credentials.token, timestamp, nonce, encryptMsg, msgSignature);
     if (!valid) {
       logger.warn({ channelId: this.channelId }, 'Invalid WeCom webhook signature');
       res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -166,8 +215,16 @@ export class WeComAdapter implements ChannelAdapter {
       return;
     }
 
-    // Parse XML message
-    const parsed = parseXmlMessage(body);
+    let parsed: WeComXmlMessage;
+    try {
+      const decrypted = decryptWeComMsg(encryptMsg, this.credentials.encodingAesKey, this.credentials.corpId);
+      parsed = parseXmlMessage(decrypted.msg);
+    } catch (err) {
+      logger.error({ err, channelId: this.channelId }, 'Failed to decrypt WeCom POST body');
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Decrypt error' }));
+      return;
+    }
 
     if (!parsed.msgId || !parsed.fromUserName) {
       res.writeHead(200, { 'Content-Type': 'text/plain' });

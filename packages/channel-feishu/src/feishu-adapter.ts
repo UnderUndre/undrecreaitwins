@@ -14,7 +14,8 @@ const IDEMPOTENCY_TTL_SECONDS = 300;
 interface FeishuCredentials {
   verificationToken: string;
   encryptKey: string;
-  botToken?: string;
+  appId: string;
+  appSecret: string;
 }
 
 interface FeishuConfig {
@@ -24,6 +25,11 @@ interface FeishuConfig {
   redisUrl?: string;
   port?: number;
   credentials: FeishuCredentials;
+}
+
+interface CachedToken {
+  token: string;
+  expiresAt: number;
 }
 
 interface FeishuEvent {
@@ -72,6 +78,7 @@ export class FeishuAdapter implements ChannelAdapter {
   private _status: ChannelStatus = 'disconnected';
   private server: Server | null = null;
   private incomingHandler?: (message: ChannelMessage) => Promise<void>;
+  private cachedToken: CachedToken | null = null;
 
   constructor(config: FeishuConfig) {
     if (!config.credentials?.verificationToken) {
@@ -79,6 +86,12 @@ export class FeishuAdapter implements ChannelAdapter {
     }
     if (!config.credentials?.encryptKey) {
       throw new AppError('Feishu encryptKey is required', 400, 'INVALID_CREDENTIALS');
+    }
+    if (!config.credentials?.appId) {
+      throw new AppError('Feishu appId is required', 400, 'INVALID_CREDENTIALS');
+    }
+    if (!config.credentials?.appSecret) {
+      throw new AppError('Feishu appSecret is required', 400, 'INVALID_CREDENTIALS');
     }
 
     this.transport = new ChannelTransport(config.redisUrl);
@@ -267,16 +280,44 @@ export class FeishuAdapter implements ChannelAdapter {
     this.incomingHandler = handler;
   }
 
-  async send(message: ChannelMessage): Promise<void> {
-    const botToken = this.credentials.botToken;
-    if (!botToken) {
-      logger.warn({ channelId: this.channelId }, 'No Feishu bot token configured for sending');
-      return;
+  private async getTenantAccessToken(): Promise<string> {
+    if (this.cachedToken && this.cachedToken.expiresAt > Date.now() + 60_000) {
+      return this.cachedToken.token;
     }
 
+    const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_id: this.credentials.appId,
+        app_secret: this.credentials.appSecret,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Failed to fetch Feishu token: ${response.status} ${errText}`);
+    }
+
+    const data = await response.json() as { code: number; msg: string; tenant_access_token?: string; expire?: number };
+    
+    if (data.code !== 0 || !data.tenant_access_token) {
+      throw new Error(`Feishu token error ${data.code}: ${data.msg}`);
+    }
+
+    this.cachedToken = {
+      token: data.tenant_access_token,
+      expiresAt: Date.now() + (data.expire ?? 7200) * 1000,
+    };
+
+    return this.cachedToken.token;
+  }
+
+  async send(message: ChannelMessage): Promise<void> {
     const chatId = message.metadata?.['chatId'] as string ?? message.externalUserId;
 
     try {
+      const botToken = await this.getTenantAccessToken();
       const body = JSON.stringify({
         receive_id: chatId,
         msg_type: 'text',

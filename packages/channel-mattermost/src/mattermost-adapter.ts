@@ -3,6 +3,7 @@ import { AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
 import { ChannelTransport, type StreamMessage } from '@undrecreaitwins/core/services/channel-transport.js';
 import { channelRateLimiter } from '@undrecreaitwins/core/services/channel-rate-limiter.js';
 import pino from 'pino';
+import WebSocket from 'ws';
 import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 
@@ -67,16 +68,16 @@ export class MattermostAdapter implements ChannelAdapter {
         resolve();
       });
 
-      this.ws.addEventListener('message', (event: MessageEvent) => {
-        this.handleWsMessage(event).catch((err) => {
+      this.ws.addEventListener('message', (event) => {
+        this.handleWsMessage(event as any).catch((err) => {
           logger.error({ err }, 'Error handling Mattermost WebSocket message');
         });
       });
 
-      this.ws.addEventListener('error', (event: Event) => {
-        logger.error({ err: (event as ErrorEvent).message }, 'Mattermost WebSocket error');
+      this.ws.addEventListener('error', (event: any) => {
+        logger.error({ err: event.message }, 'Mattermost WebSocket error');
         this._status = 'error';
-        reject(new Error(`Mattermost WebSocket error: ${(event as ErrorEvent).message}`));
+        reject(new Error(`Mattermost WebSocket error: ${event.message}`));
       });
 
       this.ws.addEventListener('close', () => {
@@ -143,7 +144,7 @@ export class MattermostAdapter implements ChannelAdapter {
         persona_slug: this.personaSlug,
         content: message.content,
         tenant_id: this.tenantId,
-        external_user_id: message.externalUserId,
+        external_user_id: (parsedPost['channel_id'] as string) ?? '',
       });
 
       if (this.incomingHandler) {
@@ -206,7 +207,7 @@ export class MattermostAdapter implements ChannelAdapter {
   }
 
   async send(message: ChannelMessage): Promise<void> {
-    const channelId = (message.metadata?.['channelId'] as string) ?? '';
+    const channelId = (message.metadata?.['channelId'] as string) ?? message.externalUserId;
 
     const payload = JSON.stringify({
       channel_id: channelId,

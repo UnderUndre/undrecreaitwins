@@ -48,6 +48,8 @@ function makeConfig(overrides?: Record<string, unknown>) {
     credentials: {
       verificationToken: TEST_VERIFICATION_TOKEN,
       encryptKey: TEST_ENCRYPT_KEY,
+      appId: 'test-app-id',
+      appSecret: 'test-app-secret',
     },
     ...overrides,
   };
@@ -146,7 +148,7 @@ describe('FeishuAdapter — signature verification', () => {
       channel_id: 'ch-feishu-001',
       message_id: 'msg-001',
       persona_slug: 'test-persona',
-      content: '{"text":"Hello from Feishu"}',
+      content: 'Hello from Feishu',
       tenant_id: 'tenant-001',
       external_user_id: 'user-open-001',
     }));
@@ -342,9 +344,68 @@ describe('FeishuAdapter — signature verification', () => {
     await adapter.connect();
 
     const response = await fetch(`http://127.0.0.1:${port}/`, {
-      method: 'PUT',
+      method: 'GET',
     });
 
     expect(response.status).toBe(405);
   });
-});
+
+  it('auto-refreshes token after expiry during send', async () => {
+    const port = 19089;
+    adapter = new FeishuAdapter(makeConfig({ port }));
+
+    // Mock the global fetch
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ code: 0, msg: 'ok', tenant_access_token: 'token-1', expire: 2 }), // 2 seconds
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => '{"code":0,"msg":"success"}',
+    });
+
+    global.fetch = fetchMock;
+
+    await adapter.send({
+      id: 'test',
+      channelId: 'ch-feishu-001',
+      externalUserId: 'user-001',
+      content: 'hello',
+      timestamp: new Date(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2); // token + send
+
+    // Advance time by 3 seconds
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(3000);
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ code: 0, msg: 'ok', tenant_access_token: 'token-2', expire: 2 }), // new token
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      text: async () => '{"code":0,"msg":"success"}',
+    });
+
+    await adapter.send({
+      id: 'test2',
+      channelId: 'ch-feishu-001',
+      externalUserId: 'user-001',
+      content: 'hello again',
+      timestamp: new Date(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4); // token(refreshed) + send
+
+    // Ensure the 3rd call (token refresh) was made
+    expect(fetchMock.mock.calls[2]?.[0]).toContain('tenant_access_token/internal');
+    expect(fetchMock.mock.calls[3]?.[0]).toContain('im/v1/messages');
+    expect(fetchMock.mock.calls[3]?.[1]?.headers?.Authorization).toBe('Bearer token-2');
+
+    vi.useRealTimers();
+    global.fetch = global.fetch; // restore
+  });
+  });

@@ -100,7 +100,15 @@ export const channelRoutes: FastifyPluginAsync = async (fastify) => {
     const cached = await healthRedis.get(cacheKey);
     if (cached) {
       try {
-        return JSON.parse(cached);
+        const parsed = JSON.parse(cached);
+        // Revive lastPingAt → Date (JSON.parse yields a string, breaking ChannelHealth) — gemini
+        if (parsed.channels) {
+          for (const chId of Object.keys(parsed.channels)) {
+            const ch = parsed.channels[chId];
+            if (ch.lastPingAt) ch.lastPingAt = new Date(ch.lastPingAt);
+          }
+        }
+        return parsed;
       } catch {
         logger.warn({ tenantId }, 'Failed to parse cached health aggregation, recomputing');
       }

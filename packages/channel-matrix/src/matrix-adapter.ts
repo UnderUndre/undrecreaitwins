@@ -101,7 +101,7 @@ export class MatrixAdapter implements ChannelAdapter {
       persona_slug: this.personaSlug,
       content: message.content,
       tenant_id: this.tenantId,
-      external_user_id: message.externalUserId,
+      external_user_id: event.room_id as string,
     };
 
     await this.transport.publish(REDIS_STREAMS.INBOUND, publishPayload);

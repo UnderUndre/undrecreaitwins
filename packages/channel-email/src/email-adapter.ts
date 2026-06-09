@@ -5,6 +5,7 @@ import { channelRateLimiter } from '@undrecreaitwins/core/services/channel-rate-
 import pino from 'pino';
 import nodemailer from 'nodemailer';
 import { ImapFlow, type ImapFlowOptions } from 'imapflow';
+import { simpleParser } from 'mailparser';
 
 const logger = pino({ name: 'email-adapter' });
 
@@ -143,29 +144,41 @@ export class EmailAdapter implements ChannelAdapter {
   }
 
   private async startImapIdle(): Promise<void> {
-    const lock = await this.imapClient.getMailboxLock('INBOX');
+    // Acquire lock only for initial fetch, release BEFORE entering idle
+    let lock;
     try {
-      // Fetch initial unseen messages
+      lock = await this.imapClient.getMailboxLock('INBOX');
       await this.fetchAndProcessUnseen();
-
-      // Set up event-driven new message detection
-      this.imapClient.on('exists', async (data) => {
-        if (data.path === 'INBOX') {
-          logger.debug({ channelId: this.channelId, count: data.count }, 'IMAP exists event received');
-          await this.fetchAndProcessUnseen();
-        }
-      });
-
-      this.imapClient.on('error', (err) => {
-        logger.error({ err, channelId: this.channelId }, 'IMAP client error');
-        this._status = 'error';
-      });
-
-      // Enter idle — this keeps the connection alive and waits for server pushes
-      // The idle() call resolves when the connection is closed or an error occurs
-      await this.imapClient.idle();
     } finally {
-      lock.release();
+      lock?.release();
+    }
+
+    // Set up event-driven new message detection (each fetch acquires/releases its own lock)
+    this.imapClient.on('exists', async (data) => {
+      if (data.path === 'INBOX') {
+        logger.debug({ channelId: this.channelId, count: data.count }, 'IMAP exists event received');
+        await this.fetchWithLock();
+      }
+    });
+
+    this.imapClient.on('error', (err) => {
+      logger.error({ err, channelId: this.channelId }, 'IMAP client error');
+      this._status = 'error';
+    });
+
+    // Enter idle OUTSIDE the lock — prevents deadlock on disconnect/logout
+    await this.imapClient.idle();
+  }
+
+  private async fetchWithLock(): Promise<void> {
+    let lock;
+    try {
+      lock = await this.imapClient.getMailboxLock('INBOX');
+      await this.fetchAndProcessUnseen();
+    } catch (err) {
+      logger.error({ err, channelId: this.channelId }, 'Failed to fetch with lock');
+    } finally {
+      lock?.release();
     }
   }
 
@@ -202,7 +215,7 @@ export class EmailAdapter implements ChannelAdapter {
     const messageId = msg.envelope?.messageId ?? `imap-${msg.uid ?? Date.now()}`;
     const fromAddress = msg.envelope?.from?.[0]?.address ?? 'unknown@unknown';
     const subject = msg.envelope?.subject ?? '(no subject)';
-    const bodyText = this.extractTextBody(msg.source);
+    const bodyText = await this.extractTextBody(msg.source);
 
     const content = subject.length > 0 ? `${subject}\n\n${bodyText}` : bodyText;
 
@@ -236,21 +249,18 @@ export class EmailAdapter implements ChannelAdapter {
     }
   }
 
-  private extractTextBody(source: Buffer | undefined): string {
+  private async extractTextBody(source: Buffer | undefined): Promise<string> {
     if (!source) return '';
-    const raw = source.toString('utf-8');
 
-    // Attempt to extract plain text part from MIME
-    const textPartMatch = raw.match(/Content-Type:\s*text\/plain[\s\S]*?\r?\n\r?\n([\s\S]*?)(?=\r?\n--|\r?\nContent-Type:|$)/i);
-    if (textPartMatch?.[1]) {
-      let text = textPartMatch[1];
-      // Handle quoted-printable
-      text = text.replace(/=\r?\n/g, '');
-      text = text.replace(/=([0-9A-Fa-f]{2})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
-      return text.trim();
+    try {
+      const parsed = await simpleParser(source);
+      const text = parsed.text ?? '';
+      if (text.length > 0) return text.trim();
+    } catch (err) {
+      logger.debug({ err, channelId: this.channelId }, 'mailparser failed, falling back to raw extraction');
     }
 
-    // Fallback: try to get anything after headers
+    const raw = source.toString('utf-8');
     const headerEnd = raw.indexOf('\r\n\r\n');
     if (headerEnd !== -1) {
       return raw.substring(headerEnd + 4).trim();

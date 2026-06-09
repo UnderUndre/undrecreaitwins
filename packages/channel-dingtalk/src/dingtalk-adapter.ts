@@ -4,7 +4,7 @@ import { ChannelTransport, type StreamMessage } from '@undrecreaitwins/core/serv
 import { channelRateLimiter } from '@undrecreaitwins/core/services/channel-rate-limiter.js';
 import pino from 'pino';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { createHmac } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 
@@ -156,7 +156,11 @@ export class DingTalkAdapter implements ChannelAdapter {
     const hash = createHmac('sha256', this.aesKey ?? this.appSecret)
       .update(stringToSign)
       .digest('base64');
-    return hash === sign;
+    // Constant-time compare — avoid timing attacks (gemini, security)
+    const hashBuf = Buffer.from(hash, 'utf8');
+    const signBuf = Buffer.from(sign, 'utf8');
+    if (hashBuf.length !== signBuf.length) return false;
+    return timingSafeEqual(hashBuf, signBuf);
   }
 
   private readBody(req: IncomingMessage): Promise<string> {
@@ -203,7 +207,14 @@ export class DingTalkAdapter implements ChannelAdapter {
       mod(url, (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (chunk: Buffer) => chunks.push(chunk));
-        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+        res.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8');
+          if (res.statusCode !== undefined && (res.statusCode < 200 || res.statusCode >= 300)) {
+            reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+            return;
+          }
+          resolve(body);
+        });
       }).on('error', reject).end();
     });
   }
@@ -224,7 +235,14 @@ export class DingTalkAdapter implements ChannelAdapter {
         (res) => {
           const chunks: Buffer[] = [];
           res.on('data', (chunk: Buffer) => chunks.push(chunk));
-          res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+          res.on('end', () => {
+            const body = Buffer.concat(chunks).toString('utf8');
+            if (res.statusCode !== undefined && (res.statusCode < 200 || res.statusCode >= 300)) {
+              reject(new Error(`HTTP ${res.statusCode}: ${body}`));
+              return;
+            }
+            resolve(body);
+          });
         },
       );
       req.on('error', reject);

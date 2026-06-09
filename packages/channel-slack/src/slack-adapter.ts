@@ -89,8 +89,8 @@ export class SlackAdapter implements ChannelAdapter {
     if (payload['type'] === 'event_callback') {
       const event = payload['event'] as Record<string, unknown> | undefined;
       if (event && event['type'] === 'message') {
-        // Ignore bot messages
-        if (event['bot_id'] || event['subtype'] === 'bot_message') {
+        // Ignore bot messages + unsupported subtypes (edits, deletes, joins) — gemini
+        if (event['bot_id'] || event['subtype'] === 'bot_message' || (event['subtype'] && event['subtype'] !== 'file_share')) {
           res.writeHead(200).end();
           return;
         }
@@ -114,7 +114,7 @@ export class SlackAdapter implements ChannelAdapter {
           persona_slug: this.personaSlug,
           content: message.content,
           tenant_id: this.tenantId,
-          external_user_id: message.externalUserId,
+          external_user_id: (event['channel'] as string) ?? '',
         });
 
         if (this.incomingHandler) {

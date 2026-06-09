@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual, createHash } from 'node:crypto';
 import pino from 'pino';
 
 const logger = pino({ name: 'webhook-signature' });
@@ -57,11 +57,16 @@ export function verifyFeishuSignature(
 }
 
 export function verifyWeComSignature(
-  body: string,
+  token: string,
+  timestamp: string,
+  nonce: string,
+  encryptedMsg: string,
   signature: string,
-  secret: string,
 ): boolean {
-  return verifySignature(body, signature, secret);
+  const arr = [token, timestamp, nonce, encryptedMsg].sort();
+  const str = arr.join('');
+  const hash = createHash('sha1').update(str).digest('hex');
+  return safeCompare(hash, signature);
 }
 
 export function verifyGenericWebhookSignature(

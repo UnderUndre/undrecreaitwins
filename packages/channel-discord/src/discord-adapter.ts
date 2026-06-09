@@ -103,7 +103,7 @@ export class DiscordAdapter implements ChannelAdapter {
       persona_slug: this.personaSlug,
       content: message.content,
       tenant_id: this.tenantId,
-      external_user_id: message.externalUserId,
+      external_user_id: msg.channelId,
     };
 
     if (attachments.length > 0) {
@@ -187,7 +187,7 @@ export class DiscordAdapter implements ChannelAdapter {
 
   async send(message: ChannelMessage): Promise<void> {
     try {
-      const channel = await this.client.channels.fetch(message.metadata?.['channelId'] as string ?? '');
+      const channel = await this.client.channels.fetch((message.metadata?.['channelId'] as string) ?? message.externalUserId);
       if (!channel?.isSendable()) {
         logger.warn({ externalUserId: message.externalUserId }, 'Discord channel not found or not sendable');
         return;
