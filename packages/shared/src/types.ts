@@ -70,14 +70,37 @@ export interface ChannelInstance {
   personaId: string;
   channelType: ChannelType;
   config: Record<string, unknown>;
+  credentialsCiphertext?: string;
+  kmsKeyRef?: string;
   status: ChannelStatus;
   lastHealthCheckAt?: Date;
   createdAt: Date;
 }
 
-export type ChannelType = 'telegram' | 'whatsapp_evolution';
+export type ChannelType =
+  | 'telegram'
+  | 'whatsapp_evolution'
+  | 'discord'
+  | 'slack'
+  | 'mattermost'
+  | 'dingtalk'
+  | 'feishu'
+  | 'wecom'
+  | 'matrix'
+  | 'email'
+  | 'sms'
+  | 'webhook'
+  | 'homeassistant';
 
 export type ChannelStatus = 'active' | 'degraded' | 'disconnected' | 'error';
+
+export interface ChannelAttachment {
+  kind: 'image' | 'audio' | 'video' | 'file';
+  url?: string;
+  bytes?: Buffer;
+  mime: string;
+  filename?: string;
+}
 
 export interface ChannelMessage {
   id: string;
@@ -86,6 +109,9 @@ export interface ChannelMessage {
   content: string;
   metadata?: Record<string, unknown>;
   timestamp: Date;
+  attachments?: ChannelAttachment[];
+  typing?: boolean;
+  replyAnchor?: { externalMessageId: string };
 }
 
 export interface ChannelHealth {

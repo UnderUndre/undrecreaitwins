@@ -44,7 +44,7 @@ export interface RetryJobPayload {
   /** Conversation ID — for calling ChatService.complete */
   conversationId: string;
   /** Channel type */
-  channelType: 'telegram' | 'whatsapp';
+  channelType: string;
   /** Channel chat ID (externalUserId) */
   chatId: string;
   /** Peer ID (e.g. for logging) */

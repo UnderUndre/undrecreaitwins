@@ -3,8 +3,13 @@ import { conversations, followupAttempts, followupRules } from '../../models/ind
 import { eq } from 'drizzle-orm';
 import { ChannelTransport } from '../channel-transport.js';
 import { REDIS_STREAMS } from '@undrecreaitwins/shared';
+import { ValidatorPipeline } from '../validators/pipeline.js';
+import { LLMClient } from '../llm-client.js';
+import pino from 'pino';
 
+const logger = pino({ name: 'reengagement-delivery' });
 const transport = new ChannelTransport();
+const validatorPipeline = new ValidatorPipeline(new LLMClient());
 
 export class ReengagementDelivery {
   async deliver(attemptId: string): Promise<void> {
@@ -35,11 +40,22 @@ export class ReengagementDelivery {
       throw new Error(`No assistant message found for conversation ${convo.id}`);
     }
 
-    // 3. Construct payload
+    const validatedContent = await validatorPipeline.validateResponse(
+      lastMessage.content,
+      {
+        tenantId: attempt.tenantId,
+        personaId: convo.personaId,
+        conversationId: convo.id,
+        messageId: attempt.id,
+      },
+    );
+
+    logger.info({ attemptId, conversationId: convo.id }, 'Reengagement content validated');
+
     const payload = {
       channel_id: convo.channelId || '',
       external_user_id: convo.externalUserId,
-      content: lastMessage.content,
+      content: validatedContent,
       tenant_id: attempt.tenantId,
       message_id: attempt.id,
       is_reengagement: 'true'

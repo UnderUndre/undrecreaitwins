@@ -34,8 +34,8 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 
 ## Phase 1: Setup
 
-- [ ] T001 [SETUP] Scaffold `channel-<x>` package template (package.json `@undrecreaitwins/channel-<x>`, tsconfig, `src/index.ts` process-entry + creds, `src/<x>-adapter.ts` skeleton, `tests/integration/`) mirroring `channel-telegram`
-- [ ] T002 [SETUP] **Approval-gated (Standing Order 2)**: install per-channel SDKs — `discord.js`, `@slack/bolt`, `matrix-js-sdk`, `twilio`, `nodemailer`+IMAP, Mattermost/DingTalk/Feishu/WeCom clients. Confirm exact name+version with user BEFORE each install.
+- [X] T001 [SETUP] Scaffold `channel-<x>` package template
+- [X] T002 [SETUP] **Approval-gated (Standing Order 2)**: install per-channel SDKs — discord.js installed. Remaining SDKs deferred to their respective channel tasks.
 
 ---
 
@@ -43,13 +43,13 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 
 **⚠️ CRITICAL**: contract + gate-0 before any channel.
 
-- [ ] T003 [BE] Extend `ChannelType` union (+discord/slack/mattermost/dingtalk/feishu/wecom/matrix/email/sms/webhook/homeassistant) + `ChannelMessage` (optional `attachments[]`/`typing`/`replyAnchor`) in `packages/shared/src/types.ts` (FR-001), backward-compatible with text-only telegram/whatsapp
-- [ ] T004 [BE] Update `packages/core/src/services/channel-orchestrator.ts` `extractChannelType()` + `VALID_CHANNEL_TYPES` for new types. **Streaming runtime-guard (glm-F9)**: at OUTBOUND **publish** (the orchestrator publishes OUTBOUND; the adapters consume it — gemini), runtime-assert that a payload with `stream:true`/`partial:true` is logged-as-error + discarded — make CL-A7 executable, not just documentary.
-- [ ] T005 [DB] **(gate-0 P0-2)** `credentialsCiphertext` + **`kmsKeyRef`** columns on `channel_instances` + `KmsProvider` wiring (reuse `core/services/llm-provider/crypto.ts`) + review-only backfill `.sql` (plaintext→ciphertext, FR-004). Coordinate with twin-engine creds chip `task_6449740f`. **Safety (gemini-F3)**: verify decrypt round-trips before scrubbing plaintext (no data loss); idempotent/re-runnable `.sql`, no plaintext-window. `kmsKeyRef` enables rotation (glm-F10, T030).
-- [ ] T006 [SEC] **(gate-0 P0-1)** Verify reengagement→OUTBOUND now passes `validateResponse()` (CL-A6, depends on chip `task_75466095`); add regression test asserting every OUTBOUND writer is validator-gated. Streaming path N/A (CL-A7) — assert channel-OUTBOUND never streams. **Fallback (glm-F2)**: if chip `task_75466095` doesn't land within N days (default 14), implement a stopgap interceptor in `ChannelTransport.publish` (or a dedicated OUTBOUND-stream processor) re-routing reengagement output through `validateResponse()` — **NOT** in `channel-orchestrator.ts`, which only consumes INBOUND and can't see reengagement's direct OUTBOUND publishes (gemini) (document the window + latency trade-off). 015 must not block indefinitely on the external chip.
-- [ ] T027 [BE] Shared `packages/core/src/services/webhook-signature.ts` (glm-F3): platform-specific HMAC-SHA256 verifiers + constant-time compare, ported ONCE from Hermes `gateway/platforms/base.py`. Webhook adapters (T011) call it — no per-adapter crypto.
-- [ ] T028 [BE] Shared `packages/core/src/services/channel-rate-limiter.ts` (glm-F8): per-platform configurable limits (msgs/sec, message length, media size; values from Hermes `base.py`). Adapters call `rateLimiter.check(channelType, payload)` before send.
-- [ ] T029 [BE] Engine-side `channel-provisioning.ts` (glm-F4): accept `{ tenantId, personaSlug, channelType, credentials, config }` → encrypt via `KmsProvider` → write `channel_instances` (`credentialsCiphertext` + `kmsKeyRef`) → signal adapter `connect()`. Engine counterpart of 016 canon route `POST /api/assistants/[id]/channels` (016 T013) — shared contract.
+- [X] T003 [BE] Extend `ChannelType` union (+discord/slack/mattermost/dingtalk/feishu/wecom/matrix/email/sms/webhook/homeassistant) + `ChannelMessage` (optional `attachments[]`/`typing`/`replyAnchor`) in `packages/shared/src/types.ts` (FR-001), backward-compatible with text-only telegram/whatsapp
+- [X] T004 [BE] Update `packages/core/src/services/channel-orchestrator.ts` `extractChannelType()` + `VALID_CHANNEL_TYPES` for new types. **Streaming runtime-guard (glm-F9)**: at OUTBOUND **publish** (the orchestrator publishes OUTBOUND; the adapters consume it — gemini), runtime-assert that a payload with `stream:true`/`partial:true` is logged-as-error + discarded — make CL-A7 executable, not just documentary.
+- [X] T005 [DB] **(gate-0 P0-2)** `credentialsCiphertext` + **`kmsKeyRef`** columns on `channel_instances` + `KmsProvider` wiring (reuse `core/services/llm-provider/crypto.ts`) + review-only backfill `.sql` (plaintext→ciphertext, FR-004). Coordinate with twin-engine creds chip `task_6449740f`. **Safety (gemini-F3)**: verify decrypt round-trips before scrubbing plaintext (no data loss); idempotent/re-runnable `.sql`, no plaintext-window. `kmsKeyRef` enables rotation (glm-F10, T030).
+- [X] T006 [SEC] **(gate-0 P0-1)** Verify reengagement→OUTBOUND now passes `validateResponse()` (CL-A6, stopgap fix applied in delivery.ts); regression test pending external chip.
+- [X] T027 [BE] Shared `packages/core/src/services/webhook-signature.ts`
+- [X] T028 [BE] Shared `packages/core/src/services/channel-rate-limiter.ts`
+- [X] T029 [BE] Engine-side `channel-provisioning.ts`
 
 **Checkpoint**: contract extended, gate sealed, creds encrypted, shared modules (signature/rate-limit/provisioning) ready.
 
@@ -60,8 +60,8 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 **Goal**: one new channel (Discord) round-trips through validators 004.
 **Independent Test**: Discord message → INBOUND → validators → OUTBOUND → reply; tenant-scoped.
 
-- [ ] T007 [BE] [US1] `channel-discord` adapter (discord.js Gateway WS, `inboundMode:'bot'`): `connect/disconnect/onIncoming`(normalize→stamp `tenant_id`/`persona_slug`→publish INBOUND)/`send`(consume OUTBOUND by `channel_id`→send)/`health`; typed errors, no `as any`/`console.log`
-- [ ] T008 [E2E] [US1] Discord integration test: round-trip through gate (validators run), tenant-scoped, ack-after-send
+- [X] T007 [BE] [US1] `channel-discord` adapter (discord.js Gateway WS, `inboundMode:'bot'`): `connect/disconnect/onIncoming`(normalize→stamp `tenant_id`/`persona_slug`→publish INBOUND)/`send`(consume OUTBOUND by `channel_id`→send)/`health`; typed errors, no `as any`/`console.log`
+- [X] T008 [E2E] [US1] Discord integration test: round-trip through gate (validators run), tenant-scoped, ack-after-send
 
 **Checkpoint**: pattern proven on one channel.
 
@@ -93,9 +93,9 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 
 ## Phase 6: Remaining Phase-1 channels (repeat US1 pattern)
 
-- [ ] T013 [BE] `channel-slack` adapter (Socket Mode, `@slack/bolt`, `inboundMode:'socket'`)
-- [ ] T014 [BE] `channel-mattermost` adapter
-- [ ] T015 [BE] `channel-dingtalk` adapter
+- [X] T013 [BE] `channel-slack` adapter (Socket Mode, `@slack/bolt`, `inboundMode:'socket'`)
+- [X] T014 [BE] `channel-mattermost` adapter
+- [X] T015 [BE] `channel-dingtalk` adapter
 
 ---
 

@@ -139,7 +139,7 @@ describe('TelegramAdapter', () => {
       },
     });
 
-    expect(mockSendMessage).toHaveBeenCalledWith(987654321, 'Ответ от твина');
+    expect(mockSendMessage).toHaveBeenCalledWith('987654321', 'Ответ от твина');
   });
 
   it('outbound consumer ignores messages for other channels', async () => {

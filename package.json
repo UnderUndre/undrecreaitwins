@@ -26,7 +26,9 @@
     "tsx": "^4.22.3"
   },
   "dependencies": {
+    "discord.js": "^14.26.4",
     "drizzle-orm": "^0.45.2",
+    "pino": "^9.6.0",
     "undici": "6.21.1"
   }
 }
