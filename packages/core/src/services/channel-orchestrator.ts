@@ -8,10 +8,13 @@ import { isRetryableProviderError, enqueueProviderRetry } from './retry/provider
 const logger = pino({ name: 'channel-orchestrator' });
 const chatService = new ChatService();
 
-const VALID_CHANNEL_TYPES = new Set(['telegram', 'whatsapp']);
+const VALID_CHANNEL_TYPES = new Set<string>([
+  'telegram', 'whatsapp_evolution', 'discord', 'slack', 'mattermost',
+  'dingtalk', 'feishu', 'wecom', 'matrix', 'email', 'sms', 'webhook', 'homeassistant',
+]);
 
-function extractChannelType(raw: string | undefined): 'telegram' | 'whatsapp' {
-  if (raw && VALID_CHANNEL_TYPES.has(raw)) return raw as 'telegram' | 'whatsapp';
+function extractChannelType(raw: string | undefined): string {
+  if (raw && VALID_CHANNEL_TYPES.has(raw)) return raw;
   return 'telegram';
 }
 
@@ -22,6 +25,16 @@ export class ChannelOrchestrator {
   constructor(redisUrl?: string) {
     this.transport = new ChannelTransport(redisUrl);
     this.dedupRedis = new Redis(redisUrl || process.env.REDIS_URL || 'redis://localhost:6379');
+  }
+
+  private assertNotStreaming(payload: Record<string, string>): void {
+    if ('stream' in payload || 'partial' in payload) {
+      logger.error(
+        { channel_id: payload['channel_id'], message_id: payload['message_id'] },
+        'CL-A7 guard: OUTBOUND payload contains stream/partial flag — discarded',
+      );
+      throw new AppError('OUTBOUND must not contain stream/partial flags', 500, 'STREAMING_OUTBOUND_BLOCKED');
+    }
   }
 
   async start(consumerName: string): Promise<void> {
@@ -50,14 +63,21 @@ export class ChannelOrchestrator {
           });
 
           const replyContent = response.choices[0]?.message?.content ?? '';
-          await this.transport.publish(REDIS_STREAMS.OUTBOUND, {
+          const outPayload: Record<string, string> = {
             channel_id,
             message_id,
             reply_to: message_id,
             content: replyContent,
             tenant_id,
             external_user_id,
-          });
+          };
+
+          if (d['attachments_json']) {
+            outPayload.attachments_json = d['attachments_json'];
+          }
+
+          this.assertNotStreaming(outPayload);
+          await this.transport.publish(REDIS_STREAMS.OUTBOUND, outPayload);
         } catch (err) {
           if (isRetryableProviderError(err) && err instanceof AppError) {
             const conversationId = err.context.conversationId;
@@ -103,13 +123,15 @@ export class ChannelOrchestrator {
             );
           }
 
-          await this.transport.publish(REDIS_STREAMS.OUTBOUND, {
+          const errPayload: Record<string, string> = {
             channel_id,
             message_id,
             reply_to: message_id,
             error: 'processing_failed',
             tenant_id,
-          });
+          };
+          this.assertNotStreaming(errPayload);
+          await this.transport.publish(REDIS_STREAMS.OUTBOUND, errPayload);
         }
       },
     );

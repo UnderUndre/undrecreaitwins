@@ -8,6 +8,8 @@ export const channelInstances = pgTable(
     personaId: uuid('persona_id').notNull(),
     channelType: text('channel_type').notNull(),
     config: jsonb('config').notNull().$type<Record<string, unknown>>(),
+    credentialsCiphertext: text('credentials_ciphertext'),
+    kmsKeyRef: text('kms_key_ref'),
     status: text('status').notNull().default('disconnected'),
     lastHealthCheckAt: timestamp('last_health_check_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

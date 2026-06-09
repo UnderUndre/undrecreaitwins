@@ -14,3 +14,5 @@ Thumbs.db
 coverage/
 *.tsbuildinfo
 drizzle/meta/
+.run-hermes.ps1
+.hermes-prompt.txt

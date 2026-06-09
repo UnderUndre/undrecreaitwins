@@ -1,0 +1,19 @@
+# Generic Dockerfile for channel adapters
+# Build from monorepo root: docker build -f packages/channel-<name>/Dockerfile -t twin-channel-<name> .
+#
+# Prerequisites: pnpm build must have been run for the package.
+
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Copy package files
+COPY package.json ./
+COPY dist/ ./dist/
+
+# Copy workspace dependencies (shared, core)
+COPY node_modules/ ./node_modules/
+
+ENV NODE_ENV=production
+
+CMD ["node", "dist/index.js"]
