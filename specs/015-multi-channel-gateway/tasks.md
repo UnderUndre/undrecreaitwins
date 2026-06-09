@@ -44,12 +44,12 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 **⚠️ CRITICAL**: contract + gate-0 before any channel.
 
 - [ ] T003 [BE] Extend `ChannelType` union (+discord/slack/mattermost/dingtalk/feishu/wecom/matrix/email/sms/webhook/homeassistant) + `ChannelMessage` (optional `attachments[]`/`typing`/`replyAnchor`) in `packages/shared/src/types.ts` (FR-001), backward-compatible with text-only telegram/whatsapp
-- [ ] T004 [BE] Update `packages/core/src/services/channel-orchestrator.ts` `extractChannelType()` + `VALID_CHANNEL_TYPES` for new types. **Streaming runtime-guard (glm-F9)**: in the OUTBOUND consumer, runtime-assert that a payload with `stream:true`/`partial:true` is logged-as-error + discarded — make CL-A7 executable, not just documentary.
-- [ ] T005 [DB] **(gate-0 P0-2)** `credentialsCiphertext` + **`kmsKeyVersion`** columns on `channel_instances` + `KmsProvider` wiring (reuse `core/services/llm-provider/crypto.ts`) + review-only backfill `.sql` (plaintext→ciphertext, FR-004). Coordinate with twin-engine creds chip `task_6449740f`. **Safety (gemini-F3)**: verify decrypt round-trips before scrubbing plaintext (no data loss); idempotent/re-runnable `.sql`, no plaintext-window. `kmsKeyVersion` enables rotation (glm-F10, T030).
-- [ ] T006 [SEC] **(gate-0 P0-1)** Verify reengagement→OUTBOUND now passes `validateResponse()` (CL-A6, depends on chip `task_75466095`); add regression test asserting every OUTBOUND writer is validator-gated. Streaming path N/A (CL-A7) — assert channel-OUTBOUND never streams. **Fallback (glm-F2)**: if chip `task_75466095` doesn't land within N days (default 14), implement a stopgap OUTBOUND interceptor in `channel-orchestrator.ts` re-routing reengagement output through `validateResponse()` (document the window + latency trade-off). 015 must not block indefinitely on the external chip.
+- [ ] T004 [BE] Update `packages/core/src/services/channel-orchestrator.ts` `extractChannelType()` + `VALID_CHANNEL_TYPES` for new types. **Streaming runtime-guard (glm-F9)**: at OUTBOUND **publish** (the orchestrator publishes OUTBOUND; the adapters consume it — gemini), runtime-assert that a payload with `stream:true`/`partial:true` is logged-as-error + discarded — make CL-A7 executable, not just documentary.
+- [ ] T005 [DB] **(gate-0 P0-2)** `credentialsCiphertext` + **`kmsKeyRef`** columns on `channel_instances` + `KmsProvider` wiring (reuse `core/services/llm-provider/crypto.ts`) + review-only backfill `.sql` (plaintext→ciphertext, FR-004). Coordinate with twin-engine creds chip `task_6449740f`. **Safety (gemini-F3)**: verify decrypt round-trips before scrubbing plaintext (no data loss); idempotent/re-runnable `.sql`, no plaintext-window. `kmsKeyRef` enables rotation (glm-F10, T030).
+- [ ] T006 [SEC] **(gate-0 P0-1)** Verify reengagement→OUTBOUND now passes `validateResponse()` (CL-A6, depends on chip `task_75466095`); add regression test asserting every OUTBOUND writer is validator-gated. Streaming path N/A (CL-A7) — assert channel-OUTBOUND never streams. **Fallback (glm-F2)**: if chip `task_75466095` doesn't land within N days (default 14), implement a stopgap interceptor in `ChannelTransport.publish` (or a dedicated OUTBOUND-stream processor) re-routing reengagement output through `validateResponse()` — **NOT** in `channel-orchestrator.ts`, which only consumes INBOUND and can't see reengagement's direct OUTBOUND publishes (gemini) (document the window + latency trade-off). 015 must not block indefinitely on the external chip.
 - [ ] T027 [BE] Shared `packages/core/src/services/webhook-signature.ts` (glm-F3): platform-specific HMAC-SHA256 verifiers + constant-time compare, ported ONCE from Hermes `gateway/platforms/base.py`. Webhook adapters (T011) call it — no per-adapter crypto.
 - [ ] T028 [BE] Shared `packages/core/src/services/channel-rate-limiter.ts` (glm-F8): per-platform configurable limits (msgs/sec, message length, media size; values from Hermes `base.py`). Adapters call `rateLimiter.check(channelType, payload)` before send.
-- [ ] T029 [BE] Engine-side `channel-provisioning.ts` (glm-F4): accept `{ tenantId, personaSlug, channelType, credentials, config }` → encrypt via `KmsProvider` → write `channel_instances` (`credentialsCiphertext` + `kmsKeyVersion`) → signal adapter `connect()`. Engine counterpart of 016 canon route `POST /api/assistants/[id]/channels` (016 T013) — shared contract.
+- [ ] T029 [BE] Engine-side `channel-provisioning.ts` (glm-F4): accept `{ tenantId, personaSlug, channelType, credentials, config }` → encrypt via `KmsProvider` → write `channel_instances` (`credentialsCiphertext` + `kmsKeyRef`) → signal adapter `connect()`. Engine counterpart of 016 canon route `POST /api/assistants/[id]/channels` (016 T013) — shared contract.
 
 **Checkpoint**: contract extended, gate sealed, creds encrypted, shared modules (signature/rate-limit/provisioning) ready.
 
@@ -117,7 +117,7 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 - [ ] T024 [BE] Per-adapter idempotency-on-redelivery tests (R6)
 - [ ] T025 [OPS] Per-channel consumer-process deploy config (scale like telegram) + per-tenant creds provisioning runbook
 - [ ] T026 [DOC] "Add a new channel" onboarding doc in twin-engine (5-method contract + stamping + inbound-mode)
-- [ ] T030 [OPS] Zero-downtime credential rotation flow `rotateChannelCredentials(channelId, newCreds)` (glm-F10/gemini-F6): re-encrypt with new KMS key → update `channel_instances.kmsKeyVersion` → signal adapter disconnect/reconnect (new conns use new secret, old drain). Depends on ciphertext column (T005).
+- [ ] T030 [OPS] Zero-downtime credential rotation flow `rotateChannelCredentials(channelId, newCreds)` (glm-F10/gemini-F6): re-encrypt with new KMS key → update `channel_instances.kmsKeyRef` → signal adapter disconnect/reconnect (new conns use new secret, old drain). Depends on ciphertext column (T005).
 
 ---
 
@@ -134,7 +134,7 @@ T006 → T007
 T007 → T008, T009
 T009 → T010
 T011 → T012
-T003 + T004 + T005 + T006 → T013, T014, T015, T016, T017, T018, T019, T020
+T003 + T004 + T005 + T006 → T011, T013, T014, T015, T016, T017, T018, T019, T020
 T007 → T021, T025, T026
 T008 + T010 + T012 → T023
 T013 + T016 → T022
@@ -172,6 +172,7 @@ graph LR
     T009 --> T010
     T011 --> T012
     T003 & T004 & T005 & T006 --> T013
+    T003 & T004 & T005 & T006 --> T011
     T013 & T016 --> T022
     T008 & T010 & T012 --> T023
     T007 --> T021

@@ -27,7 +27,7 @@ Existing: `config: jsonb` (holds creds **plaintext** — gap). **P0-2/FR-004 cha
 | Field | Type | Note |
 | --- | --- | --- |
 | `credentialsCiphertext` | text/bytea | encrypted creds via `KmsProvider` (mirror `llm_provider_config.apiKeyCiphertext`) |
-| `kmsKeyVersion` | string/int | KMS key version used — enables rotation without ambiguity (glm-F10) |
+| `kmsKeyRef` | text | KMS key reference (`KmsEnvelopeResult.keyRef`, mirrors 011 `apiKeyCiphertext`+`keyRef`) — enables rotation without ambiguity (glm-F10, gemini) |
 | `config` (jsonb) | — | keep ONLY non-secret display/config; secrets move to ciphertext |
 
 **Migration (Standing Order 5 — review .sql, no auto-exec)**: add column + backfill existing
@@ -54,6 +54,6 @@ by adapter (FR-008). Webhook adapters carry signature secret + verifier.
 
 - Webhook inbound: verify signature via shared `webhook-signature.ts` (HMAC-SHA256 + constant-time, glm-F3) BEFORE INBOUND publish; invalid → discard + log (FR-006). Idempotency: Redis `seen:<channel>:<message_id>` SET NX + TTL drops redelivered webhooks (gemini-F4).
 - Platform limits encoded via shared `channel-rate-limiter.ts` (per-platform msgs/sec, length, media-size; glm-F8) — adapters call `rateLimiter.check()` before send; values ported from Hermes `base.py`. (Telegram UTF-16, WhatsApp 24h window, LINE 60s token.)
-- Creds: never in env, never plaintext at rest, never logged (Standing Order 4 / FR-004); rotation re-encrypts + reconnects, `kmsKeyVersion` tracks key (glm-F10).
+- Creds: never in env, never plaintext at rest, never logged (Standing Order 4 / FR-004); rotation re-encrypts + reconnects, `kmsKeyRef` tracks key (glm-F10).
 - `health()` returns `ChannelHealth` (`active|degraded|disconnected|error`) — surfaced per-channel + aggregated `GET /api/channels/health` (`{ channels, overall }`, tenant-scoped, ~30s poll cached in Redis; glm-F7) (FR-005).
 - OUTBOUND consumer: runtime-assert no `stream:true`/`partial:true` payload (CL-A7 executable, glm-F9); adapter crash before send → `XPENDING` idle-timeout (`XPENDING_IDLE_MS` default 5 min) redelivery, monitor pending > threshold (glm-F5).

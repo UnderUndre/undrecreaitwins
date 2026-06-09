@@ -135,7 +135,7 @@ WeCom/Feishu/MS Graph → верификация подписи входящег
   `llm_provider_config.apiKeyCiphertext`) — сейчас креды лежат **plaintext** в
   `config` jsonb (existing gap, мигрировать). **Ротация (glm-F10/gemini-F6)**: flow
   `rotateChannelCredentials` — re-encrypt новым KMS-ключом + reconnect адаптера без даунтайма;
-  `kmsKeyVersion`-колонка трекает версию ключа.
+  `kmsKeyRef`-колонка трекает ссылку на ключ (как 011 `keyRef`).
 - **FR-005** Per-channel health() + статус в API (наследует ChannelHealth). Агрегирующий
   `GET /api/channels/health` → `{ channels: Record<channelId, ChannelHealth>, overall:
   'healthy'|'degraded'|'down' }`, tenant-scoped; health собирается поллингом (~30s) + кэш в Redis (glm-F7).

@@ -41,9 +41,11 @@ Adapter sends only its `channel_id`; acks after platform send confirms (no-loss)
 deduped upstream. **Crash-window (glm-F5)**: if the adapter dies after consume but before `send`,
 XACK never fires → the message sits in `XPENDING` until idle-timeout (`XPENDING_IDLE_MS`, default
 5 min) → redelivered to another consumer. Crash within the send-window = delayed delivery, NOT
-loss; monitor pending > threshold. **Guard (CL-A7, executable, glm-F9)**: the OUTBOUND consumer in
-`channel-orchestrator.ts` runtime-asserts no `stream:true`/`partial:true` payload — log error +
-discard (not just a documentary guard); never stream partial tokens to a channel.
+loss; monitor pending > threshold. **Guard (CL-A7, executable, glm-F9)**: the streaming guard runs at
+OUTBOUND **publish** in `channel-orchestrator.ts` **and** in each adapter's OUTBOUND consumer — note the
+orchestrator is the OUTBOUND *publisher* (INBOUND consumer); the **adapters** are the OUTBOUND consumers
+(gemini). Either point runtime-asserts no `stream:true`/`partial:true` payload — log error + discard (not
+just a documentary guard); never stream partial tokens to a channel.
 
 ## health() → ChannelHealth
 
@@ -62,7 +64,7 @@ Never from env, never logged (FR-004 / Standing Order 4).
 Channels are provisioned via an engine-side flow `channel-provisioning.ts` (NOT ad-hoc CLI args
 like `channel-telegram --bot-token`): accept `{ tenantId, personaSlug, channelType, credentials,
 config }` → encrypt creds via `KmsProvider` → write `channel_instances` (`credentialsCiphertext`
-+ `kmsKeyVersion`) → signal adapter `connect()`. This is the engine counterpart of the 016 canon
++ `kmsKeyRef`) → signal adapter `connect()`. This is the engine counterpart of the 016 canon
 route `POST /api/assistants/[id]/channels` (016 T013) — they share this contract.
 
 ## Rate-limit (glm-F8)
@@ -75,5 +77,5 @@ duplicated per adapter.
 ## Rotation (glm-F10)
 
 `rotateChannelCredentials(channelId, newCreds)`: re-encrypt with the new KMS key → update
-`channel_instances` (`kmsKeyVersion`) → signal adapter disconnect/reconnect so new connections
+`channel_instances` (`kmsKeyRef`) → signal adapter disconnect/reconnect so new connections
 use the new secret while old ones drain. Zero-downtime rotation for a compromised key.
