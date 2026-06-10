@@ -16,9 +16,18 @@ Existing: `{ id, channelId, externalUserId, content, metadata?, timestamp }`.
 ## ChannelType (extend union — `packages/shared/src/types.ts`)
 
 Existing: `'telegram' \| 'whatsapp_evolution'`. **Add (Phase 1)**: `discord`, `slack`,
-`mattermost`, `dingtalk`, `feishu`, `wecom`. **(Phase 2)**: `matrix`, `email`, `sms`,
-`webhook`, `homeassistant`. Update `channel-orchestrator.ts` `extractChannelType()` allow-set
-+ `VALID_CHANNEL_TYPES`.
+`mattermost`, `dingtalk`, `feishu`, `wecom`, **`vk`**. **(Phase 2)**: `matrix`, `email`, `sms`,
+`webhook`, `homeassistant`, **`avito`**. Update `channel-orchestrator.ts` `extractChannelType()`
+allow-set + `VALID_CHANNEL_TYPES`.
+
+**RU/CIS-каналы (CL-A8/A9):**
+- **`vk`** — Community Bot API, `messages.send`, community-токен. `inboundMode: 'bot'`
+  **(v1 = Bots Long Poll, паритет с telegram, без публичной URL; B1)**. Callback API/webhook —
+  отложен на потом. Только community/group; userbot запрещён (ToS).
+- **`avito`** — Messenger API (`api.avito.ru`, OAuth Bearer, scope `messenger:write`).
+  `inboundMode: 'webhook'` (Webhook V3, эндпоинт обязан вернуть `200` за ≤2s). Per-tenant
+  business-доступ (client_id/secret). Рейт-лимит из заголовков `X-RateLimit-*` →
+  `channel-rate-limiter.ts`.
 
 ## channel_instances (extend — `packages/core/src/models/channel-instances.ts`)
 
@@ -36,13 +45,17 @@ verify decrypt round-trips ДО scrub plaintext (no-data-loss); миграция
 
 ## INBOUND payload (existing, per `channel-orchestrator.ts`)
 
-`{ channel_id, message_id, persona_slug, content, tenant_id, external_user_id, channel_type? }`.
-Adapters stamp `tenant_id`+`persona_slug` (held per-instance). Extend with attachment refs for media.
+`{ channel_id, message_id, persona_slug, content, tenant_id, external_user_id, channel_type?, attachments? }`.
+Adapters stamp `tenant_id`+`persona_slug` (held per-instance). **`attachments?` (glm-F15, T009)**:
+адаптеры (Discord/Slack/Email) уже извлекают вложения inbound, но оркестратор сейчас прокидывает
+только `content` — метаданные вложений теряются между inbound- и outbound-адаптером. T009 ОБЯЗАН
+протащить `attachments?` через INBOUND **и** OUTBOUND payload (иначе media US2 заблокирована).
 
 ## OUTBOUND payload (existing)
 
-`{ channel_id, message_id, reply_to, content, tenant_id, external_user_id }` | `{…, error }`.
-Adapter consumes filtered by `channel_id`, sends, acks after success (R6).
+`{ channel_id, message_id, reply_to, content, tenant_id, external_user_id, attachments? }` | `{…, error }`.
+Adapter consumes filtered by `channel_id`, sends, acks after success (R6). `attachments?` симметрично
+INBOUND (glm-F15/T009) — для media-out (US2).
 
 ## Per-adapter config (per channel package)
 

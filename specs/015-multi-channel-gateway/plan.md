@@ -5,18 +5,20 @@
 
 ## ⚠️ Cross-repo note (read first)
 
-Spec/plan artifacts live in **`ai-twins/specs/015-…`**, but the implementation target is the
+Spec/plan artifacts **перенесены в `undrecreaitwins/specs/015-…`** (re-home выполнен 2026-06-09;
+analyze/clarify прогнаны здесь). Implementation target — тот же
 **twin-engine** repo: `C:\Users\Admin\Documents\Repos\underhelpers\under-ai-helpers\undrecreaitwins`
 (TypeScript, pnpm, scope `@undrecreaitwins/*`). All `packages/channel-*`, `packages/core`,
 `packages/shared` paths below are in **twin-engine**, not ai-twins. **Decision (2026-06-09,
-user-approved): RE-HOME** this feature's spec tree to `undrecreaitwins/specs/015-…` before
-`/speckit.implement` (Principle IX: implementation branch must live in the repo that holds the
-code). The cross-repo git move is executed by the user; artifact content here is prepared for it.
-After the move, create the `015-…` planning branch in twin-engine.
+user-approved): RE-HOME выполнен** — spec tree теперь в `undrecreaitwins/specs/015-…`
+(Principle IX: implementation branch must live in the repo that holds the code). **ОСТАЁТСЯ
+(F3)**: создать `015-multi-channel-gateway` planning-ветку в twin-engine перед `/speckit.implement`.
+analyze/clarify прогнаны через `SPECIFY_FEATURE` на ветке `main` — это допустимо для read/clarify,
+но implement обязан идти с feature-ветки.
 
 ## Summary
 
-Расширить охват каналов твина с 2 (`telegram`, `whatsapp_evolution`) до Phase1+2 (~11),
+Расширить охват каналов твина с 2 (`telegram`, `whatsapp_evolution`) до Phase1+2 (~13, вкл. VK/Avito),
 портируя протоколы Hermes (Python `gateway/platforms/*.py`) как **референс** в новые TS-пакеты
 `@undrecreaitwins/channel-<platform>`. Архитектура **уже есть** и переиспользуется как есть:
 контракт `ChannelAdapter` (`connect/disconnect/onIncoming/send/health`), `ChannelMessage`,
@@ -47,15 +49,17 @@ publish, Hermes = справочник протокольных квирков. 
 **Primary Dependencies**: ioredis (Redis Streams), drizzle (channel_instances), `KmsProvider`
 (`core/services/llm-provider/crypto.ts`), grammy (telegram ref). Existing: `@undrecreaitwins/{core,shared,channel-telegram,channel-whatsapp,channel-telegram-mtproto}`.
 **New per-channel deps (approval-gated, Standing Order 2)**: `discord.js` (Discord Gateway WS),
-`@slack/bolt` (Socket Mode), Mattermost/DingTalk/Feishu/WeCom SDKs or thin HTTP clients,
-`matrix-js-sdk`, `nodemailer`+IMAP (email), `twilio` (SMS). Confirm each name/version before install.
+Slack — webhook (Events API + HMAC, raw HTTP / bolt HTTP-mode, НЕ Socket — CL-A13), Mattermost/DingTalk/Feishu/WeCom SDKs or thin HTTP clients,
+`matrix-js-sdk`, `nodemailer`+IMAP (email), `twilio` (SMS), **VK** (`node-vk-bot-api` ИЛИ тонкий
+HTTP-клиент для Long Poll/Callback + `messages.send`), **Avito** (тонкий HTTP-клиент `api.avito.ru`
++ OAuth Bearer; webhook V3). Confirm each name/version before install.
 **Storage**: Postgres via drizzle (`channel_instances` + new ciphertext column); Redis (streams + dedup).
 **Testing**: vitest (per-package unit + integration, как `channel-telegram/tests/integration`).
 **Target Platform**: Linux; each adapter = standalone consumer process (scales like telegram).
 **Project Type**: Backend service / monorepo packages (twin-engine).
 **Performance/Constraints**: per-tenant isolation (zero cross-tenant); креды encrypted at-rest;
 adapter fail → status 'error', не роняет движок; Redis Streams ack (no loss/dup on rebalance).
-**Scale/Scope**: Phase1 = 6 каналов, Phase2 = 5; +contract extension (ChannelMessage attachments/
+**Scale/Scope**: Phase1 = 7 каналов (+VK), Phase2 = 6 (+Avito); +contract extension (ChannelMessage attachments/
 typing/reply-anchor) + ciphertext column + inbound-mode (bot/socket vs webhook).
 
 ## Constitution Check
@@ -64,9 +68,9 @@ typing/reply-anchor) + ciphertext column + inbound-mode (bot/socket vs webhook).
 | --- | --- |
 | **VI** Cross-AI Review Gate | ⏳ после tasks (analyze + ≥2 external) |
 | **VII** Artifact Versioning | ✅ snapshot plan/tasks |
-| **IX** Two-Phase branch | 🟡 **decided (2026-06-09, user-approved)**: RE-HOME spec tree → `undrecreaitwins/specs/015-…`; git move pending (user executes). После переноса — создать `015-…` planning-ветку в twin-engine. (Снимает (b) код-в-другом-репо; остаётся (a) — завести ветку в twin-engine.) |
+| **IX** Two-Phase branch | 🟡 **re-home выполнен** (spec tree в `undrecreaitwins/specs/015-…`). Остаётся (F3): завести `015-…` planning-ветку в twin-engine перед implement (сейчас `main`). |
 | Governance §4 (complexity) | ✅ оправдано: переиспользуем существующий контракт/оркестратор; новые пакеты = тот же паттерн, что telegram |
-| **DD-HX-001 / FR-003 sole gate** | 🔴 **нарушен сегодня** (CL-A6 reengagement) → Gate-0 P0-1 чинит до масштабирования |
+| **DD-HX-001 / FR-003 sole gate** | ✅ **RESOLVED in code (verified 2026-06-09)**: `reengagement/delivery.ts:43` → `validateResponse()` ПЕРЕД `publish(OUTBOUND)` (:65); чистая реализация, не стопгэп (glm-F2, gem-F1). Чип `task_75466095` больше не блокирует 015. Остаётся regression-тест (T023). |
 
 **Gate verdict: PASS с флагами** — gate-0 prerequisites (P0-1/P0-2) + ветка/репо (IX) +
 per-channel dep approvals. Ни одного артефакт-дефекта.
@@ -87,13 +91,15 @@ packages/core/src/services/
 packages/core/src/models/
 └── channel-instances.ts      # P0-2: + credentialsCiphertext колонка (drizzle migration, review .sql)
 packages/channel-discord/     # НОВЫЙ — ChannelAdapter (discord.js Gateway WS)
-packages/channel-slack/       # НОВЫЙ — Socket Mode (@slack/bolt)
+packages/channel-slack/       # НОВЫЙ — webhook (Events API + HMAC, один эндпоинт по team_id; CL-A13/glm-F18)
 packages/channel-mattermost/  # НОВЫЙ
 packages/channel-dingtalk/    # НОВЫЙ
 packages/channel-feishu/      # НОВЫЙ (webhook + signature)
 packages/channel-wecom/       # НОВЫЙ (webhook + signature)
+packages/channel-vk/          # НОВЫЙ — VK Community Bot API (Long Poll 'bot' или Callback 'webhook'); CL-A8
 # Phase 2:
 packages/channel-matrix/, channel-email/, channel-sms/, channel-webhooks/, channel-homeassistant/
+packages/channel-avito/       # НОВЫЙ — Avito Messenger (webhook V3 + OAuth Bearer, per-tenant business creds); CL-A9
 # каждый: src/index.ts (process entry + creds), src/<platform>-adapter.ts (5 методов), tests/integration/
 ```
 

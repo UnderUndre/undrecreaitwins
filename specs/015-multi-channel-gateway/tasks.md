@@ -26,8 +26,10 @@ Spec «Phase 1» (6 каналов) ≠ task-фазы (организованы 
 | Slack | T013 | Phase 6 | socket-mode, повтор US1 |
 | Mattermost | T014 | Phase 6 | socket, повтор US1 |
 | DingTalk | T015 | Phase 6 | повтор US1 |
+| **VK** | **T031** | **Phase 6** | Long Poll ('bot', паттерн telegram) или Callback ('webhook'); CL-A8 |
+| **Avito** | **T032** | **Phase 7** | webhook V3 + OAuth + signature/idempotency; CL-A9 |
 
-Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → tasks T016–T020 (Phase 7).
+Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → tasks T016–T020 (Phase 7); **Avito → T032**.
 «Phase 6: Remaining Phase-1 channels» = Slack/Mattermost/DingTalk (Discord уже в US1, Feishu/WeCom в US3).
 
 ## Format: `[ID] [AGENT] [Story?] Description`
@@ -46,10 +48,10 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 - [X] T003 [BE] Extend `ChannelType` union (+discord/slack/mattermost/dingtalk/feishu/wecom/matrix/email/sms/webhook/homeassistant) + `ChannelMessage` (optional `attachments[]`/`typing`/`replyAnchor`) in `packages/shared/src/types.ts` (FR-001), backward-compatible with text-only telegram/whatsapp
 - [X] T004 [BE] Update `packages/core/src/services/channel-orchestrator.ts` `extractChannelType()` + `VALID_CHANNEL_TYPES` for new types. **Streaming runtime-guard (glm-F9)**: at OUTBOUND **publish** (the orchestrator publishes OUTBOUND; the adapters consume it — gemini), runtime-assert that a payload with `stream:true`/`partial:true` is logged-as-error + discarded — make CL-A7 executable, not just documentary.
 - [X] T005 [DB] **(gate-0 P0-2)** `credentialsCiphertext` + **`kmsKeyRef`** columns on `channel_instances` + `KmsProvider` wiring (reuse `core/services/llm-provider/crypto.ts`) + review-only backfill `.sql` (plaintext→ciphertext, FR-004). Coordinate with twin-engine creds chip `task_6449740f`. **Safety (gemini-F3)**: verify decrypt round-trips before scrubbing plaintext (no data loss); idempotent/re-runnable `.sql`, no plaintext-window. `kmsKeyRef` enables rotation (glm-F10, T030).
-- [X] T006 [SEC] **(gate-0 P0-1)** Verify reengagement→OUTBOUND now passes `validateResponse()` (CL-A6, stopgap fix applied in delivery.ts); regression test pending external chip.
+- [X] T006 [SEC] **(gate-0 P0-1) RESOLVED in code (verified 2026-06-09)**: `reengagement/delivery.ts:43` зовёт `validatorPipeline.validateResponse()` ПЕРЕД `transport.publish(OUTBOUND)` (:65) — чистая реализация, НЕ стопгэп (glm-F2). CL-A6 закрыт, external chip `task_75466095` больше НЕ блокирует 015. **Остаётся**: regression-тест (добавить в T023), чтоб гейт не регрессировал.
 - [X] T027 [BE] Shared `packages/core/src/services/webhook-signature.ts`
 - [X] T028 [BE] Shared `packages/core/src/services/channel-rate-limiter.ts`
-- [X] T029 [BE] Engine-side `channel-provisioning.ts`
+- [X] T029 [BE] Engine-side `channel-provisioning.ts`. ⚠️ **Footgun (glm-F19)**: возвращает `committed:false` всегда — шифрует creds + генерит channelId, но в БД НЕ пишет (caller обязан персистить). Соответствует анти-паттерну CLAUDE.md «Caller ignoring `{committed}` flag». **Дофиксить (T035)**: либо задокументировать caller-side persist-паттерн (DB write + adapter.connect) с примером, либо опция `commit:true` → запись в `channel_instances` через drizzle.
 
 **Checkpoint**: contract extended, gate sealed, creds encrypted, shared modules (signature/rate-limit/provisioning) ready.
 
@@ -93,9 +95,10 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 
 ## Phase 6: Remaining Phase-1 channels (repeat US1 pattern)
 
-- [X] T013 [BE] `channel-slack` adapter (Socket Mode, `@slack/bolt`, `inboundMode:'socket'`)
+- [X] T013 [BE] `channel-slack` adapter — **webhook-режим (Events API + HMAC), `inboundMode:'webhook'`** (решено CL-A13/glm-F18 = вариант B). Код raw HTTP + ручной HMAC оставлен; перевести на общий `webhook-signature.ts` (T027) для консистентности. Один эндпоинт, роутинг по `team_id` (НЕ per-tenant URL). Спека (CL-A3/DL-5/FR-008) приведена в соответствие. ✅ mismatch закрыт.
 - [X] T014 [BE] `channel-mattermost` adapter
 - [X] T015 [BE] `channel-dingtalk` adapter
+- [ ] T031 [BE] [US1] `channel-vk` adapter (VK Community Bot API, `messages.send`, community-токен; `inboundMode:'bot'` **Bots Long Poll — v1, паттерн telegram, без публичной URL** (B1); Callback API/webhook-режим отложен). ⚠️ ТОЛЬКО community/group; userbot запрещён (ToS, паритет с 006). CL-A8. Зависит от foundation (T003–T006). **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` allow-set на `'vk'` — T003/T004 закрыты `[X]` без vk, дельта здесь.
 
 ---
 
@@ -106,6 +109,7 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 - [ ] T018 [BE] `channel-sms` adapter (Twilio)
 - [ ] T019 [BE] `channel-webhooks` adapter (generic, signature-verified)
 - [ ] T020 [BE] `channel-homeassistant` adapter
+- [ ] T032 [BE] `channel-avito` adapter (Avito Messenger, `api.avito.ru`, OAuth Bearer, scope `messenger:write`; `inboundMode:'webhook'` Webhook V3 — эндпоинт обязан вернуть `200` за ≤2s). Signature/idempotency via shared `webhook-signature.ts` (T027) + Redis `seen:` SET NX (gemini-F4). Per-tenant business creds (client_id/secret) из `credentialsCiphertext` (T005). Рейт-лимит из `X-RateLimit-*` → `channel-rate-limiter.ts` (T028). CL-A9. **⚠️ Pre-req (U1)**: верифицировать схему аутентификации Avito Webhook V3 (HMAC vs IP-allowlist vs секрет-в-URL) ДО реализации — допущение про `webhook-signature.ts` НЕ подтверждено. **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` на `'avito'` — T003/T004 закрыты `[X]` без avito, дельта здесь.
 
 ---
 
@@ -113,11 +117,14 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 
 - [ ] T021 [BE] Surface per-channel `health()` in API (FR-005), all adapters. **Aggregation (glm-F7)**: `GET /api/channels/health` → `{ channels: Record<channelId, ChannelHealth>, overall }`, tenant-scoped, ~30s poll cached in Redis.
 - [ ] T022 [SEC] Tenant-isolation audit across all channels (zero cross-tenant); creds-at-rest verify (no plaintext, no log leak, FR-004)
-- [ ] T023 [E2E] Cross-channel E2E: gate path + resilience (adapter crash→`health:'error'`, engine survives; Redis Streams ack → no loss/dup on rebalance, FR-007). **XPENDING (glm-F5)**: configure `XPENDING_IDLE_MS` (default 5 min) + `XREADGROUP` block/timeout; test crash-after-consume-before-send → message redelivered (not lost); monitor pending > threshold.
+- [ ] T023 [E2E] Cross-channel E2E: gate path + resilience (adapter crash→`health:'error'`, engine survives; Redis Streams ack → no loss/dup on rebalance, FR-007). **XPENDING (glm-F5)**: configure `XPENDING_IDLE_MS` (default 5 min) + `XREADGROUP` block/timeout; test crash-after-consume-before-send → message redelivered (not lost); monitor pending > threshold. **Reengagement-regression (T006)**: тест, что reengagement-вывод идёт через `validateResponse()` перед OUTBOUND — гейт не должен регрессировать.
 - [ ] T024 [BE] Per-adapter idempotency-on-redelivery tests (R6)
-- [ ] T025 [OPS] Per-channel consumer-process deploy config (scale like telegram) + per-tenant creds provisioning runbook
+- [ ] T025 [OPS] Per-channel consumer-process deploy config (scale like telegram) + per-tenant creds provisioning runbook. **Baseline-память (gem-F4)**: замерить RSS одного адаптера, задать min системные требования для 15-канального gateway (15×~50MB + MTProto сессии → OOM-риск на мелких инстансах). **Healthcheck (glm-F20)**: валидировать healthcheck-команду в целевом образе в CI (twin-engine использует `node -e fetch(...)`, не `wget` — его нет в Node Alpine).
 - [ ] T026 [DOC] "Add a new channel" onboarding doc in twin-engine (5-method contract + stamping + inbound-mode)
 - [ ] T030 [OPS] Zero-downtime credential rotation flow `rotateChannelCredentials(channelId, newCreds)` (glm-F10/gemini-F6): re-encrypt with new KMS key → update `channel_instances.kmsKeyRef` → signal adapter disconnect/reconnect (new conns use new secret, old drain). Depends on ciphertext column (T005).
+- [ ] T033 [E2E] **(glm-F14)** Integration-тесты для 4 непокрытых адаптеров (matrix, sms, webhooks, homeassistant) — реальные реализации (188–362 LOC) с внешними deps (`matrix-bot-sdk`/`twilio`/raw HTTP/`ws`), но 0 тестов. Минимум: connect/disconnect lifecycle, валидация кред, inbound publish с tenant-стампингом, outbound send, `channel_id`-фильтрация, rate-limiter, tenant-isolation. Паттерн — `channel-discord` (20 тестов). Зависит от T016,T017,T019,T020.
+- [ ] T034 [OPS] **(gem-F6)** Observability/alerting на глубину очереди per-channel: алерт когда `XPENDING` / `seen:`-ключи превышают «stuck message» порог (дополняет T023-мониторинг). Зависит от T023.
+- [ ] T035 [BE] **(glm-F19)** Закрыть `channel-provisioning.ts` footgun: задокументировать caller-side persist-паттерн ИЛИ добавить `commit:true` → drizzle-запись в `channel_instances`. Зависит от T029.
 
 ---
 
@@ -134,8 +141,13 @@ T006 → T007
 T007 → T008, T009
 T009 → T010
 T011 → T012
-T003 + T004 + T005 + T006 → T011, T013, T014, T015, T016, T017, T018, T019, T020
+T003 + T004 + T005 + T006 → T011, T013, T014, T015, T016, T017, T018, T019, T020, T031, T032
 T007 → T021, T025, T026
+T027 → T032
+T028 → T031, T032
+T016 + T017 + T019 + T020 → T033
+T023 → T034
+T029 → T035
 T008 + T010 + T012 → T023
 T013 + T016 → T022
 T013 → T024
@@ -146,7 +158,7 @@ T028 → T007
 
 ### Self-Validation Checklist
 
-- [x] Every task ID in Dependencies exists in the task list (T001–T030)
+- [x] Every task ID in Dependencies exists in the task list (T001–T035; T031 VK, T032 Avito, T033–T035 review-фиксы glm-F14/F19+gem-F6, added 2026-06-09)
 - [x] No circular dependencies
 - [x] No orphan IDs
 - [x] Fan-in uses `+` only, fan-out uses `,` only
@@ -188,7 +200,7 @@ graph LR
     T028 --> T007
 ```
 
-> (Phase-2 channels T014–T020 share the same foundational fan-in as T013; edges elided for readability.)
+> (Phase-2 channels T014–T020 + **T031 (VK)**/**T032 (Avito)** share the same foundational fan-in as T013; T032 also needs T027+T028+T005 like other webhook channels; edges elided for readability.)
 
 ---
 
@@ -200,7 +212,7 @@ graph LR
 | 2 | [BE] foundation | T003 → T004 | T001 |
 | 3 | [DB] gate-0 | T005 | T001 + creds chip |
 | 4 | [SEC] gate-0/audit | T006; T012; T022 | chip / T011 / channels |
-| 5 | [BE] channels | T007 → T009; T013, T014, T015, T016, T017, T018, T019, T020; T011 | T003+T004+T005+T006 |
+| 5 | [BE] channels | T007 → T009; T013, T014, T015, T016, T017, T018, T019, T020, T031, T032; T011 | T003+T004+T005+T006 (T032 also +T027+T028) |
 | 6 | [E2E] | T008, T010, T023 | T007 / T009 / all-US |
 | 7 | [BE] polish | T021, T024 | channels |
 | 8 | [OPS] | T025 | T007 |
@@ -215,11 +227,11 @@ graph LR
 | Agent | Task Count | Can Start After |
 |-------|-----------|-----------------|
 | [SETUP] | 2 | immediately |
-| [BE] | 16 | T001 (+ foundation for channels) |
+| [BE] | 21 | T001 (+ foundation for channels) |
 | [DB] | 1 | T001 + creds chip |
 | [SEC] | 3 | gate chip / T011 / channels |
-| [E2E] | 3 | T007 / T009 / all-US |
-| [OPS] | 1 | T007 |
+| [E2E] | 4 | T007 / T009 / all-US / 4-adapter tests (T033) |
+| [OPS] | 3 | T007 / T023 (alerting T034) / cred-rotation T030 |
 | [DOC] | 1 | T007 |
 
 **Critical Path**: T001 → T003 → T005 → T006 → T007 → T008 → T023 (gate-0 chips upstream of T005/T006)
@@ -231,11 +243,11 @@ graph LR
 | Agent | Subagent | Skills | Input Context | Tasks | Files |
 |-------|----------|--------|---------------|-------|-------|
 | `[SETUP]` | — (orchestrator) | — | plan.md §structure | T001, T002 | `packages/channel-*/` scaffolds |
-| `[BE]` | `backend-specialist` | `api-patterns`, `system-design-patterns` | contracts/channel-adapter.contract.md, data-model.md, research R4/R5/R7 | T003,T004,T007,T009,T011,T013–T021,T024 | `packages/shared/`, `packages/core/services/channel-orchestrator.ts`, `packages/channel-*/` |
+| `[BE]` | `backend-specialist` | `api-patterns`, `system-design-patterns` | contracts/channel-adapter.contract.md, data-model.md, research R4/R5/R7 | T003,T004,T007,T009,T011,T013–T021,T024,T031,T032,T035 | `packages/shared/`, `packages/core/services/channel-orchestrator.ts`, `packages/channel-*/` |
 | `[DB]` | `database-architect` | `database-design` | data-model.md §channel_instances, research R3 | T005 | `packages/core/src/models/channel-instances.ts`, migrations |
 | `[SEC]` | `security-auditor` | `vulnerability-scanner`, `red-team-tactics` | spec §Non-Functional, research R2/R3, contracts (signature) | T006, T012, T022 | gate path, webhook adapters, creds |
-| `[E2E]` | `test-engineer` | `testing-patterns`, `webapp-testing` | quickstart.md, contracts/ | T008, T010, T023 | `packages/channel-*/tests/integration/` |
-| `[OPS]` | `devops-engineer` | `deployment-procedures`, `server-management` | plan.md §structure, quickstart.md | T025 | deploy/process config, runbook |
+| `[E2E]` | `test-engineer` | `testing-patterns`, `webapp-testing` | quickstart.md, contracts/ | T008, T010, T023, T033 | `packages/channel-*/tests/integration/` |
+| `[OPS]` | `devops-engineer` | `deployment-procedures`, `server-management` | plan.md §structure, quickstart.md | T025, T030, T034 | deploy/process config, runbook, cred-rotation, queue-alerting |
 | `[DOC]` | `documentation-writer` | `documentation-templates` | contracts/channel-adapter.contract.md | T026 | twin-engine channel onboarding doc |
 
 ---
