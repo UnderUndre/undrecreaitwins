@@ -10,7 +10,8 @@
 > **Split note (2026-06-08, CL-1)**: этот спек был зонтиком над тремя треками
 > (gateway + builder-unifier + MCP). По решению CL-1 Track A (Gateway) остаётся
 > здесь как `015-multi-channel-gateway`; Builder-Unifier + Agent-MCP-Server
-> вынесены в [`016-agent-builder-unifier-and-mcp-server`](../016-agent-builder-unifier-and-mcp-server/spec.md).
+> живут в **репозитории `ai-twins`** как `015-agent-builder-unifier-and-mcp-server`
+> (НЕ в `undrecreaitwins/016`). В `undrecreaitwins` номер **016 = marketplace-comms** (CL-A10).
 
 ## Overview
 
@@ -34,9 +35,10 @@
 - **CL-A2 (Phase 3)** → **режем из 015**: Signal (signal-cli daemon), iMessage
   (Mac+BlueBubbles), WeChat (iLink, ToS-риск) выносятся в отдельный gated-спек.
   015 = Phase 1 + Phase 2.
-- **CL-A3 (Discord/Slack inbound)** → **bot/socket mode**: Discord Gateway WS +
-  Slack Socket Mode (исходящее соединение, без публичной URL per-tenant; паритет
-  с Telegram long-poll). Webhook-режим — только для WeCom/Feishu/MS Graph (US3).
+- **CL-A3 (Discord/Slack inbound)** → **Discord = socket (Gateway WS)**; **Slack = webhook**
+  (Events API + HMAC) — **уточнено CL-A13 (glm-F18, 2026-06-09)**. Discord Gateway WS — исходящее
+  соединение, без публичной URL. Slack — один общий webhook-эндпоинт, роутинг по `team_id` (не
+  per-tenant URL). Webhook-класс: Slack + WeCom + Feishu + MS Graph (US3), общий `webhook-signature.ts`.
 - **CL-A4 (ChannelMessage расширение)** → **внутри 015** (FR-001), фундамент-фаза
   перед адаптерами; отдельная предтеча — оверхед.
 - **CL-A5 (gateway approach, по аудиту twin-engine 2026-06-09)** → **Option A —
@@ -80,6 +82,52 @@
   reuse `KmsProvider`. 🟠 Существующий security-gap. **→ в работе:** отдельный
   bug-fix-чип в twin-engine (шифр-колонка + миграция plaintext→ciphertext).
 
+### Session 2026-06-09 (addendum) — RU/CIS каналы + MCP-вопрос
+
+- **CL-A8 (VK, ВКонтакте)** → **в 015, Phase 1**. Community Bot API (`messages.send`),
+  Bots **Long Poll** ИЛИ **Callback API**, community-токен. Паритет с Telegram long-poll —
+  чистый фит под `ChannelAdapter`. Inbound-режим (FR-008): **v1 = 'bot' (Long Poll, паритет
+  telegram, без публичной URL; решено B1)**; Callback API/webhook отложен. ⚠️ ТОЛЬКО
+  community/group messaging; userbot (личный аккаунт) — против ToS, НЕ делаем (паритет с
+  MTProto-риском 006). Либа-референс: `node-vk-bot-api` (протокол, не зависимость по умолчанию).
+- **CL-A9 (Avito Messenger)** → **в 015, Phase 2**. `https://api.avito.ru`, OAuth Bearer,
+  scope `messenger:write`, **Webhook V3** (эндпоинт обязан вернуть `200` за ≤2s, иначе ретраи).
+  Webhook-канал (FR-006). Гейт: нужен одобренный Avito business-доступ (client_id/secret)
+  **per-tenant**. **⚠️ U1 (analyze)**: схема аутентификации Avito Webhook V3 (HMAC vs
+  IP-allowlist vs секрет-в-URL) НЕ верифицирована — подтвердить ДО реализации T032, не
+  закладываться вслепую на `webhook-signature.ts`. Рейт-лимит из заголовков `X-RateLimit-*` → `channel-rate-limiter.ts`. DM по
+  объявлению — фит под текущую модель `ChannelMessage`.
+- **CL-A10 (Marketplace-comms: Ozon / Wildberries / Я.Маркет)** → **НЕ в 015 — решено
+  (2026-06-09): отдельный спек `016-marketplace-comms`**. Это НЕ DM-каналы:
+  - Сообщение привязано к **заказу/товару** (Ozon `chat_id`↔posting `POST /v1/chat/send/message`,
+    `Client-Id`+`Api-Key`; WB `buyer-chat-api.wildberries.ru`↔order; + WB Questions/Reviews по
+    карточке `nmId`), не к свободному диалогу → другая форма `ChannelMessage`
+    (postingId/orderId/SKU/questionId). Расширять базовый контракт под это = протечка модели.
+  - Транспорт — **поллинг REST**, жёсткие рейт-лимиты (WB: 1 req/s, burst 3 → блок 60s).
+  - 🔴 **Compliance-мина**: маркетплейсы **запрещают увод покупателя с площадки**. Машинерия
+    твина — funnel (003) + reengagement-дожимы (009) — заточена ГНАТЬ конверсию/контакты.
+    Включить её на Ozon/WB как есть = **бан продавца**. Marketplace-режим ОБЯЗАН отключать
+    reengagement/funnel-redirect и резать запрещённый контент валидатором (новый policy-профиль).
+    Это **ограниченный режим**, где половина движка под запретом — отдельный домен, не «ещё канал».
+- **CL-A11 (каналы как MCP-сервера?)** → **НЕТ для транспорта; путаница двух слоёв.**
+  - **Inbound = push-событие** (клиент пишет сам, рантайм реагирует). MCP — **pull-протокол**
+    вызова tools агентом-клиентом; нет примитива «сервер сам инициирует входящий разговор +
+    дедуп + tenant-стамп + ordering + ack». Это ровно работа Redis-Streams-оркестратора. MCP
+    тут — не та труба.
+  - **Outbound-send как MCP-tool** возможно технически, но **опасно**: сырой `send_message`-tool
+    у мозга = отправка МИМО `validateResponse()` → это дыра CL-A6 (reengagement-bypass),
+    возведённая в фичу. Ломает DD-HX-001 (010). Отвергнуто.
+  - **Два слоя не путать**: (1) транспорт канала [байты в/из VK/Telegram] = адаптеры+стримы,
+    НЕ MCP; (2) capability мозга [что агент может вызвать] = engine-MCP-server (010 FR-002,
+    014 per-assistant-mcp) — уже есть. Сам Hermes держит `gateway/` и `mcp_serve.py`/toolsets
+    раздельно — даже он не моделит каналы как MCP. Корроборация.
+  - **Законное зерно**: можно унифицировать **реестр/конфиг-UX коннекторов** (один способ
+    регать/discover канал и MCP-tool в UI коннекторов (билдер — ai-twins `015`)), НЕ рантайм-транспорт.
+- **CL-A12 (другие RU/CIS-кандидаты, НЕ верифицированы — TODO перед добавлением)**:
+  **Viber** (Bot REST + webhook, жив в CIS — вероятный Phase 1/2), **Одноклассники** (group
+  bot API, ниша), **Jivo / веб-виджет чата** (через generic Webhooks, FR-006). Не вписаны в
+  Phasing до проверки API (confidence <0.85).
+
 ## Decisions locked (требуют подтверждения в /clarify)
 
 - **DL-1 Топология**: адаптеры в движке, контракт `ChannelAdapter` + Redis
@@ -93,8 +141,9 @@
 - **DL-4 Out of scope (CL-A2)**: Signal (signal-cli daemon), iMessage
   (Mac+BlueBubbles), WeChat (unofficial iLink — ToS-риск) — **вынесены в отдельный
   gated-спек**, не в 015. 015 покрывает Phase 1 + Phase 2.
-- **DL-5 Inbound-режим (CL-A3)**: Discord/Slack — **bot/socket mode** (Gateway WS /
-  Socket Mode, исходящее соединение, без публичной URL). Webhook — только WeCom/Feishu/MS Graph.
+- **DL-5 Inbound-режим (CL-A3/CL-A13)**: **Discord = socket** (Gateway WS, исходящее соединение,
+  без публичной URL). **Slack = webhook** (Events API + HMAC, один эндпоинт по `team_id` — glm-F18).
+  Webhook-класс: Slack/WeCom/Feishu/MS Graph.
 
 ## User Scenarios
 
@@ -145,9 +194,10 @@ WeCom/Feishu/MS Graph → верификация подписи входящег
   `seen:<channel>:<message_id>` SET NX + TTL до публикации (реплей вебхука не задваивает —
   gemini-F4). Discord/Slack идут bot/socket-режимом (CL-A3), не webhook.
 - **FR-007** Грейсфул degrade: упавший адаптер → status 'error', не роняет движок.
-- **FR-008** Inbound-транспорт per-channel (CL-A3): bot/socket (Discord/Slack — исходящее
-  WS-соединение, без публичной URL per-tenant) vs webhook (signature-verified). Адаптер
-  объявляет свой режим; gateway не требует публичного эндпоинта для socket-каналов.
+- **FR-008** Inbound-транспорт per-channel (CL-A3/CL-A13): **socket** (Discord — исходящее
+  WS-соединение, без публичной URL) vs **webhook** (Slack/WeCom/Feishu — signature-verified,
+  общий эндпоинт, роутинг по идентификатору воркспейса/площадки). Адаптер объявляет свой режим;
+  socket-каналы не требуют публичного эндпоинта, webhook-каналы делят один ingress.
 
 ## Non-Functional
 
@@ -172,9 +222,12 @@ WeCom/Feishu/MS Graph → верификация подписи входящег
 
 ## Phasing (по сложности интеграции — из анализа platforms/*.py)
 
-- **Phase 1 (bot/socket/token, близки к Telegram)**: Discord (Gateway WS), Slack (Socket Mode), Mattermost, DingTalk, Feishu (webhook), WeCom (webhook).
-- **Phase 2 (medium)**: Matrix (matrix-js-sdk), Email (IMAP/SMTP), SMS (Twilio), Webhooks (generic), Home Assistant.
+- **Phase 1 (bot/socket/token, близки к Telegram)**: Discord (Gateway WS), Slack (Socket Mode), Mattermost, DingTalk, Feishu (webhook), WeCom (webhook), **VK (Long Poll / Callback API — CL-A8)**.
+- **Phase 2 (medium)**: Matrix (matrix-js-sdk), Email (IMAP/SMTP), SMS (Twilio), Webhooks (generic), Home Assistant, **Avito (Messenger webhook V3 — CL-A9)**.
 - ~~Phase 3~~ — **вынесена из 015** (CL-A2): Signal/iMessage/WeChat → отдельный gated-спек.
+- **Marketplace-comms** (Ozon / Wildberries / Я.Маркет) — **НЕ в 015** (CL-A10): отдельный спек
+  `016-marketplace-comms` (PENDING ОК юзера) — другая модель сообщения (order/SKU-scoped) +
+  compliance-режим (reengagement/funnel OFF, иначе бан продавца).
 
 ## Dependencies / Resolved Questions
 
@@ -187,6 +240,12 @@ WeCom/Feishu/MS Graph → верификация подписи входящег
   валидаторов. Закрыть до масштабирования каналов. **Bug-fix-чип в twin-engine — в работе.**
 - **CL-A7** ✅ Streaming bypass — N/A для твинов (человек не стримит); guard: channel-OUTBOUND без стрима.
 - **CL-A1 fix** 🟠 plaintext креды каналов → ciphertext-колонка + KmsProvider. **Bug-fix-чип — в работе.**
-- **Open (cross-spec)**: detail-view ассистента в `016` управляет channels этого трека —
-  контракт канал↔`assistantId` согласовать с канон-API 016 (CL-2 / FR-B03). Channel FK —
-  локальный `Assistant.id` (см. 016 data-model). Решается при планировании 015.
+- **CL-A8** ✅ VK — в 015 Phase 1 (Community Bot API, long-poll/callback).
+- **CL-A9** ✅ Avito — в 015 Phase 2 (Messenger webhook V3, per-tenant business-доступ).
+- **CL-A10** ✅ Marketplace-comms (Ozon/WB/Я.Маркет) — **решено (2026-06-09): отдельный спек `016-marketplace-comms`**. Вне 015. Другая модель (order/SKU-scoped) + compliance-режим (funnel/reengagement OFF).
+- **CL-A11** ✅ Каналы≠MCP-транспорт — отвергнуто (push-event vs pull-tool; send-as-tool = gate-bypass). Унификация — только на уровне registry/UX билдера (ai-twins `015`).
+- **CL-A12** ⏳ Viber / OK / Jivo — кандидаты, API не верифицирован, не в Phasing до проверки.
+- **CL-A13** ✅ **Slack = webhook, не socket (glm-F18, решено 2026-06-09)**: код уже webhook+HMAC (рабочий), переписывать на Socket Mode смысла нет. Один общий эндпоинт + роутинг по `team_id` (НЕ per-tenant URL), переиспользует `webhook-signature.ts` + существующий ingress (Feishu/WeCom). Discord остаётся socket (Gateway WS — нет HTTP-варианта). Обновлены CL-A3/DL-5/FR-008.
+- **Open (cross-spec)**: detail-view ассистента в **builder-spec (ai-twins `015-agent-builder-unifier-and-mcp-server`)**
+  управляет channels этого трека — контракт канал↔`assistantId` согласовать с его канон-API (CL-2 / FR-B03).
+  Channel FK — локальный `Assistant.id` (см. builder data-model). Решается при планировании 015.

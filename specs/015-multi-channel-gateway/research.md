@@ -34,9 +34,10 @@ store (dup of crypto.ts), env-only (breaks multitenant, Standing Order 4).
 
 **Decision**: adapter declares its mode.
 - **bot/socket** (outbound WS, no public URL per-tenant): Discord (Gateway WS, `discord.js`),
-  Slack (Socket Mode, `@slack/bolt`), Mattermost, DingTalk, Matrix (`matrix-js-sdk`).
-- **webhook** (signature-verified before INBOUND publish, FR-006): Feishu, WeCom, MS Graph,
-  generic Webhooks. Signature verify in the adapter, in TS (not trusted to an external fork).
+  Mattermost, DingTalk, Matrix (`matrix-js-sdk`).
+- **webhook** (signature-verified before INBOUND publish, FR-006): **Slack (Events API + HMAC,
+  один эндпоинт, роутинг по `team_id` — CL-A13/glm-F18)**, Feishu, WeCom, MS Graph, generic Webhooks.
+  Signature verify in the adapter, in TS (not trusted to an external fork), общий `webhook-signature.ts`.
 **Rationale**: parity with Telegram long-poll; multitenant-friendly; smaller attack surface.
 **Alternatives rejected**: all-webhook (needs public per-tenant endpoints + routing).
 
