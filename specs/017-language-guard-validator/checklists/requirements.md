@@ -35,6 +35,11 @@
 - [x] **SC-005 marked target-not-gate** (claude F9) → spec SC-005
 - [x] **Script-vs-language terminology note** (claude F10) → spec Assumptions
 
+## Review remediation round 2 (2026-06-10 — gemini PR#32, 2 MEDIUM)
+
+- [x] **Latin range U+0000→U+0041 start** — plan.md contradicted research.md; controls/digits/punctuation must be Common, else punctuation inflates the fraction for non-Latin personas → DD-001, T005
+- [x] **Common strict, not fallback** — unmapped letters (`\p{L}`, e.g. Greek/Georgian/Armenian/Tamil) → `Unknown`, counted non-compliant; fallback-to-Common was a bypass hole → FR-015, DD-001 precedence note, research table, T005, T006 tests
+
 ## Feature Readiness
 
 - [x] All functional requirements have clear acceptance criteria

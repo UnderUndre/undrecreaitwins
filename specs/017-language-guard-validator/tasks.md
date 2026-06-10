@@ -37,7 +37,7 @@
 
 - [ ] T005 [BE] Implement `packages/core/src/services/validators/language-guard.ts`:
   - **Masking pre-pass (DD-008 / FR-014, gemini F1 / claude F1+F5)**: before classification, mask fenced code blocks, inline code spans, URLs, and emails (deterministic regex); masked chars count toward neither numerator nor denominator
-  - `ScriptClassifier` class: static Unicode range table (Latin incl. U+1E00–U+1EFF, claude F8; extensibility comment), `classify(char) → ScriptName`, `analyze(maskedText) → Map<ScriptName, number>` (character counts per script)
+  - `ScriptClassifier` class: static Unicode range table (Latin **U+0041**–U+024F letters-only + U+1E00–U+1EFF, claude F8 / gemini PR#32; extensibility comment), `classify(char) → ScriptName`, `analyze(maskedText) → Map<ScriptName, number>` (character counts per script). **Precedence**: Common (strict: whitespace/punctuation/digits/symbols/emoji/control) checked first; a letter (`\p{L}`) matching no known range → `Unknown`, counted **non-compliant** (no fallback-to-Common bypass — gemini PR#32)
   - **Fraction (FR-015)**: `nonCompliantFraction = nonCompliantScriptChars / scriptChars` with `scriptChars = totalChars − commonChars − maskedChars`; `scriptChars === 0` → fraction 0 → `pass`
   - `LanguageGuardValidator` class implementing `ResponseValidator`:
     - `name: 'language-guard'`
@@ -68,6 +68,8 @@
   - **Russian persona (`["ru"]`) + response that is 50% fenced Python code block → `pass`** (code masked, DD-008 — the gemini/claude CRITICAL case)
   - **Chinese persona (`["zh"]`) + 200-char Han response containing a 30-char URL → `pass`** (URL masked, claude F5)
   - **Response that is only code + whitespace (`scriptChars === 0`) → `pass`, fraction 0** (FR-015 zero-denominator)
+  - **Russian persona + 40% Greek text → flagged** (`Unknown` script counts non-compliant; no fallback-to-Common bypass — gemini PR#32)
+  - **Punctuation/digits-heavy Russian response → `pass`** (Common strict + Latin starts at U+0041 — punctuation never classifies as Latin)
   - `stripThreshold > blockThreshold` config → validation error
   - `pass` verdict with non-empty `allowedLanguages` → audit entry written (FR-009)
 

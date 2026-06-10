@@ -30,7 +30,8 @@ A deterministic classifier maps each character to a script via Unicode code-poin
 | Hangul | U+AC00–U+D7AF, U+1100–U+11FF | Korean |
 | Katakana | U+30A0–U+30FF | Japanese (katakana) |
 | Hiragana | U+3040–U+309F | Japanese (hiragana) |
-| Common | Everything else (punctuation, digits, emoji, control) | Excluded from fraction |
+| Common | **Strictly defined**: whitespace, punctuation, digits, symbols, emoji, control characters (NOT a fallback) | Excluded from fraction |
+| Unknown | Any **letter** (`\p{L}`) not matching a known script range (Greek, Georgian, Armenian, Tamil, …) | **Counted as non-compliant** — a fallback-to-Common would let unmapped-script contamination bypass the guard (gemini PR#32) |
 
 ### BCP-47 → Script Mapping
 

@@ -106,7 +106,7 @@ A tenant runs multiple personas on the same workspace: a Russian customer suppor
 - **FR-012**: When `allowedLanguages` is empty or absent, the guard MUST be a complete no-op — no directive injection, no validation, no audit entry.
 - **FR-013**: Language guard configuration MUST be scoped per (tenant, persona) pair, independent of other personas in the same tenant.
 - **FR-014**: Before script classification, the system MUST mask content inside markdown fenced code blocks, inline code spans, URLs, and email addresses — these characters count toward neither the numerator nor the denominator of the non-compliant fraction. (gemini F1, claude F1/F5)
-- **FR-015**: The non-compliant fraction MUST be computed as `nonCompliantFraction = nonCompliantScriptChars / scriptChars`, where `scriptChars = totalChars − commonChars − maskedChars` (Common = punctuation, whitespace, digits, emoji, control characters; masked = FR-014 spans). If `scriptChars` is 0, the fraction is 0 (verdict `pass`). (gemini F3, claude F2 — formula pinned so thresholds and SC-001/SC-005 are measurable)
+- **FR-015**: The non-compliant fraction MUST be computed as `nonCompliantFraction = nonCompliantScriptChars / scriptChars`, where `scriptChars = totalChars − commonChars − maskedChars` (Common = punctuation, whitespace, digits, emoji, control characters; masked = FR-014 spans). If `scriptChars` is 0, the fraction is 0 (verdict `pass`). Common is a **strict** category, not a fallback: a letter character belonging to no recognized script classifies as `Unknown` and counts as non-compliant — unmapped scripts (Greek, Georgian, Armenian, …) MUST NOT bypass the guard. (gemini F3, claude F2, gemini PR#32 — formula pinned so thresholds and SC-001/SC-005 are measurable)
 
 ### Key Entities
 

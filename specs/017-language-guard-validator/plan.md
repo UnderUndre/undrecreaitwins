@@ -85,7 +85,9 @@ drizzle/
 **Rationale**: Spec assumption: "Language/script detection is deterministic (Unicode code-point range analysis); no ML inference is used." A static table of ~20 Unicode ranges covers all major scripts. Performance: O(n) scan of the response string, single pass, no regex backtracking. Each character classified into exactly one script or "common" (punctuation, digits, control chars). "Common" characters are always excluded from the non-compliant fraction.
 
 **Ranges** (initial set, extensible):
-- Latin: U+0000–U+024F (basic + extended) **+ U+1E00–U+1EFF (Latin Extended Additional — Vietnamese diacritics, claude F8)**. Known limitation: further extended-Latin blocks (C/D) are not covered in MVP; `ScriptClassifier` table is designed extensible — document in a code comment.
+- Latin: **U+0041–U+024F** (letters only — U+0000–U+0040 is controls/digits/punctuation = Common, matching research.md and FR-015; gemini PR#32) **+ U+1E00–U+1EFF (Latin Extended Additional — Vietnamese diacritics, claude F8)**. Known limitation: further extended-Latin blocks (C/D) are not covered in MVP; `ScriptClassifier` table is designed extensible — document in a code comment.
+
+**Classification precedence**: Common (strictly defined: whitespace, punctuation, digits, symbols, emoji, control) is checked **before** script ranges — non-letter code points inside a script range (e.g. `[\]^_` at U+005B–U+0060) never classify as a script. A **letter** code point (Unicode `\p{L}`) matching **no** known range classifies as **`Unknown`** and counts as **non-compliant** — never as Common. Otherwise unmapped scripts (Greek, Georgian, Armenian, Tamil…) would silently bypass the guard (gemini PR#32).
 - Cyrillic: U+0400–U+04FF + U+0500–U+052F
 - Han (CJK): U+4E00–U+9FFF + U+3400–U+4DBF
 - Arabic: U+0600–U+06FF
