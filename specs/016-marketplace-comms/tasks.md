@@ -115,7 +115,7 @@ M009 → M019
 | Agent | Subagent | Skills | Input | Tasks | Files |
 |-------|----------|--------|-------|-------|-------|
 | `[SETUP]` | — | — | plan §structure | M001,M002 | `packages/channel-*/`, `core/services/policy-engine|marketplace/` |
-| `[BE]` | `backend-specialist` | `api-patterns`,`system-design-patterns` | contracts, data-model, research | M003,M004,M006,M008,M009,M011,M012,M015,M016 | `packages/shared`, `core/services/*`, `packages/channel-ozon|wb` |
+| `[BE]` | `backend-specialist` | `api-patterns`,`system-design-patterns` | contracts, data-model, research | M003,M004,M006,M008,M009,M011,M012,M015,M016,M020,M021 | `packages/shared`, `core/services/*`, `packages/channel-ozon|wb` |
 | `[SEC]` | `security-auditor` | `vulnerability-scanner`,`red-team-tactics` | spec §Compliance, contracts §policy | M005,M014,M017 | policy-engine, marketplace adapters, creds |
 | `[DB]` | `database-architect` | `database-design` | data-model §creds | M007 | `core/models/channel-instances.ts`, migrations |
 | `[E2E]` | `test-engineer` | `testing-patterns`,`webapp-testing` | quickstart, contracts | M010,M013 | `packages/channel-*/tests/integration/` (M014 compliance-E2E — под тегом [SEC]) |

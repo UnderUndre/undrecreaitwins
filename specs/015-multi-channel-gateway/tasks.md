@@ -98,7 +98,7 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 - [X] T013 [BE] `channel-slack` adapter — **webhook-режим (Events API + HMAC), `inboundMode:'webhook'`** (решено CL-A13/glm-F18 = вариант B). Код raw HTTP + ручной HMAC оставлен; перевести на общий `webhook-signature.ts` (T027) для консистентности. Один эндпоинт, роутинг по `team_id` (НЕ per-tenant URL). Спека (CL-A3/DL-5/FR-008) приведена в соответствие. ✅ mismatch закрыт.
 - [X] T014 [BE] `channel-mattermost` adapter
 - [X] T015 [BE] `channel-dingtalk` adapter
-- [ ] T031 [BE] [US1] `channel-vk` adapter (VK Community Bot API, `messages.send`, community-токен; `inboundMode:'bot'` **Bots Long Poll — v1, паттерн telegram, без публичной URL** (B1); Callback API/webhook-режим отложен). ⚠️ ТОЛЬКО community/group; userbot запрещён (ToS, паритет с 006). CL-A8. Зависит от foundation (T003–T006).
+- [ ] T031 [BE] [US1] `channel-vk` adapter (VK Community Bot API, `messages.send`, community-токен; `inboundMode:'bot'` **Bots Long Poll — v1, паттерн telegram, без публичной URL** (B1); Callback API/webhook-режим отложен). ⚠️ ТОЛЬКО community/group; userbot запрещён (ToS, паритет с 006). CL-A8. Зависит от foundation (T003–T006). **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` allow-set на `'vk'` — T003/T004 закрыты `[X]` без vk, дельта здесь.
 
 ---
 
@@ -109,7 +109,7 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 - [ ] T018 [BE] `channel-sms` adapter (Twilio)
 - [ ] T019 [BE] `channel-webhooks` adapter (generic, signature-verified)
 - [ ] T020 [BE] `channel-homeassistant` adapter
-- [ ] T032 [BE] `channel-avito` adapter (Avito Messenger, `api.avito.ru`, OAuth Bearer, scope `messenger:write`; `inboundMode:'webhook'` Webhook V3 — эндпоинт обязан вернуть `200` за ≤2s). Signature/idempotency via shared `webhook-signature.ts` (T027) + Redis `seen:` SET NX (gemini-F4). Per-tenant business creds (client_id/secret) из `credentialsCiphertext` (T005). Рейт-лимит из `X-RateLimit-*` → `channel-rate-limiter.ts` (T028). CL-A9. **⚠️ Pre-req (U1)**: верифицировать схему аутентификации Avito Webhook V3 (HMAC vs IP-allowlist vs секрет-в-URL) ДО реализации — допущение про `webhook-signature.ts` НЕ подтверждено.
+- [ ] T032 [BE] `channel-avito` adapter (Avito Messenger, `api.avito.ru`, OAuth Bearer, scope `messenger:write`; `inboundMode:'webhook'` Webhook V3 — эндпоинт обязан вернуть `200` за ≤2s). Signature/idempotency via shared `webhook-signature.ts` (T027) + Redis `seen:` SET NX (gemini-F4). Per-tenant business creds (client_id/secret) из `credentialsCiphertext` (T005). Рейт-лимит из `X-RateLimit-*` → `channel-rate-limiter.ts` (T028). CL-A9. **⚠️ Pre-req (U1)**: верифицировать схему аутентификации Avito Webhook V3 (HMAC vs IP-allowlist vs секрет-в-URL) ДО реализации — допущение про `webhook-signature.ts` НЕ подтверждено. **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` на `'avito'` — T003/T004 закрыты `[X]` без avito, дельта здесь.
 
 ---
 
@@ -231,7 +231,7 @@ graph LR
 | [DB] | 1 | T001 + creds chip |
 | [SEC] | 3 | gate chip / T011 / channels |
 | [E2E] | 4 | T007 / T009 / all-US / 4-adapter tests (T033) |
-| [OPS] | 2 | T007 / T023 (alerting T034) |
+| [OPS] | 3 | T007 / T023 (alerting T034) / cred-rotation T030 |
 | [DOC] | 1 | T007 |
 
 **Critical Path**: T001 → T003 → T005 → T006 → T007 → T008 → T023 (gate-0 chips upstream of T005/T006)
@@ -243,11 +243,11 @@ graph LR
 | Agent | Subagent | Skills | Input Context | Tasks | Files |
 |-------|----------|--------|---------------|-------|-------|
 | `[SETUP]` | — (orchestrator) | — | plan.md §structure | T001, T002 | `packages/channel-*/` scaffolds |
-| `[BE]` | `backend-specialist` | `api-patterns`, `system-design-patterns` | contracts/channel-adapter.contract.md, data-model.md, research R4/R5/R7 | T003,T004,T007,T009,T011,T013–T021,T024,T031,T032 | `packages/shared/`, `packages/core/services/channel-orchestrator.ts`, `packages/channel-*/` |
+| `[BE]` | `backend-specialist` | `api-patterns`, `system-design-patterns` | contracts/channel-adapter.contract.md, data-model.md, research R4/R5/R7 | T003,T004,T007,T009,T011,T013–T021,T024,T031,T032,T035 | `packages/shared/`, `packages/core/services/channel-orchestrator.ts`, `packages/channel-*/` |
 | `[DB]` | `database-architect` | `database-design` | data-model.md §channel_instances, research R3 | T005 | `packages/core/src/models/channel-instances.ts`, migrations |
 | `[SEC]` | `security-auditor` | `vulnerability-scanner`, `red-team-tactics` | spec §Non-Functional, research R2/R3, contracts (signature) | T006, T012, T022 | gate path, webhook adapters, creds |
-| `[E2E]` | `test-engineer` | `testing-patterns`, `webapp-testing` | quickstart.md, contracts/ | T008, T010, T023 | `packages/channel-*/tests/integration/` |
-| `[OPS]` | `devops-engineer` | `deployment-procedures`, `server-management` | plan.md §structure, quickstart.md | T025 | deploy/process config, runbook |
+| `[E2E]` | `test-engineer` | `testing-patterns`, `webapp-testing` | quickstart.md, contracts/ | T008, T010, T023, T033 | `packages/channel-*/tests/integration/` |
+| `[OPS]` | `devops-engineer` | `deployment-procedures`, `server-management` | plan.md §structure, quickstart.md | T025, T030, T034 | deploy/process config, runbook, cred-rotation, queue-alerting |
 | `[DOC]` | `documentation-writer` | `documentation-templates` | contracts/channel-adapter.contract.md | T026 | twin-engine channel onboarding doc |
 
 ---
