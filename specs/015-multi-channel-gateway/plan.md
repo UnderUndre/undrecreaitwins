@@ -105,7 +105,7 @@ packages/channel-avito/       # НОВЫЙ — Avito Messenger (webhook V3 + OAu
 
 **Structure Decision**: один пакет на платформу (зеркалит `channel-telegram`), общий контракт
 из `@undrecreaitwins/shared`. Inbound-режим объявляется адаптером (CL-A3/FR-008): bot/socket
-(Discord/Slack — исходящее WS, без публичной URL) vs webhook (Feishu/WeCom — signature-verified).
+(Discord — исходящее WS, без публичной URL) vs webhook (Slack/Feishu/WeCom — signature-verified, CL-A13/glm-F18).
 
 ## Complexity Tracking
 

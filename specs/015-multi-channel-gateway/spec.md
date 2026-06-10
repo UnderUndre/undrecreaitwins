@@ -192,7 +192,7 @@ WeCom/Feishu/MS Graph → верификация подписи входящег
   в INBOUND через общий `webhook-signature.ts` (HMAC-SHA256 + constant-time, порт из Hermes
   один раз — glm-F3), НЕ крипта per-adapter. Идемпотентность редоставки — Redis
   `seen:<channel>:<message_id>` SET NX + TTL до публикации (реплей вебхука не задваивает —
-  gemini-F4). Discord/Slack идут bot/socket-режимом (CL-A3), не webhook.
+  gemini-F4). Discord = socket-режим (CL-A3); Slack = webhook-режим (CL-A13/glm-F18).
 - **FR-007** Грейсфул degrade: упавший адаптер → status 'error', не роняет движок.
 - **FR-008** Inbound-транспорт per-channel (CL-A3/CL-A13): **socket** (Discord — исходящее
   WS-соединение, без публичной URL) vs **webhook** (Slack/WeCom/Feishu — signature-verified,
@@ -222,7 +222,7 @@ WeCom/Feishu/MS Graph → верификация подписи входящег
 
 ## Phasing (по сложности интеграции — из анализа platforms/*.py)
 
-- **Phase 1 (bot/socket/token, близки к Telegram)**: Discord (Gateway WS), Slack (Socket Mode), Mattermost, DingTalk, Feishu (webhook), WeCom (webhook), **VK (Long Poll / Callback API — CL-A8)**.
+- **Phase 1 (bot/socket/token, близки к Telegram)**: Discord (Gateway WS), Slack (Events API webhook), Mattermost, DingTalk, Feishu (webhook), WeCom (webhook), **VK (Long Poll / Callback API — CL-A8)**.
 - **Phase 2 (medium)**: Matrix (matrix-js-sdk), Email (IMAP/SMTP), SMS (Twilio), Webhooks (generic), Home Assistant, **Avito (Messenger webhook V3 — CL-A9)**.
 - ~~Phase 3~~ — **вынесена из 015** (CL-A2): Signal/iMessage/WeChat → отдельный gated-спек.
 - **Marketplace-comms** (Ozon / Wildberries / Я.Маркет) — **НЕ в 015** (CL-A10): отдельный спек
@@ -234,7 +234,7 @@ WeCom/Feishu/MS Graph → верификация подписи входящег
 - **CL-A1** ⚠️ Secret-store — KMS-примитив есть (только LLM-ключи); креды каналов **plaintext** → FR-004 достраивает ciphertext-колонку (verified 2026-06-09).
 - **CL-A4** ✅ `ChannelMessage` расширение — внутри 015 (FR-001).
 - **CL-A2** ✅ Phase 3 — режем из 015 (отдельный gated-спек).
-- **CL-A3** ✅ Discord/Slack — bot/socket mode (FR-008).
+- **CL-A3** ✅ Discord — socket (Gateway WS); Slack — webhook (Events API + HMAC, CL-A13/glm-F18).
 - **CL-A5** ✅ Gateway approach — Option A (свои TS-адаптеры).
 - **CL-A6 🔴 PREREQUISITE (gate-0)**: reengagement (`delivery.ts:49`) пишет в OUTBOUND мимо
   валидаторов. Закрыть до масштабирования каналов. **Bug-fix-чип в twin-engine — в работе.**

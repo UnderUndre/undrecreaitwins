@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       discord.js:
         specifier: ^14.26.4
         version: 14.26.4(bufferutil@4.1.0)(utf-8-validate@5.0.10)
@@ -20,6 +23,9 @@ importers:
       undici:
         specifier: 6.21.1
         version: 6.21.1
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     devDependencies:
       drizzle-kit:
         specifier: ^0.31.10

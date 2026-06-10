@@ -25,15 +25,19 @@ const mockWsSend = vi.fn();
 const mockWsClose = vi.fn();
 const mockWsReadyState = { OPEN: 1, CLOSED: 3 };
 
+const MockWebSocket = vi.fn().mockImplementation(() => ({
+  on: mockWsOn,
+  send: mockWsSend,
+  close: mockWsClose,
+  readyState: 1,
+  OPEN: 1,
+  CLOSED: 3,
+}));
+(MockWebSocket as unknown as Record<string, unknown>).OPEN = 1;
+(MockWebSocket as unknown as Record<string, unknown>).CLOSED = 3;
+
 vi.mock('ws', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    on: mockWsOn,
-    send: mockWsSend,
-    close: mockWsClose,
-    readyState: 1,
-    OPEN: 1,
-    CLOSED: 3,
-  })),
+  default: MockWebSocket,
   WebSocket: { OPEN: 1, CLOSED: 3 },
 }));
 
@@ -44,7 +48,14 @@ vi.mock('node:https', () => ({
   request: (...args: unknown[]) => mockHttpsRequest(...args),
 }));
 
-function mockHttpsResponse(body: string, statusCode = 200) {
+// Mock node:http for outbound HA API (used when hassUrl is http://)
+const mockHttpRequest = vi.fn();
+
+vi.mock('node:http', () => ({
+  request: (...args: unknown[]) => mockHttpRequest(...args),
+}));
+
+function mockHttpResponse(body: string, statusCode = 200) {
   return (optsOrUrl: unknown, cbOrOpts: unknown, maybeCb?: unknown) => {
     const cb = (typeof cbOrOpts === 'function' ? cbOrOpts : maybeCb) as (res: unknown) => void;
     const res = {
@@ -299,7 +310,7 @@ describe('HomeAssistantAdapter', () => {
   });
 
   it('sends message via HA conversation API', async () => {
-    mockHttpsRequest.mockImplementation(mockHttpsResponse('{"response":{}}'));
+    mockHttpRequest.mockImplementation(mockHttpResponse('{"response":{}}'));
 
     mockWsOn.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
       if (event === 'message') {
@@ -320,7 +331,7 @@ describe('HomeAssistantAdapter', () => {
 
     await adapter.send(message);
 
-    expect(mockHttpsRequest).toHaveBeenCalledWith(
+    expect(mockHttpRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         hostname: 'homeassistant.local',
         path: '/api/conversation/process',
@@ -353,7 +364,7 @@ describe('HomeAssistantAdapter', () => {
       },
     });
 
-    expect(mockHttpsRequest).not.toHaveBeenCalled();
+    expect(mockHttpRequest).not.toHaveBeenCalled();
   });
 
   it('respects rate limiter rejection', async () => {
@@ -384,7 +395,7 @@ describe('HomeAssistantAdapter', () => {
       },
     });
 
-    expect(mockHttpsRequest).not.toHaveBeenCalled();
+    expect(mockHttpRequest).not.toHaveBeenCalled();
   });
 
   it('disconnect closes WebSocket and transport', async () => {
@@ -406,7 +417,7 @@ describe('HomeAssistantAdapter', () => {
   });
 
   it('sets status to error on failed send', async () => {
-    mockHttpsRequest.mockImplementation(mockHttpsResponse('Error', 500));
+    mockHttpRequest.mockImplementation(mockHttpResponse('Error', 500));
 
     mockWsOn.mockImplementation((event: string, handler: (...args: unknown[]) => void) => {
       if (event === 'message') {
