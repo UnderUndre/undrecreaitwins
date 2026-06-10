@@ -90,7 +90,9 @@ export type ChannelType =
   | 'email'
   | 'sms'
   | 'webhook'
-  | 'homeassistant';
+  | 'homeassistant'
+  | 'vk'
+  | 'avito';
 
 export type ChannelStatus = 'active' | 'degraded' | 'disconnected' | 'error';
 

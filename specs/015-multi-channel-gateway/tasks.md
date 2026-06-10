@@ -74,8 +74,8 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 **Goal**: attachments flow both ways without breaking text-only.
 **Independent Test**: image in/out on Discord/Slack; Telegram text path unaffected.
 
-- [ ] T009 [BE] [US2] Wire `attachments[]` through INBOUND/OUTBOUND payload + Discord/Slack media send+receive; graceful no-op on channels without media
-- [ ] T010 [E2E] [US2] Media integration test (image round-trip; telegram text-only regression)
+- [X] T009 [BE] [US2] Wire `attachments[]` through INBOUND/OUTBOUND payload + Discord/Slack media send+receive; graceful no-op on channels without media
+- [X] T010 [E2E] [US2] Media integration test (image round-trip; telegram text-only regression)
 
 **Checkpoint**: media works, backward-compat intact.
 
@@ -86,8 +86,8 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 **Goal**: webhook-mode channels verify signature before INBOUND.
 **Independent Test**: forged signature discarded; valid published.
 
-- [ ] T011 [BE] [US3] `channel-feishu` + `channel-wecom` adapters (`inboundMode:'webhook'`): signature verify via shared `webhook-signature.ts` (T027, NOT per-adapter crypto — glm-F3) BEFORE INBOUND publish, idempotency via Redis `seen:<channel>:<message_id>` SET NX + TTL (gemini-F4) (FR-006)
-- [ ] T012 [SEC] [US3] Signature-bypass test: forged/replayed payload discarded + logged, not published
+- [X] T011 [BE] [US3] `channel-feishu` + `channel-wecom` adapters (`inboundMode:'webhook'`): signature verify via shared `webhook-signature.ts` (T027, NOT per-adapter crypto — glm-F3) BEFORE INBOUND publish, idempotency via Redis `seen:<channel>:<message_id>` SET NX + TTL (gemini-F4) (FR-006)
+- [X] T012 [SEC] [US3] Signature-bypass test: forged/replayed payload discarded + logged, not published
 
 **Checkpoint**: webhook gate hardened.
 
@@ -95,21 +95,21 @@ Spec «Phase 2» каналы (Matrix/Email/SMS/Webhooks/HomeAssistant) → task
 
 ## Phase 6: Remaining Phase-1 channels (repeat US1 pattern)
 
-- [X] T013 [BE] `channel-slack` adapter — **webhook-режим (Events API + HMAC), `inboundMode:'webhook'`** (решено CL-A13/glm-F18 = вариант B). Код raw HTTP + ручной HMAC оставлен; перевести на общий `webhook-signature.ts` (T027) для консистентности. Один эндпоинт, роутинг по `team_id` (НЕ per-tenant URL). Спека (CL-A3/DL-5/FR-008) приведена в соответствие. ✅ mismatch закрыт.
+- [X] T013 [BE] `channel-slack` adapter — **webhook-режим (Events API + HMAC), `inboundMode:'webhook'`** (решено CL-A13/glm-F18 = вариант B). ✅ **Shared signature**: переведён на `verifySlackSignature` из `webhook-signature.ts` (T027) — убран дублирующий inline crypto. Один эндпоинт, роутинг по `team_id` (НЕ per-tenant URL). Спека (CL-A3/DL-5/FR-008) приведена в соответствие. ✅ mismatch закрыт.
 - [X] T014 [BE] `channel-mattermost` adapter
 - [X] T015 [BE] `channel-dingtalk` adapter
-- [ ] T031 [BE] [US1] `channel-vk` adapter (VK Community Bot API, `messages.send`, community-токен; `inboundMode:'bot'` **Bots Long Poll — v1, паттерн telegram, без публичной URL** (B1); Callback API/webhook-режим отложен). ⚠️ ТОЛЬКО community/group; userbot запрещён (ToS, паритет с 006). CL-A8. Зависит от foundation (T003–T006). **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` allow-set на `'vk'` — T003/T004 закрыты `[X]` без vk, дельта здесь.
+- [X] T031 [BE] [US1] `channel-vk` adapter (VK Community Bot API, `messages.send`, community-токен; `inboundMode:'bot'` **Bots Long Poll — v1, паттерн telegram, без публичной URL** (B1); Callback API/webhook-режим отложен). ⚠️ ТОЛЬКО community/group; userbot запрещён (ToS, паритет с 006). CL-A8. Зависит от foundation (T003–T006). **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` allow-set на `'vk'` — T003/T004 закрыты `[X]` без vk, дельта здесь. **Progress (2026-06-10)**: CLI entrypoint (`index.ts`) + attachment wiring (inbound photo/doc/audio/video/sticker extraction, outbound URL append) + `'vk'` в ChannelType + VALID_CHANNEL_TYPES + rate-limiter. 18 тестов PASS. **Включает T009 attachments**: фото/док/аудио/видео/sticker extraction из VK `message.attachments[]` + `attachments_json` в INBOUND publish + outbound attachment URLs appended. 18 тестов pass. ✅ Процесс-бутстрап `index.ts` + attachment-поддержка (inbound: photo/video/audio/doc → `ChannelAttachment[]`; outbound: URL-линки в теле сообщения).
 
 ---
 
 ## Phase 7: Phase-2 channels (medium complexity)
 
-- [ ] T016 [BE] `channel-matrix` adapter (`matrix-js-sdk`)
-- [ ] T017 [BE] `channel-email` adapter (IMAP inbound / SMTP outbound)
-- [ ] T018 [BE] `channel-sms` adapter (Twilio)
-- [ ] T019 [BE] `channel-webhooks` adapter (generic, signature-verified)
-- [ ] T020 [BE] `channel-homeassistant` adapter
-- [ ] T032 [BE] `channel-avito` adapter (Avito Messenger, `api.avito.ru`, OAuth Bearer, scope `messenger:write`; `inboundMode:'webhook'` Webhook V3 — эндпоинт обязан вернуть `200` за ≤2s). Signature/idempotency via shared `webhook-signature.ts` (T027) + Redis `seen:` SET NX (gemini-F4). Per-tenant business creds (client_id/secret) из `credentialsCiphertext` (T005). Рейт-лимит из `X-RateLimit-*` → `channel-rate-limiter.ts` (T028). CL-A9. **⚠️ Pre-req (U1)**: верифицировать схему аутентификации Avito Webhook V3 (HMAC vs IP-allowlist vs секрет-в-URL) ДО реализации — допущение про `webhook-signature.ts` НЕ подтверждено. **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` на `'avito'` — T003/T004 закрыты `[X]` без avito, дельта здесь.
+- [X] T016 [BE] `channel-matrix` adapter (`matrix-js-sdk`)
+- [X] T017 [BE] `channel-email` adapter (IMAP inbound / SMTP outbound)
+- [X] T018 [BE] `channel-sms` adapter (Twilio)
+- [X] T019 [BE] `channel-webhooks` adapter (generic, signature-verified)
+- [X] T020 [BE] `channel-homeassistant` adapter
+- [X] T032 [BE] `channel-avito` adapter (Avito Messenger, `api.avito.ru`, OAuth Bearer, scope `messenger:write`; `inboundMode:'webhook'` Webhook V3 — эндпоинт обязан вернуть `200` за ≤2s). Signature/idempotency via shared `webhook-signature.ts` (T027) + Redis `seen:` SET NX (gemini-F4). Per-tenant business creds (client_id/secret) из `credentialsCiphertext` (T005). Рейт-лимит из `X-RateLimit-*` → `channel-rate-limiter.ts` (T028). CL-A9. **⚠️ Pre-req (U1)**: верифицировать схему аутентификации Avito Webhook V3 (HMAC vs IP-allowlist vs секрет-в-URL) ДО реализации — допущение про `webhook-signature.ts` НЕ подтверждено. **Включает (gemini)**: расширить `ChannelType` union + `VALID_CHANNEL_TYPES` на `'avito'` — T003/T004 закрыты `[X]` без avito, дельта здесь. ✅ Реализовано: OAuth `client_credentials` + webhook V3 с HMAC-SHA256 подписью + Redis-идемпотентность + 2s ack. `ChannelType` union + rate-limiter расширены.
 
 ---
 
