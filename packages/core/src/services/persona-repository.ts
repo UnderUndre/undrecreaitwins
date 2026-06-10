@@ -1,10 +1,12 @@
 import { eq, and, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { personas } from '../models/index.js';
 import { withTenantContext } from '../db.js';
 import { NotFoundError, ConflictError } from '@undrecreaitwins/shared';
 import type { PersonaTraits, ModelPreferences } from '@undrecreaitwins/shared';
 
 type NewPersona = {
+  id?: string;
   name: string;
   slug: string;
   systemPrompt: string;
@@ -31,6 +33,7 @@ export class PersonaRepository {
       const rows = await tx
         .insert(personas)
         .values({
+          id: data.id ?? randomUUID(),
           tenantId,
           name: data.name,
           slug: data.slug,

@@ -6,7 +6,7 @@ export const trainingJobs = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull(),
-    personaId: uuid('persona_id').notNull(),
+    personaId: text('persona_id').notNull(),
     sourceType: text('source_type').notNull(),
     sourceFileRef: text('source_file_ref').notNull(),
     status: text('status').notNull().default('pending'),

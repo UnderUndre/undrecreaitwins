@@ -5,7 +5,7 @@ export const channelInstances = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull(),
-    personaId: uuid('persona_id').notNull(),
+    personaId: text('persona_id').notNull(),
     channelType: text('channel_type').notNull(),
     config: jsonb('config').notNull().$type<Record<string, unknown>>(),
     credentialsCiphertext: text('credentials_ciphertext'),

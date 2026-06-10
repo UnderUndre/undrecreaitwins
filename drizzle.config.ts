@@ -5,6 +5,6 @@ export default defineConfig({
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL || 'postgresql://undre:changeme@localhost:5433/twinengine',
+    url: process.env.DATABASE_URL!,
   },
 });

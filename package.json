@@ -14,8 +14,8 @@
     "validate": "pnpm -r run validate",
     "lint": "pnpm -r run lint",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:migrate": "node --env-file=.env node_modules/drizzle-kit/bin.cjs migrate",
+    "db:push": "node --env-file=.env node_modules/drizzle-kit/bin.cjs push"
   },
   "engines": {
     "node": ">=20.0.0",
@@ -24,6 +24,7 @@
   "packageManager": "pnpm@9.15.4",
   "devDependencies": {
     "drizzle-kit": "^0.31.10",
+    "pg": "^8.21.0",
     "postgres": "^3.4.0",
     "tsx": "^4.22.3"
   },

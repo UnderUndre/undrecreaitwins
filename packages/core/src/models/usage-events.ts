@@ -5,7 +5,7 @@ export const usageEvents = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull(),
-    personaId: uuid('persona_id').notNull(),
+    personaId: text('persona_id').notNull(),
     conversationId: uuid('conversation_id').notNull(),
     provider: text('provider').notNull(),
     model: text('model').notNull(),

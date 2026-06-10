@@ -48,7 +48,7 @@ export const assistantMcpBinding = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull(),
-    personaId: uuid('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
+    personaId: text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
     catalogEntryId: uuid('catalog_entry_id').notNull().references(() => mcpCatalogEntry.id, { onDelete: 'cascade' }),
     enabled: boolean('enabled').notNull().default(true),
     toolOverrides: jsonb('tool_overrides').$type<Array<{

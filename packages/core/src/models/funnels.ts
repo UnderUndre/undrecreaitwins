@@ -9,7 +9,7 @@ export const funnelDefinitions = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull().references(() => tenants.id),
-    personaId: uuid('persona_id').notNull().references(() => personas.id),
+    personaId: text('persona_id').notNull().references(() => personas.id),
     name: text('name').notNull(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

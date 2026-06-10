@@ -7,6 +7,7 @@ import type { PersonaTraits, ModelPreferences } from '@undrecreaitwins/shared';
 const repo = new PersonaRepository();
 
 const createPersonaSchema = z.object({
+  id: z.string().min(1).max(128).optional(),
   name: z.string().min(1).max(200),
   slug: z.string().regex(/^[a-z0-9][a-z0-9_-]{1,62}[a-z0-9]$/),
   system_prompt: z.string().min(1),
@@ -57,6 +58,7 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
     }
     const body = parseResult.data;
     const persona = await repo.create(request.tenantId, {
+      id: body.id,
       name: body.name,
       slug: body.slug,
       systemPrompt: body.system_prompt,

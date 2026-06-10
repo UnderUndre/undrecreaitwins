@@ -1,10 +1,10 @@
-import { pgTable, uuid, text, timestamp, jsonb, bigint, uniqueIndex, index, real, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, jsonb, bigint, uniqueIndex, index, real, boolean } from 'drizzle-orm/pg-core';
 import type { PersonaTraits, ModelPreferences } from '@undrecreaitwins/shared';
 
 export const personas = pgTable(
   'personas',
   {
-    id: uuid('id').defaultRandom().primaryKey(),
+    id: text('id').primaryKey(),
     tenantId: text('tenant_id').notNull(),
     name: text('name').notNull(),
     slug: text('slug').notNull(),

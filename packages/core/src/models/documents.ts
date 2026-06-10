@@ -7,7 +7,7 @@ export const documents = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull(),
-    personaId: uuid('persona_id')
+    personaId: text('persona_id')
       .notNull()
       .references(() => personas.id, { onDelete: 'cascade' }),
     filename: text('filename').notNull(),
@@ -30,7 +30,7 @@ export const documentChunks = pgTable(
     documentId: uuid('document_id')
       .notNull()
       .references(() => documents.id, { onDelete: 'cascade' }),
-    personaId: uuid('persona_id').notNull(),
+    personaId: text('persona_id').notNull(),
     chunkIndex: integer('chunk_index').notNull(),
     text: text('text').notNull(),
     embedding: vector('embedding').notNull(),

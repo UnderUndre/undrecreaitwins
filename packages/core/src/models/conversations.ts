@@ -5,7 +5,7 @@ export const conversations = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull(),
-    personaId: uuid('persona_id').notNull(),
+    personaId: text('persona_id').notNull(),
     channelId: uuid('channel_id'),
     externalUserId: text('external_user_id').notNull(),
     summary: text('summary'),

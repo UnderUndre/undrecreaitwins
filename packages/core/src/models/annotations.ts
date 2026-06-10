@@ -7,7 +7,7 @@ export const annotations = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     tenantId: text('tenant_id').notNull(),
-    personaId: uuid('persona_id')
+    personaId: text('persona_id')
       .notNull()
       .references(() => personas.id, { onDelete: 'cascade' }),
     originalQuery: text('original_query').notNull(),
