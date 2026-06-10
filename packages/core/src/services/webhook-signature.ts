@@ -88,7 +88,7 @@ export function verifySlackSignature(
 ): boolean {
   // Reject requests older than 5 minutes
   const fiveMinutes = 300;
-  const elapsed = Math.floor(Date.now() / 1000) - parseInt(timestamp, 10);
+  const elapsed = Math.abs(Math.floor(Date.now() / 1000) - parseInt(timestamp, 10));
   if (isNaN(elapsed) || elapsed > fiveMinutes) {
     return false;
   }

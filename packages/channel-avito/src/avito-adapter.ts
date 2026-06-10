@@ -86,7 +86,8 @@ export class AvitoAdapter implements ChannelAdapter {
   private server: Server;
   private port: number;
   private tokenCache: TokenCache | null = null;
-  private seenMessages: Map<string, number> = new Map(); // in-memory idempotency + TTL cleanup
+  private tokenPromise: Promise<string> | null = null;
+  private seenMessages: Map<string, number> = new Map();
   private cleanupInterval?: ReturnType<typeof setInterval>;
 
   constructor(config: {
@@ -126,41 +127,52 @@ export class AvitoAdapter implements ChannelAdapter {
   // --- OAuth token management ---
 
   private async getAccessToken(): Promise<string> {
-    // Reuse cached token if still valid (60s buffer)
     if (this.tokenCache && this.tokenCache.expiresAt > Date.now() + 60_000) {
       return this.tokenCache.accessToken;
     }
 
-    const body = JSON.stringify({
-      client_id: this.clientId,
-      client_secret: this.clientSecret,
-      grant_type: 'client_credentials',
-    });
-
-    const url = new URL(`${AVITO_API_BASE}/token`);
-
-    const response = await this.httpPost(url, body, {
-      'Content-Type': 'application/json',
-    });
-
-    if (!response.ok || !response.data?.['access_token']) {
-      throw new AppError(
-        `Avito OAuth failed: ${JSON.stringify(response.data)}`,
-        401,
-        'AUTH_FAILED',
-      );
+    if (this.tokenPromise) {
+      return this.tokenPromise;
     }
 
-    const expiresIn = typeof response.data['expires_in'] === 'number'
-      ? response.data['expires_in'] * 1000
-      : 86_400_000; // default 24h
+    this.tokenPromise = (async () => {
+      try {
+        const body = JSON.stringify({
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+          grant_type: 'client_credentials',
+        });
 
-    this.tokenCache = {
-      accessToken: response.data['access_token'] as string,
-      expiresAt: Date.now() + expiresIn,
-    };
+        const url = new URL(`${AVITO_API_BASE}/token`);
 
-    return this.tokenCache.accessToken;
+        const response = await this.httpPost(url, body, {
+          'Content-Type': 'application/json',
+        });
+
+        if (!response.ok || !response.data?.['access_token']) {
+          throw new AppError(
+            `Avito OAuth failed: ${JSON.stringify(response.data)}`,
+            401,
+            'AUTH_FAILED',
+          );
+        }
+
+        const expiresIn = typeof response.data['expires_in'] === 'number'
+          ? response.data['expires_in'] * 1000
+          : 86_400_000;
+
+        this.tokenCache = {
+          accessToken: response.data['access_token'] as string,
+          expiresAt: Date.now() + expiresIn,
+        };
+
+        return this.tokenCache.accessToken;
+      } finally {
+        this.tokenPromise = null;
+      }
+    })();
+
+    return this.tokenPromise;
   }
 
   // --- Inbound webhook handler ---
@@ -177,7 +189,7 @@ export class AvitoAdapter implements ChannelAdapter {
     const signature = req.headers['x-signature'] as string | undefined
       ?? req.headers['x-avito-signature'] as string | undefined;
 
-    if (signature && !verifyGenericWebhookSignature(body, signature, this.webhookSecret)) {
+    if (!signature || !verifyGenericWebhookSignature(body, signature, this.webhookSecret)) {
       logger.warn({ channelId: this.channelId }, 'Avito webhook signature verification failed');
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'invalid_signature' }));
@@ -400,6 +412,7 @@ export class AvitoAdapter implements ChannelAdapter {
             ...headers,
             'Content-Length': Buffer.byteLength(body),
           },
+          timeout: 10_000,
         },
         (res) => {
           const chunks: Buffer[] = [];
@@ -421,6 +434,9 @@ export class AvitoAdapter implements ChannelAdapter {
         },
       );
       req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy(new Error('Request timeout'));
+      });
       req.write(body);
       req.end();
     });

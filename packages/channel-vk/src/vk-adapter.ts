@@ -387,7 +387,7 @@ export class VkAdapter implements ChannelAdapter {
       v: VK_API_VERSION,
       peer_id: peerId,
       message: content,
-      random_id: String(Date.now()),
+      random_id: String(Math.floor(Math.random() * 2147483647)),
     });
 
     try {

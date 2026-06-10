@@ -430,7 +430,11 @@ export class SlackAdapter implements ChannelAdapter {
     try {
       return await new Promise<string>((resolve, reject) => {
         const mod = url.startsWith('https') ? httpsRequest : httpRequest;
-        const req = mod(url, { headers: { 'Authorization': `Bearer ${this.botToken}` } }, (res) => {
+        const headers: Record<string, string> = {};
+        if (url.includes('slack.com')) {
+          headers['Authorization'] = `Bearer ${this.botToken}`;
+        }
+        const req = mod(url, { headers }, (res) => {
           const chunks: Buffer[] = [];
           res.on('data', (chunk: Buffer) => chunks.push(chunk));
           res.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
