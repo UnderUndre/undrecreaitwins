@@ -79,3 +79,24 @@ export function verifyGenericWebhookSignature(
     : signature;
   return verifySignature(body, cleanSignature, secret);
 }
+
+export function verifySlackSignature(
+  body: string,
+  timestamp: string,
+  signature: string,
+  secret: string,
+): boolean {
+  // Reject requests older than 5 minutes
+  const fiveMinutes = 300;
+  const elapsed = Math.abs(Math.floor(Date.now() / 1000) - parseInt(timestamp, 10));
+  if (isNaN(elapsed) || elapsed > fiveMinutes) {
+    return false;
+  }
+
+  // Slack signs: v0:timestamp:body
+  const sigBasestring = `v0:${timestamp}:${body}`;
+  const hash = createHmac('sha256', secret).update(sigBasestring).digest('hex');
+  const expected = `v0=${hash}`;
+
+  return safeCompare(signature, expected);
+}

@@ -103,7 +103,7 @@ export class DiscordAdapter implements ChannelAdapter {
       persona_slug: this.personaSlug,
       content: message.content,
       tenant_id: this.tenantId,
-      external_user_id: msg.channelId,
+      external_user_id: msg.author.id,
     };
 
     if (attachments.length > 0) {

@@ -12,6 +12,8 @@ export const CHANNEL_TYPES = [
   'sms',
   'webhook',
   'homeassistant',
+  'vk',
+  'avito',
 ] as const;
 
 export const TRAINING_SOURCE_TYPES = ['telegram_json', 'whatsapp_txt', 'generic_jsonl'] as const;

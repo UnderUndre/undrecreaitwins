@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       discord.js:
         specifier: ^14.26.4
         version: 14.26.4(bufferutil@4.1.0)(utf-8-validate@5.0.10)
@@ -20,6 +23,9 @@ importers:
       undici:
         specifier: 6.21.1
         version: 6.21.1
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     devDependencies:
       drizzle-kit:
         specifier: ^0.31.10
@@ -69,6 +75,31 @@ importers:
       zod:
         specifier: ^3.24.0
         version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@22.19.19)(tsx@4.22.3)
+
+  packages/channel-avito:
+    dependencies:
+      '@undrecreaitwins/core':
+        specifier: workspace:*
+        version: link:../core
+      '@undrecreaitwins/shared':
+        specifier: workspace:*
+        version: link:../shared
+      ioredis:
+        specifier: ^5.4.0
+        version: 5.11.1
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -383,6 +414,28 @@ importers:
       telegram:
         specifier: ^2.22.0
         version: 2.26.22
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@22.19.19)(tsx@4.22.3)
+
+  packages/channel-vk:
+    dependencies:
+      '@undrecreaitwins/core':
+        specifier: workspace:*
+        version: link:../core
+      '@undrecreaitwins/shared':
+        specifier: workspace:*
+        version: link:../shared
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

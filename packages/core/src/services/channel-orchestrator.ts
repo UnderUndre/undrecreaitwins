@@ -11,6 +11,7 @@ const chatService = new ChatService();
 const VALID_CHANNEL_TYPES = new Set<string>([
   'telegram', 'whatsapp_evolution', 'discord', 'slack', 'mattermost',
   'dingtalk', 'feishu', 'wecom', 'matrix', 'email', 'sms', 'webhook', 'homeassistant',
+  'vk', 'avito',
 ]);
 
 function extractChannelType(raw: string | undefined): string {

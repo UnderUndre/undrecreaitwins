@@ -163,7 +163,7 @@ describe('DiscordAdapter', () => {
 
   it('outbound message from stream sends to Discord channel', async () => {
     mockChannelsFetch.mockResolvedValueOnce({
-      isTextBased: () => true,
+      isSendable: () => true,
       send: mockChannelSend,
     });
 
@@ -216,7 +216,7 @@ describe('DiscordAdapter', () => {
 
   it('sets status to error on failed send', async () => {
     mockChannelsFetch.mockResolvedValueOnce({
-      isTextBased: () => true,
+      isSendable: () => true,
       send: vi.fn().mockRejectedValue(new Error('Discord API error')),
     });
 
@@ -386,7 +386,7 @@ describe('DiscordAdapter', () => {
   describe('OUTBOUND attachments', () => {
     it('sends message with files parameter when attachments are present', async () => {
       mockChannelsFetch.mockResolvedValueOnce({
-        isTextBased: () => true,
+        isSendable: () => true,
         send: mockChannelSend,
       });
 
@@ -422,7 +422,7 @@ describe('DiscordAdapter', () => {
 
     it('sends message with Buffer attachment bytes', async () => {
       mockChannelsFetch.mockResolvedValueOnce({
-        isTextBased: () => true,
+        isSendable: () => true,
         send: mockChannelSend,
       });
 
@@ -460,7 +460,7 @@ describe('DiscordAdapter', () => {
 
     it('falls back to text-only send when attachments array is empty', async () => {
       mockChannelsFetch.mockResolvedValueOnce({
-        isTextBased: () => true,
+        isSendable: () => true,
         send: mockChannelSend,
       });
 
@@ -481,7 +481,7 @@ describe('DiscordAdapter', () => {
 
     it('outbound consumer parses attachments_json and sends with files', async () => {
       mockChannelsFetch.mockResolvedValueOnce({
-        isTextBased: () => true,
+        isSendable: () => true,
         send: mockChannelSend,
       });
 
@@ -520,7 +520,7 @@ describe('DiscordAdapter', () => {
 
     it('outbound consumer handles invalid attachments_json gracefully', async () => {
       mockChannelsFetch.mockResolvedValueOnce({
-        isTextBased: () => true,
+        isSendable: () => true,
         send: mockChannelSend,
       });
 
@@ -544,7 +544,7 @@ describe('DiscordAdapter', () => {
 
     it('text-only outbound still works unchanged', async () => {
       mockChannelsFetch.mockResolvedValueOnce({
-        isTextBased: () => true,
+        isSendable: () => true,
         send: mockChannelSend,
       });
 

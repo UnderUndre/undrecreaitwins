@@ -22,6 +22,8 @@ const PLATFORM_LIMITS: Record<string, PlatformLimits> = {
   sms: { maxMessagesPerSecond: 1, maxMessageLength: 1600, maxMediaSizeBytes: 0 },
   webhook: { maxMessagesPerSecond: 100, maxMessageLength: 1000000, maxMediaSizeBytes: 100 * 1024 * 1024 },
   homeassistant: { maxMessagesPerSecond: 10, maxMessageLength: 50000, maxMediaSizeBytes: 10 * 1024 * 1024 },
+  vk: { maxMessagesPerSecond: 3, maxMessageLength: 4096, maxMediaSizeBytes: 50 * 1024 * 1024 },
+  avito: { maxMessagesPerSecond: 1, maxMessageLength: 10000, maxMediaSizeBytes: 10 * 1024 * 1024 },
 };
 
 const DEFAULT_LIMITS: PlatformLimits = { maxMessagesPerSecond: 100, maxMessageLength: 1000000, maxMediaSizeBytes: 100 * 1024 * 1024 };

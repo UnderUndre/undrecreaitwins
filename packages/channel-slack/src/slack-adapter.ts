@@ -1,14 +1,42 @@
-import type { ChannelAdapter, ChannelMessage, ChannelHealth, ChannelStatus } from '@undrecreaitwins/shared';
+import type { ChannelAdapter, ChannelMessage, ChannelHealth, ChannelStatus, ChannelAttachment } from '@undrecreaitwins/shared';
 import { AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
 import { ChannelTransport, type StreamMessage } from '@undrecreaitwins/core/services/channel-transport.js';
 import { channelRateLimiter } from '@undrecreaitwins/core/services/channel-rate-limiter.js';
+import { verifySlackSignature } from '@undrecreaitwins/core/services/webhook-signature.js';
 import pino from 'pino';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { request as httpsRequest } from 'node:https';
 import { request as httpRequest } from 'node:http';
 
 const logger = pino({ name: 'slack-adapter' });
+
+const CRLF = '\r\n';
+
+function classifyAttachmentKind(mimetype: string | undefined): ChannelAttachment['kind'] {
+  if (!mimetype) return 'file';
+  if (mimetype.startsWith('image/')) return 'image';
+  if (mimetype.startsWith('audio/')) return 'audio';
+  if (mimetype.startsWith('video/')) return 'video';
+  return 'file';
+}
+
+interface SlackFile {
+  id?: string;
+  url_private?: string;
+  mimetype?: string;
+  name?: string;
+  size?: number;
+}
+
+function extractSlackAttachments(files: SlackFile[] | undefined): ChannelAttachment[] {
+  if (!files || files.length === 0) return [];
+  return files.map((f) => ({
+    kind: classifyAttachmentKind(f.mimetype),
+    url: f.url_private,
+    mime: f.mimetype ?? 'application/octet-stream',
+    filename: f.name,
+  }));
+}
 
 export class SlackAdapter implements ChannelAdapter {
   private transport: ChannelTransport;
@@ -95,6 +123,11 @@ export class SlackAdapter implements ChannelAdapter {
           return;
         }
 
+        const slackFiles = event['subtype'] === 'file_share'
+          ? (event['files'] as SlackFile[] | undefined)
+          : undefined;
+        const attachments = extractSlackAttachments(slackFiles);
+
         const message: ChannelMessage = {
           id: event['event_ts'] as string ?? String(Date.now()),
           channelId: this.channelId,
@@ -105,9 +138,10 @@ export class SlackAdapter implements ChannelAdapter {
             channel: event['channel'],
             threadTs: event['thread_ts'],
           },
+          ...(attachments.length > 0 && { attachments }),
         };
 
-        await this.transport.publish(REDIS_STREAMS.INBOUND, {
+        const publishPayload: Record<string, string> = {
           channel_type: 'slack',
           channel_id: this.channelId,
           message_id: message.id,
@@ -115,7 +149,18 @@ export class SlackAdapter implements ChannelAdapter {
           content: message.content,
           tenant_id: this.tenantId,
           external_user_id: (event['channel'] as string) ?? '',
-        });
+        };
+
+        if (attachments.length > 0) {
+          publishPayload.attachments_json = JSON.stringify(attachments.map((a) => ({
+            kind: a.kind,
+            url: a.url,
+            mime: a.mime,
+            filename: a.filename,
+          })));
+        }
+
+        await this.transport.publish(REDIS_STREAMS.INBOUND, publishPayload);
 
         if (this.incomingHandler) {
           await this.incomingHandler(message);
@@ -135,23 +180,7 @@ export class SlackAdapter implements ChannelAdapter {
     signature?: string,
   ): boolean {
     if (!timestamp || !signature) return false;
-
-    // Reject requests older than 5 minutes
-    const fiveMinutes = 300;
-    const elapsed = Math.floor(Date.now() / 1000) - parseInt(timestamp, 10);
-    if (isNaN(elapsed) || elapsed > fiveMinutes) {
-      return false;
-    }
-
-    const sigBasestring = `v0:${timestamp}:${body}`;
-    const hash = createHmac('sha256', this.signingSecret).update(sigBasestring).digest('hex');
-    const expected = `v0=${hash}`;
-
-    try {
-      return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-    } catch {
-      return false;
-    }
+    return verifySlackSignature(body, timestamp, signature, this.signingSecret);
   }
 
   private readBody(req: IncomingMessage): Promise<string> {
@@ -194,6 +223,15 @@ export class SlackAdapter implements ChannelAdapter {
           return;
         }
 
+        let attachments: ChannelAttachment[] | undefined;
+        if (msg.data.attachments_json) {
+          try {
+            attachments = JSON.parse(msg.data.attachments_json) as ChannelAttachment[];
+          } catch {
+            logger.warn({ channelId: this.channelId }, 'Failed to parse attachments_json from outbound stream');
+          }
+        }
+
         await this.send({
           id: msg.data.message_id ?? '',
           channelId: this.channelId,
@@ -203,6 +241,7 @@ export class SlackAdapter implements ChannelAdapter {
           metadata: {
             channel: msg.data.slack_channel,
           },
+          ...(attachments && attachments.length > 0 && { attachments }),
         });
       },
     ).catch(() => {
@@ -225,6 +264,12 @@ export class SlackAdapter implements ChannelAdapter {
 
   async send(message: ChannelMessage): Promise<void> {
     const channel = (message.metadata?.['channel'] as string) ?? message.externalUserId;
+
+    // If attachments present, send via files.upload for image files + text via chat.postMessage
+    if (message.attachments && message.attachments.length > 0) {
+      await this.sendWithAttachments(message, channel);
+      return;
+    }
 
     const payload = JSON.stringify({
       channel,
@@ -274,6 +319,132 @@ export class SlackAdapter implements ChannelAdapter {
       this._status = 'error';
       logger.error({ err, channelId: this.channelId }, 'Slack send failed');
       throw err;
+    }
+  }
+
+  private async sendWithAttachments(message: ChannelMessage, channel: string): Promise<void> {
+    const imageAttachments = message.attachments!.filter((a) => a.kind === 'image');
+
+    // Send images via files.upload
+    for (const att of imageAttachments) {
+      try {
+        const fileContent = att.bytes
+          ? att.bytes.toString('base64')
+          : att.url
+            ? await this.downloadAsBase64(att.url)
+            : undefined;
+
+        if (!fileContent) {
+          logger.warn({ filename: att.filename }, 'Slack attachment has no bytes or URL — skipping');
+          continue;
+        }
+
+        const boundary = `----FormBoundary${Date.now()}`;
+        const parts: Buffer[] = [];
+
+        // Add file content
+        parts.push(Buffer.from(
+          `--${boundary}${CRLF}` +
+          `Content-Disposition: form-data; name="file"; filename="${att.filename ?? 'image.png'}"${CRLF}` +
+          `Content-Type: ${att.mime}${CRLF}${CRLF}`,
+        ));
+        parts.push(Buffer.from(fileContent, 'base64'));
+        parts.push(Buffer.from(CRLF));
+
+        // Add channels
+        parts.push(Buffer.from(
+          `--${boundary}${CRLF}` +
+          `Content-Disposition: form-data; name="channels"${CRLF}${CRLF}` +
+          `${channel}${CRLF}`,
+        ));
+
+        // Add initial comment (message text)
+        if (message.content) {
+          parts.push(Buffer.from(
+            `--${boundary}${CRLF}` +
+            `Content-Disposition: form-data; name="initial_comment"${CRLF}${CRLF}` +
+            `${message.content}${CRLF}`,
+          ));
+        }
+
+        parts.push(Buffer.from(`--${boundary}--${CRLF}`));
+
+        const body = Buffer.concat(parts);
+
+        await new Promise<void>((resolve, reject) => {
+          const req = httpsRequest(
+            {
+              hostname: 'slack.com',
+              path: '/api/files.upload',
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${this.botToken}`,
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': body.length,
+              },
+            },
+            (res) => {
+              const chunks: Buffer[] = [];
+              res.on('data', (chunk: Buffer) => chunks.push(chunk));
+              res.on('end', () => {
+                const respBody = Buffer.concat(chunks).toString('utf8');
+                try {
+                  const parsed = JSON.parse(respBody) as Record<string, unknown>;
+                  if (parsed['ok'] !== true) {
+                    reject(new Error(`Slack files.upload error: ${parsed['error'] ?? 'unknown'}`));
+                  } else {
+                    resolve();
+                  }
+                } catch {
+                  reject(new Error('Invalid JSON response from Slack files.upload'));
+                }
+              });
+            },
+          );
+          req.on('error', reject);
+          req.write(body);
+          req.end();
+        });
+      } catch (err) {
+        logger.warn({ err, filename: att.filename }, 'Failed to upload attachment to Slack, skipping');
+      }
+    }
+
+    // Send non-image attachments as text links (graceful no-op for unsupported types)
+    const nonImageAttachments = message.attachments!.filter((a) => a.kind !== 'image');
+    if (nonImageAttachments.length > 0) {
+      const links = nonImageAttachments
+        .map((a) => a.url ?? `[${a.filename ?? a.kind}]`)
+        .join('\n');
+      const text = message.content ? `${message.content}\n${links}` : links;
+
+      await this.send({
+        ...message,
+        content: text,
+        attachments: undefined,
+      });
+    }
+  }
+
+  private async downloadAsBase64(url: string): Promise<string | undefined> {
+    try {
+      return await new Promise<string>((resolve, reject) => {
+        const mod = url.startsWith('https') ? httpsRequest : httpRequest;
+        const headers: Record<string, string> = {};
+        if (url.includes('slack.com')) {
+          headers['Authorization'] = `Bearer ${this.botToken}`;
+        }
+        const req = mod(url, { headers }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+        });
+        req.on('error', reject);
+        req.end();
+      });
+    } catch (err) {
+      logger.warn({ err, url: url.slice(0, 80) }, 'Failed to download attachment');
+      return undefined;
     }
   }
 
