@@ -17,6 +17,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(pg@8.21.0)(postgres@3.4.9)
+      officeparser:
+        specifier: ^7.1.0
+        version: 7.1.0
       pino:
         specifier: ^9.6.0
         version: 9.14.0

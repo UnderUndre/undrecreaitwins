@@ -46,4 +46,10 @@ export const documentRoutes = async (fastify: FastifyInstance) => {
     await documentService.delete(request.tenantId, id);
     reply.status(204);
   });
+
+  fastify.delete('/v1/assistants/:assistantId/documents/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    await documentService.delete(request.tenantId, id);
+    reply.status(204);
+  });
 };

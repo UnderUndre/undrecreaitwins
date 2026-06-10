@@ -1,7 +1,6 @@
 import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
-// @ts-ignore
-import officeParser from 'officeparser';
+import { parseOffice } from 'officeparser';
 import { withTenantContext } from '@undrecreaitwins/core/db.js';
 import { documents, documentChunks } from '@undrecreaitwins/core/models/index.js';
 import { embeddingService } from '@undrecreaitwins/core/services/index.js';
@@ -21,7 +20,7 @@ export async function processDocumentIngest(job: Job<IngestJobData>): Promise<vo
 
     // 1. Parse document
     const text = await new Promise<string>((resolve, reject) => {
-      officeParser.parseBuffer(buffer, (data: any, err: any) => {
+      parseOffice(buffer, (data: any, err: any) => {
         if (err) reject(err);
         else resolve(data);
       });
