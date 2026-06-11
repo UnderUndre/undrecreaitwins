@@ -30,7 +30,8 @@ export const sandboxRoutes = async (fastify: FastifyInstance) => {
     // US3: Real reply path with isTestThread=true (FR-008)
     return chatService.complete({
       tenantId: request.tenantId,
-      personaSlug: body.model,
+      personaId: body.model,
+      personaSlug: body.model, // fallback if not UUID
       messages: body.messages.map((m) => ({
         role: m.role,
         content: m.content,
