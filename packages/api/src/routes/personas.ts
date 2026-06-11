@@ -70,6 +70,30 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
     return toApiPersona(persona as Record<string, unknown>);
   });
 
+  fastify.post('/v1/assistants', async (request, reply) => {
+    const parseResult = createPersonaSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      throw new ValidationError(
+        parseResult.error.issues.map((i) => ({
+          field: i.path.join('.'),
+          message: i.message,
+        })),
+      );
+    }
+    const body = parseResult.data;
+    const persona = await repo.create(request.tenantId, {
+      id: body.id,
+      name: body.name,
+      slug: body.slug,
+      systemPrompt: body.system_prompt,
+      traits: body.traits as PersonaTraits | undefined,
+      modelPreferences: body.model_preferences as ModelPreferences | undefined,
+      annotationSimilarityThreshold: body.annotation_similarity_threshold,
+    });
+    reply.status(201);
+    return toApiPersona(persona as Record<string, unknown>);
+  });
+
   fastify.get('/v1/personas', async (request) => {
     const query = request.query as Record<string, string | undefined>;
     const parsedLimit = Number(query.limit);

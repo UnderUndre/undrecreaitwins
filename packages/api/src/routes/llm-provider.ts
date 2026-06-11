@@ -9,14 +9,27 @@ const service = new ProviderConfigService(db);
 
 const providerConfigSchema = z.object({
   provider_type: z.string().min(1).default('custom'),
-  base_url: z.string().url(),
-  model_id: z.string().min(1),
-  api_key: z.string().min(1),
+  base_url: z.string().url().optional(),
+  baseUrl: z.string().url().optional(),
+  model_id: z.string().min(1).optional(),
+  modelId: z.string().min(1).optional(),
+  api_key: z.string().min(1).optional(),
+  apiKey: z.string().min(1).optional(),
   temperature: z.number().min(0).max(2).optional(),
   max_tokens: z.number().int().min(1).optional(),
+  maxTokens: z.number().int().min(1).optional(),
   enabled: z.boolean().optional(),
   version: z.number().int().min(0).optional(),
-});
+}).transform((data) => ({
+  provider_type: data.provider_type,
+  base_url: data.base_url ?? data.baseUrl ?? '',
+  model_id: data.model_id ?? data.modelId ?? '',
+  api_key: data.api_key ?? data.apiKey ?? '',
+  temperature: data.temperature,
+  max_tokens: data.max_tokens ?? data.maxTokens,
+  enabled: data.enabled,
+  version: data.version,
+}));
 
 const testConnectionSchema = z.object({
   base_url: z.string().url(),
@@ -58,6 +71,42 @@ export const llmProviderRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   fastify.delete('/v1/llm-provider/tenant', async (request, reply) => {
+    const deleted = await service.deleteTenantDefault(request.tenantId);
+    if (!deleted) throw new NotFoundError('TenantLLMDefault', request.tenantId);
+    reply.status(204);
+  });
+
+  fastify.get('/v1/tenant/llm-provider', async (request) => {
+    const config = await service.getTenantDefault(request.tenantId);
+    if (!config) throw new NotFoundError('TenantLLMDefault', request.tenantId);
+    return config;
+  });
+
+  fastify.put('/v1/tenant/llm-provider', async (request) => {
+    const parseResult = providerConfigSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      request.log.warn({ body: request.body, issues: parseResult.error.issues }, 'Tenant LLM provider validation failed');
+      throw new ValidationError(
+        parseResult.error.issues.map((i) => ({
+          field: i.path.join('.'),
+          message: i.message,
+        })),
+      );
+    }
+    const body = parseResult.data;
+    return service.upsertTenantDefault(request.tenantId, {
+      providerType: body.provider_type,
+      baseUrl: body.base_url,
+      modelId: body.model_id,
+      apiKey: body.api_key,
+      temperature: body.temperature,
+      maxTokens: body.max_tokens,
+      enabled: body.enabled,
+      expectedVersion: body.version,
+    });
+  });
+
+  fastify.delete('/v1/tenant/llm-provider', async (request, reply) => {
     const deleted = await service.deleteTenantDefault(request.tenantId);
     if (!deleted) throw new NotFoundError('TenantLLMDefault', request.tenantId);
     reply.status(204);
