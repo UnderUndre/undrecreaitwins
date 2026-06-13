@@ -1,13 +1,17 @@
 import { Worker, Queue, type Job, UnrecoverableError } from 'bullmq';
 import { AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
-import { ChatService, type ChatResponse } from '../chat-service.js';
+import type { ChatResponse } from '../chat-service.js';
 import { ChannelTransport } from '../channel-transport.js';
 import pino from 'pino';
 
 const logger = pino({ name: 'provider-retry-worker' });
 
-const chatService = new ChatService();
 const transport = new ChannelTransport();
+
+async function getChatService() {
+  const mod = await import('../chat-service.js');
+  return new mod.ChatService();
+}
 
 // ---------------------------------------------------------------------------
 // Queue configuration
@@ -243,6 +247,7 @@ async function executeRetryAttempt(
     'executeRetryAttempt: re-running via ChatService',
   );
 
+  const chatService = await getChatService();
   return chatService.complete({
     tenantId: payload.tenantId,
     personaSlug: payload.personaSlug,

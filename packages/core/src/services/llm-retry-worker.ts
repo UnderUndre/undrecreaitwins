@@ -1,7 +1,7 @@
 import { Worker, Queue, type Job } from 'bullmq';
 import { eq, and, lte } from 'drizzle-orm';
 import { REDIS_STREAMS } from '@undrecreaitwins/shared';
-import { ChatService, type ChatResponse } from './chat-service.js';
+import type { ChatResponse } from './chat-service.js';
 import { ChannelTransport } from './channel-transport.js';
 import { withTenantContext, db } from '../db.js';
 import { llmRetryJobs } from '../models/delivery-record.js';
@@ -10,8 +10,12 @@ import pino from 'pino';
 
 const logger = pino({ name: 'llm-retry-worker' });
 
-const chatService = new ChatService();
 const transport = new ChannelTransport();
+
+async function getChatService() {
+  const mod = await import('./chat-service.js');
+  return new mod.ChatService();
+}
 
 // ---------------------------------------------------------------------------
 // Queue configuration (spec §1.4: 1s→2s→4s→8s→16s, max 5 attempts)
@@ -174,6 +178,7 @@ async function executeRetryAttempt(
     'executeRetryAttempt: re-running via ChatService',
   );
 
+  const chatService = await getChatService();
   return chatService.complete({
     tenantId: payload.tenantId,
     personaSlug: payload.personaSlug,
@@ -252,7 +257,8 @@ export class LLMRetryWorker {
 
         // 3. Won the CAS — persist messages and deliver to channel
         try {
-          await chatService.persistMessages(tenantId, conversationId, job.data.messages, content);
+          const svc = await getChatService();
+          await svc.persistMessages(tenantId, conversationId, job.data.messages, content);
 
           await transport.publish(REDIS_STREAMS.OUTBOUND, {
             channel_id: job.data.chatId,
