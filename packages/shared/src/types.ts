@@ -121,6 +121,8 @@ export interface ChannelHealth {
   lastPingAt?: Date;
   error?: string;
   uptimeSeconds?: number;
+  /** MTProto session state (017-hybrid-agent-core, task 5.2) */
+  sessionState?: 'active' | 'revoked' | 'expired' | 'unverified';
 }
 
 export interface ChannelAdapter {
@@ -264,6 +266,14 @@ export interface ConversationFunnelState {
   currentStageId: string;
   consecutiveStuckCount: number;
   capturedSlots: Record<string, CapturedSlot>;
+  /** Active topics in current conversation (017-hybrid-agent-core, task 4.6) */
+  activeTopics: string[];
+  /** Unresolved objections raised by user (017-hybrid-agent-core, task 4.6) */
+  unresolvedObjections: string[];
+  /** Messages sent within current stage; resets on stage advance (017-hybrid-agent-core, task 4.6) */
+  messagesOnCurrentStage: number;
+  /** Stage name offered by bot, awaiting affirmative response (017-hybrid-agent-core, task 4.6) */
+  pendingStageOffer: string | null;
   version: number;
   updatedAt: Date;
 }
@@ -283,5 +293,7 @@ export interface FunnelSelectionMetadata {
     from: string;
     to: string;
     type: 'advance' | 'regression' | 'stay';
+    blocked?: boolean;
+    blockedReason?: string;
   };
 }

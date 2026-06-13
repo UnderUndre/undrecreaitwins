@@ -58,6 +58,10 @@ export class FunnelRuntime {
           currentStageId: firstStage!.id,
           consecutiveStuckCount: 0,
           capturedSlots: {},
+          activeTopics: [],
+          unresolvedObjections: [],
+          messagesOnCurrentStage: 0,
+          pendingStageOffer: null,
           version: 0
         };
         await this.repository.createConversationState(newState as any);
@@ -68,6 +72,39 @@ export class FunnelRuntime {
 
       if (!funnel || !state) {
         return { metadata: { type: 'no_funnel' } };
+      }
+
+      // 2.5. Affirmative Advance (017-hybrid-agent-core, task 4.8)
+      const stateAny = state as any;
+      const pendingOffer: string | null = stateAny.pendingStageOffer ?? null;
+      if (pendingOffer) {
+        const affirmative = this.detectAffirmative(message);
+        if (affirmative) {
+          const offeredStage = funnel.stages.find((s: FunnelStage) => s.name === pendingOffer);
+          if (offeredStage) {
+            // Route to offered stage
+            await this.repository.updateConversationState(conversationId, {
+              currentStageId: offeredStage.id,
+              consecutiveStuckCount: 0,
+              messagesOnCurrentStage: 0,
+              pendingStageOffer: null,
+            } as any, state.version);
+
+            return {
+              metadata: {
+                type: 'affirmative_advance',
+                stage_transition: { from: state.currentStageId, to: offeredStage.id, type: 'advance' },
+              } as any,
+            };
+          }
+        } else {
+          // Non-affirmative response clears the offer
+          await this.repository.updateConversationState(conversationId, {
+            pendingStageOffer: null,
+          } as any, state.version);
+          // Re-read state after clearing offer
+          state = await this.repository.getConversationState(conversationId) ?? state;
+        }
       }
 
       // 3. Scoring
@@ -119,21 +156,42 @@ export class FunnelRuntime {
         const transition = await this.evaluateTransitions(state, funnel, currentStage, best);
         
         let updatedStuckCount = state.consecutiveStuckCount;
+        let updatedMsgsOnStage = (state as any).messagesOnCurrentStage ?? 0;
+        updatedMsgsOnStage++; // Increment per message (task 4.6)
+
         if (transition.type === 'stay') {
           updatedStuckCount++;
         } else {
-          updatedStuckCount = 0;
+          // ── Stage Advance Guard (017-hybrid-agent-core, task 4.7) ──
+          const blocked = this.evaluateAdvanceGuard(state, currentStage, message);
+          if (blocked) {
+            // Transition blocked — deliver answer without stage change
+            updatedStuckCount++;
+          } else {
+            updatedStuckCount = 0;
+            updatedMsgsOnStage = 0; // Reset on stage advance (task 4.6)
+          }
         }
 
         const stuckAction = this.handleStuck(updatedStuckCount, currentStage, funnel.config);
         
         const update: Partial<ConversationFunnelState> = {
           consecutiveStuckCount: updatedStuckCount,
+          messagesOnCurrentStage: updatedMsgsOnStage,
         };
 
-        if (transition.type !== 'stay') {
+        const advanceBlocked = transition.type !== 'stay' && this.evaluateAdvanceGuard(state, currentStage, message);
+
+        if (transition.type !== 'stay' && !advanceBlocked) {
           update.currentStageId = transition.to;
           selectionMetadata.stage_transition = transition;
+        } else if (advanceBlocked) {
+          // Guard blocked the transition — metadata reflects block
+          selectionMetadata.stage_transition = {
+            ...transition,
+            blocked: true,
+            blockedReason: 'advance_guard',
+          };
         }
 
         if (stuckAction) {
@@ -157,6 +215,103 @@ export class FunnelRuntime {
         await this.redis.del(lockKey);
       }
     }
+  }
+
+  /**
+   * Affirmative Advance detection (017-hybrid-agent-core, task 4.8)
+   * Word-boundary regex on common Russian affirmative phrases with negation guards.
+   * Returns true if user message is affirmative.
+   */
+  private detectAffirmative(message: string): boolean {
+    const normalized = message.trim().toLowerCase();
+
+    // Negation guard patterns — if any match, NOT affirmative
+    if (/\bне\s*(хочу|надо|нужн|буду|думаю|планирую|собираюсь)\b/.test(normalized)) return false;
+    if (/\bнет\b/.test(normalized) && !/\bда\b/.test(normalized)) return false;
+
+    // Affirmative patterns (with negation guards built-in)
+    const affirmativePatterns: RegExp[] = [
+      /\bда\b(?!.*\bнет\b)/,       // 'да' without 'нет' in same message
+      /\bдавай(те)?\b/,
+      /\bок(?:ей)?\b/,
+      /\bхорошо\b/,
+      /\bсоглас(ен|на|ны)\b/,
+      /\b(?<!не\s?)\bхочу\b/,      // 'хочу' not preceded by 'не'
+      /\bго(тов|това|товы)\b/,
+      /\bпожалуйста\b/,
+      /\bконечно\b/,
+      /\bбез\s*проблем\b/,
+      /\bточно\b/,
+      /\bофк\b/,                    // slang
+      /\byes\b/,
+      /\bsure\b/,
+      /\bok(?:ay)?\b/,
+      /\bplease\b/,
+      /\blet'?s?\b/,
+      /\bgo\s*ahead\b/,
+    ];
+
+    return affirmativePatterns.some(p => p.test(normalized));
+  }
+
+  /**
+   * Stage Advance Guard (017-hybrid-agent-core, task 4.7)
+   * Deterministic gate evaluated BEFORE any LLM-proposed stage transition.
+   * Returns true if transition should be BLOCKED.
+   */
+  private evaluateAdvanceGuard(
+    state: ConversationFunnelState,
+    currentStage: FunnelStage,
+    userMessage: string
+  ): boolean {
+    const stateAny = state as any;
+
+    // (1) Unresolved objections → BLOCK
+    const unresolvedObjections: string[] = stateAny.unresolvedObjections ?? [];
+    if (unresolvedObjections.length > 0) {
+      return true;
+    }
+
+    // (2) Min messages on stage not reached → BLOCK
+    const msgsOnStage: number = stateAny.messagesOnCurrentStage ?? 0;
+    const minMessages: number = (currentStage as any).minMessages ?? 1;
+    if (msgsOnStage < minMessages) {
+      return true;
+    }
+
+    // (3) Last user message is a question → BLOCK unless buying-intent
+    const BUYING_INTENT_KEYWORDS = [
+      'купить', 'оплатить', 'сколько стоит', 'как оплатить',
+      'где платить', 'оформить', 'цена', 'стоимость', 'заказать',
+      'buy', 'purchase', 'price', 'pay', 'order', 'checkout',
+    ];
+    const isQuestion = userMessage.trim().endsWith('?')
+      || /^(как|что|где|когда|почему|сколько|зачем|кто|какой|который)\b/i.test(userMessage.trim())
+      || /^(how|what|where|when|why|how much|who|which)\b/i.test(userMessage.trim());
+
+    if (isQuestion) {
+      const hasBuyingIntent = BUYING_INTENT_KEYWORDS.some(kw =>
+        userMessage.toLowerCase().includes(kw)
+      );
+      if (!hasBuyingIntent) {
+        return true;
+      }
+    }
+
+    // (4) Topic continues in current stage → BLOCK
+    // (Simple heuristic: if active topics overlap with stage slots, user is still on topic)
+    const activeTopics: string[] = stateAny.activeTopics ?? [];
+    const stageSlotNames: string[] = ((currentStage as any).requiredSlots ?? []) as string[];
+    if (activeTopics.length > 0 && stageSlotNames.length > 0) {
+      const overlap = activeTopics.some(t =>
+        stageSlotNames.some(s => s.toLowerCase() === t.toLowerCase())
+      );
+      if (overlap) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private async evaluateTransitions(

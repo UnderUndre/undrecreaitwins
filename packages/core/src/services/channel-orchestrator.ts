@@ -61,24 +61,18 @@ export class ChannelOrchestrator {
             tenantId: tenant_id,
             personaSlug: persona_slug,
             messages: [{ role: 'user', content }],
+            channelContext: {
+              channelMessageId: message_id,
+              chatId: channel_id,
+              peerId: external_user_id,
+            },
           });
 
-          const replyContent = response.choices[0]?.message?.content ?? '';
-          const outPayload: Record<string, string> = {
-            channel_id,
-            message_id,
-            reply_to: message_id,
-            content: replyContent,
-            tenant_id,
-            external_user_id,
-          };
-
-          if (d['attachments_json']) {
-            outPayload.attachments_json = d['attachments_json'];
+          // Channel conversations: answer is already delivered via CAS in ChatService.
+          // Return the response for caller compatibility (logging/metrics).
+          if (response.metadata?.degraded_mode) {
+            logger.info({ channel_id, message_id }, 'Response delivered via fallback path');
           }
-
-          this.assertNotStreaming(outPayload);
-          await this.transport.publish(REDIS_STREAMS.OUTBOUND, outPayload);
         } catch (err) {
           if (isRetryableProviderError(err) && err instanceof AppError) {
             const conversationId = err.context.conversationId;
