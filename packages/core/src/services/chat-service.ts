@@ -1,4 +1,4 @@
-import { eq, sql, and, ne } from 'drizzle-orm';
+import { eq, sql, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { Redis } from 'ioredis';
 import { Queue } from 'bullmq';
@@ -12,7 +12,7 @@ import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { AnnotationService } from './annotation-service.js';
 import { EmbeddingService } from './embedding-service.js';
 import { LangfuseService } from './langfuse-service.js';
-import { withTenantContext, db } from '../db.js';
+import { withTenantContext } from '../db.js';
 import { groundingEngine } from './index.js';
 import { conversations, messages, usageEvents, deliveryRecords, llmRetryJobs } from '../models/index.js';
 import { ServiceUnavailableError, NotFoundError, AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
@@ -21,6 +21,8 @@ import { routeTurn } from './hermes/turn-router.js';
 import { HermesExecutor } from './hermes/hermes-executor.js';
 import { ChannelTransport } from './channel-transport.js';
 import { enqueueLLMRetry } from './llm-retry-worker.js';
+import { isRetryableProviderError } from './retry/provider-retry.worker.js';
+import { tryCasFinalDelivery } from './delivery-cas.js';
 
 interface ChatRequest {
   tenantId: string;
@@ -34,6 +36,7 @@ interface ChatRequest {
   maxTokens?: number;
   isTestThread?: boolean;
   source?: string;
+  persist?: boolean;
   /** Channel context — present only for channel conversations (not sandbox/API). Enables delivery ledger + fallback. */
   channelContext?: {
     channelMessageId: string;
@@ -118,8 +121,28 @@ const fallbackQueue = new Queue('llm-fallback', {
 });
 const channelTransport = new ChannelTransport();
 
-// Per-conversation fallback rotation: maps convId → last-used fallback index
-const lastFallbackIndex = new Map<string, number>();
+// Per-conversation fallback rotation: maps convId → { index, ts } with TTL eviction
+const FALLBACK_TTL_MS = 30 * 60 * 1000;
+const lastFallbackIndex = new Map<string, { index: number; ts: number }>();
+
+function getFallbackIndex(convId: string): number {
+  const entry = lastFallbackIndex.get(convId);
+  if (entry && Date.now() - entry.ts < FALLBACK_TTL_MS) {
+    return entry.index;
+  }
+  return -1;
+}
+
+function setFallbackIndex(convId: string, index: number): void {
+  lastFallbackIndex.set(convId, { index, ts: Date.now() });
+
+  if (lastFallbackIndex.size > 5000) {
+    const now = Date.now();
+    for (const [key, val] of lastFallbackIndex) {
+      if (now - val.ts > FALLBACK_TTL_MS) lastFallbackIndex.delete(key);
+    }
+  }
+}
 
 let hermesExecutor: HermesExecutor | undefined;
 function getHermesExecutor(): HermesExecutor | undefined {
@@ -332,6 +355,8 @@ export class ChatService {
         return {
           id: `strict-rag-${Date.now()}`,
           object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: 'funnel-1.0',
           choices: [{ message: { role: 'assistant', content: systemPrompt }, index: 0, finish_reason: 'stop' }],
           usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
         };
@@ -397,12 +422,14 @@ export class ChatService {
         rawUserMessage: lastUserMessage
       });
 
-      await this.persistMessages(
-        request.tenantId,
-        conversationId,
-        request.messages,
-        finalContent,
-      );
+      if (request.persist !== false) {
+        await this.persistMessages(
+          request.tenantId,
+          conversationId,
+          request.messages,
+          finalContent,
+        );
+      }
 
       await this.emitUsageEvent(
         request.tenantId,
@@ -423,7 +450,7 @@ export class ChatService {
         }
 
         // CAS: only deliver if no one else already did
-        const casWon = await this.tryCasFinalDelivery(
+        const casWon = await tryCasFinalDelivery(
           request.tenantId,
           conversationId,
           request.channelContext.channelMessageId,
@@ -441,7 +468,7 @@ export class ChatService {
             }
             delay = Math.min(delay, 120_000); // hard cap
 
-            logger.info(
+            console.log(
               { tenantId: request.tenantId, conversationId, delayMs: delay, baseMs: pacing.baseDelayMs },
               '[ChatService] Pacing hold before delivery',
             );
@@ -454,7 +481,7 @@ export class ChatService {
                 request.tenantId,
                 delay,
               ).catch((e) => {
-                logger.warn({ err: e }, '[ChatService] Typing indicator failed');
+                console.warn({ err: e }, '[ChatService] Typing indicator failed');
               });
             }
 
@@ -472,7 +499,7 @@ export class ChatService {
               external_user_id: request.channelContext.peerId,
             });
           } catch (deliverErr) {
-            logger.error(
+            console.error(
               { err: deliverErr, tenantId: request.tenantId, conversationId },
               '[ChatService] Failed to deliver answer to outbound stream',
             );
@@ -501,10 +528,11 @@ export class ChatService {
       // Hard timeout / LLM error → enqueue retry for channel conversations
       if (isChannel && request.channelContext) {
         const isHardTimeout = err instanceof Error && err.message === 'HARD_TIMEOUT';
-        const isLlmError = err instanceof Error;
+        const isLlmError = isRetryableProviderError(err);
 
         if (isHardTimeout || isLlmError) {
           try {
+            const messagesToPersist = allMessages.length > 0 ? allMessages : request.messages;
             // Dedup: INSERT llm_retry_jobs row (unique constraint on tenant+conv+msg)
             await withTenantContext(request.tenantId, async (tx) => {
               await tx.insert(llmRetryJobs).values({
@@ -512,7 +540,7 @@ export class ChatService {
                 tenantId: request.tenantId,
                 conversationId,
                 channelMessageId: request.channelContext!.channelMessageId,
-                messagesPayload: allMessages,
+                messagesPayload: messagesToPersist,
                 status: 'pending',
               });
             });
@@ -526,7 +554,7 @@ export class ChatService {
               channelMessageId: request.channelContext!.channelMessageId,
               chatId: request.channelContext!.chatId,
               peerId: request.channelContext!.peerId,
-              messages: allMessages,
+              messages: messagesToPersist,
             });
           } catch (retryErr) {
             console.error(
@@ -815,7 +843,7 @@ export class ChatService {
    * (017-hybrid-agent-core, task 4.5)
    */
   private async buildFunnelContext(
-    funnelResult: { scriptedReply?: string; metadata: any },
+    _funnelResult: { scriptedReply?: string; metadata: any },
     conversationId: string,
   ): Promise<{ stageName?: string; slots?: Record<string, string>; promptHint?: string } | undefined> {
     try {
@@ -1105,29 +1133,6 @@ export class ChatService {
     }
   }
 
-  private async tryCasFinalDelivery(
-    tenantId: string,
-    conversationId: string,
-    channelMessageId: string,
-  ): Promise<boolean> {
-    const result = await withTenantContext(tenantId, async (tx) => {
-      const rows = await tx
-        .update(deliveryRecords)
-        .set({ state: 'final_delivered', updatedAt: new Date() })
-        .where(
-          and(
-            eq(deliveryRecords.tenantId, tenantId),
-            eq(deliveryRecords.conversationId, conversationId),
-            eq(deliveryRecords.channelMessageId, channelMessageId),
-            ne(deliveryRecords.state, 'final_delivered'),
-          ),
-        )
-        .returning({ id: deliveryRecords.id });
-      return rows.length > 0;
-    });
-    return result;
-  }
-
   /**
    * Execute soft fallback: pick a fallback message with rotation,
    * CAS pending → fallback_sent, deliver to channel.
@@ -1137,7 +1142,7 @@ export class ChatService {
     tenantId: string,
     conversationId: string,
     channelMessageId: string,
-    personaId: string,
+    _personaId: string,
     chatId: string,
     peerId: string,
     fallbackMessages: string[],
@@ -1164,7 +1169,7 @@ export class ChatService {
     if (!casResult) return; // already in fallback_sent or final_delivered
 
     // Pick fallback with rotation (random excluding last-used index)
-    const lastIdx = lastFallbackIndex.get(conversationId) ?? -1;
+    const lastIdx = getFallbackIndex(conversationId);
     let idx: number;
     if (fallbackMessages.length === 1) {
       idx = 0;
@@ -1173,8 +1178,8 @@ export class ChatService {
         idx = Math.floor(Math.random() * fallbackMessages.length);
       } while (idx === lastIdx);
     }
-    lastFallbackIndex.set(conversationId, idx);
-    const fallbackText = fallbackMessages[idx];
+    setFallbackIndex(conversationId, idx);
+    const fallbackText = fallbackMessages[idx] ?? '';
 
     // Deliver to channel
     await channelTransport.publish(REDIS_STREAMS.OUTBOUND, {

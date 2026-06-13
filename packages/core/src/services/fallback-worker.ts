@@ -1,9 +1,7 @@
 import { Worker, type Job } from 'bullmq';
 import pino from 'pino';
 import { ChatService } from './chat-service.js';
-import { withTenantContext } from '../db.js';
-import { deliveryRecords } from '../models/index.js';
-import { eq, and } from 'drizzle-orm';
+
 
 const logger = pino({ name: 'fallback-worker' });
 const chatService = new ChatService();

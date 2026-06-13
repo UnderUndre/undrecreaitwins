@@ -73,12 +73,6 @@ export const personas = pgTable(
     /** RAG mode: 'static' = auto-inject in prompt (Phase 1), 'tool' = search_docs tool (Phase 2). */
     ragMode: text('rag_mode').notNull().default('static'),
 
-    /** Strict RAG mode: when true, refuse to answer if retrieval returns no relevant chunks. */
-    strictRag: boolean('strict_rag').notNull().default(false),
-
-    /** Custom refusal text when strict RAG blocks generation. NULL = built-in default. */
-    strictRagRefusal: text('strict_rag_refusal'),
-
     /** Funnel generation mode: 'single' = 1 LLM call with structured output, 'dual' = 2 calls (FR-006). */
     funnelGeneration: text('funnel_generation').notNull().default('single'),
 

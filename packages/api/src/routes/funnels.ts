@@ -3,15 +3,15 @@ import { z } from 'zod';
 import { FunnelRepository } from '@undrecreaitwins/core/services/funnel/funnel-repository.js';
 import { db } from '@undrecreaitwins/core/db.js';
 import { personas } from '@undrecreaitwins/core/models/index.js';
-import { eq as eqOp } from 'drizzle-orm';
+import { eq as eqOp, and } from 'drizzle-orm';
 import { ValidationError } from '@undrecreaitwins/shared';
 
 const repo = new FunnelRepository();
 
-async function getPersonaFunnelGeneration(personaId: string): Promise<string> {
+async function getPersonaFunnelGeneration(tenantId: string, personaId: string): Promise<string> {
   const row = await db.select({ funnelGeneration: personas.funnelGeneration })
     .from(personas)
-    .where(eqOp(personas.id, personaId))
+    .where(and(eqOp(personas.id, personaId), eqOp(personas.tenantId, tenantId)))
     .limit(1);
   return row[0]?.funnelGeneration ?? 'single';
 }
@@ -83,7 +83,7 @@ export const funnelRoutes: FastifyPluginAsync = async (fastify) => {
     // Extract funnelGeneration from persona definition (stored on the definition)
     // The definition is attached via getActiveVersion → definition relation
     const funnelGeneration = (funnel as any).definition?.funnelGeneration
-      ?? (await getPersonaFunnelGeneration(personaId))
+      ?? (await getPersonaFunnelGeneration(tenantId, personaId))
       ?? 'single';
 
     return {
@@ -123,7 +123,7 @@ export const funnelRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── PUT /v1/personas/:id/funnel ───
   // Updates funnel config + stages by creating a new version.
   // Optionally updates funnelGeneration on the persona.
-  fastify.put('/v1/personas/:id/funnel', async (request, reply) => {
+  fastify.put('/v1/personas/:id/funnel', async (request, _reply) => {
     const { id: personaId } = request.params as { id: string };
     const tenantId = request.tenantId;
 
@@ -178,7 +178,7 @@ export const funnelRoutes: FastifyPluginAsync = async (fastify) => {
     if (body.funnelGeneration) {
       await db.update(personas)
         .set({ funnelGeneration: body.funnelGeneration })
-        .where(eqOp(personas.id, personaId));
+        .where(and(eqOp(personas.id, personaId), eqOp(personas.tenantId, tenantId)));
     }
 
     // Return updated funnel

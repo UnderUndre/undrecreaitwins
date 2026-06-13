@@ -1,10 +1,11 @@
 import { Worker, Queue, type Job } from 'bullmq';
-import { eq, and, ne, lte } from 'drizzle-orm';
+import { eq, and, lte } from 'drizzle-orm';
 import { REDIS_STREAMS } from '@undrecreaitwins/shared';
 import { ChatService, type ChatResponse } from './chat-service.js';
 import { ChannelTransport } from './channel-transport.js';
 import { withTenantContext, db } from '../db.js';
-import { deliveryRecords, llmRetryJobs } from '../models/delivery-record.js';
+import { llmRetryJobs } from '../models/delivery-record.js';
+import { tryCasFinalDelivery } from './delivery-cas.js';
 import pino from 'pino';
 
 const logger = pino({ name: 'llm-retry-worker' });
@@ -103,40 +104,6 @@ export async function enqueueLLMRetry(
 }
 
 // ---------------------------------------------------------------------------
-// CAS delivery — only ONE final answer wins the race
-// ---------------------------------------------------------------------------
-
-/**
- * Attempt atomic CAS on delivery_records:
- *   UPDATE delivery_records SET state = 'final_delivered' WHERE state != 'final_delivered'
- * Returns true if the CAS was won (row updated).
- */
-async function tryCasFinalDelivery(
-  tenantId: string,
-  conversationId: string,
-  channelMessageId: string,
-): Promise<boolean> {
-  const result = await withTenantContext(tenantId, async (tx) => {
-    const rows = await tx
-      .update(deliveryRecords)
-      .set({ state: 'final_delivered', updatedAt: new Date() })
-      .where(
-        and(
-          eq(deliveryRecords.tenantId, tenantId),
-          eq(deliveryRecords.conversationId, conversationId),
-          eq(deliveryRecords.channelMessageId, channelMessageId),
-          ne(deliveryRecords.state, 'final_delivered'),
-        ),
-      )
-      .returning({ id: deliveryRecords.id });
-
-    return rows.length > 0;
-  });
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
 // Mark llm_retry_jobs row status
 // ---------------------------------------------------------------------------
 
@@ -213,6 +180,7 @@ async function executeRetryAttempt(
     personaId: payload.personaId,
     conversationId: payload.conversationId,
     messages: payload.messages,
+    persist: false,
   });
 }
 
@@ -282,8 +250,10 @@ export class LLMRetryWorker {
           } satisfies LLMRetryJobResult;
         }
 
-        // 3. Won the CAS — deliver to channel
+        // 3. Won the CAS — persist messages and deliver to channel
         try {
+          await chatService.persistMessages(tenantId, conversationId, job.data.messages, content);
+
           await transport.publish(REDIS_STREAMS.OUTBOUND, {
             channel_id: job.data.chatId,
             message_id: channelMessageId,

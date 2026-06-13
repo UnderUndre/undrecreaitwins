@@ -2,7 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { withTenantContext } from '@undrecreaitwins/core/db.js';
 import { llmRetryJobs } from '@undrecreaitwins/core/models/index.js';
-import { eq, and, lte, desc } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 
 const querySchema = z.object({
   status: z.enum(['pending', 'in_progress', 'completed', 'dlq']).optional(),

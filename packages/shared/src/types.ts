@@ -293,5 +293,7 @@ export interface FunnelSelectionMetadata {
     from: string;
     to: string;
     type: 'advance' | 'regression' | 'stay';
+    blocked?: boolean;
+    blockedReason?: string;
   };
 }

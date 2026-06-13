@@ -1,7 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { PersonaRepository } from '@undrecreaitwins/core/services/persona-repository.js';
-import { db } from '@undrecreaitwins/core/db.js';
 import { personas } from '@undrecreaitwins/core/models/index.js';
 import { eq } from 'drizzle-orm';
 import { withTenantContext } from '@undrecreaitwins/core/db.js';
