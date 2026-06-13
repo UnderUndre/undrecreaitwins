@@ -4,27 +4,54 @@ import { db } from '../db.js';
 import { documents, documentChunks } from '../models/documents.js';
 import { EmbeddingService } from './embedding-service.js';
 import { eq } from 'drizzle-orm';
-import { IngestJobData } from './document-service.js';
+import type { IngestJobData } from './document-service.js';
 
+/**
+ * Test-only document ingestion worker.
+ *
+ * Production document-ingestion is handled by
+ * `packages/training/src/jobs/document-ingest-worker.ts` which uses
+ * `withTenantContext`, FK-violation handling, and character-based splitting.
+ *
+ * This class exists solely for integration tests and intentionally binds to
+ * `'document-ingestion-test'` (not `'document-ingestion'`) to avoid competing
+ * with the production training worker.
+ */
 export class DocumentWorker {
   private worker: Worker<IngestJobData>;
   private embeddingService: EmbeddingService;
 
-  constructor(embeddingService: EmbeddingService) {
+  /**
+   * @param embeddingService - embedding service instance (mocked in tests)
+   * @param queueName - queue to consume. Defaults to 'document-ingestion-test'.
+   *   MUST NOT be 'document-ingestion' — that queue belongs to the training worker.
+   */
+  constructor(
+    embeddingService: EmbeddingService,
+    queueName: string = 'document-ingestion-test',
+  ) {
+    if (queueName === 'document-ingestion') {
+      throw new Error(
+        "DocumentWorker must not bind to 'document-ingestion' queue — " +
+          "that queue is owned by the training worker (packages/training/src/jobs/). " +
+          "Use 'document-ingestion-test' or a custom name for test isolation.",
+      );
+    }
+
     this.embeddingService = embeddingService;
-    
-    this.worker = new Worker(
-      'document-ingestion',
+
+    this.worker = new Worker<IngestJobData>(
+      queueName,
       async (job: Job<IngestJobData>) => {
         await this.processIngest(job);
       },
-      { 
+      {
         connection: {
           host: 'localhost',
           port: 6379,
-          ...(process.env.REDIS_URL ? this.parseRedisUrl(process.env.REDIS_URL) : {})
-        }
-      }
+          ...(process.env.REDIS_URL ? this.parseRedisUrl(process.env.REDIS_URL) : {}),
+        },
+      },
     );
 
     this.worker.on('failed', (job, err) => {
@@ -50,7 +77,8 @@ export class DocumentWorker {
 
     try {
       // 1. Update status to 'parsing'
-      await db.update(documents)
+      await db
+        .update(documents)
         .set({ status: 'parsing' })
         .where(eq(documents.id, documentId));
 
@@ -63,7 +91,7 @@ export class DocumentWorker {
         });
       });
 
-      // 3. Chunk text (Basic recursive splitter)
+      // 3. Chunk text (word-based splitter — adequate for tests)
       const chunks = this.splitText(text, 512, 50);
 
       // 4. Embed and store chunks
@@ -84,13 +112,14 @@ export class DocumentWorker {
       }
 
       // 5. Update status to 'ready'
-      await db.update(documents)
+      await db
+        .update(documents)
         .set({ status: 'ready' })
         .where(eq(documents.id, documentId));
-
     } catch (err: any) {
       console.error(`Failed to ingest document ${documentId}:`, err);
-      await db.update(documents)
+      await db
+        .update(documents)
         .set({ status: 'failed', error: err.message })
         .where(eq(documents.id, documentId));
       throw err;
@@ -100,7 +129,7 @@ export class DocumentWorker {
   private splitText(text: string, chunkSize: number, overlap: number): string[] {
     const chunks: string[] = [];
     const words = text.split(/\s+/).filter(Boolean);
-    
+
     let start = 0;
     while (start < words.length) {
       const end = Math.min(start + chunkSize, words.length);
@@ -108,7 +137,7 @@ export class DocumentWorker {
       if (end === words.length) break;
       start += chunkSize - overlap;
     }
-    
+
     return chunks;
   }
 

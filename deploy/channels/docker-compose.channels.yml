@@ -240,5 +240,63 @@ services:
           cpus: "0.5"
     restart: unless-stopped
 
+  # =============================================
+  # Phase 3 Channels — 017-hybrid-agent-core
+  # =============================================
+
+  channel-telegram:
+    build:
+      context: ../
+      dockerfile: packages/channel-telegram/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-telegram.env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-telegram-mtproto:
+    build:
+      context: ../
+      dockerfile: packages/channel-telegram-mtproto/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-telegram-mtproto.env
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  channel-vk:
+    build:
+      context: ../
+      dockerfile: packages/channel-vk/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - secrets/channel-vk.env
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
 volumes:
   redis-data:
