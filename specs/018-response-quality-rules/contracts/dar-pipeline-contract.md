@@ -42,6 +42,8 @@
 
 **Error handling**: Product API unavailable → use cached rules (if fresh) or skip DAR (reply delivered without custom rules). Logged via pino.
 
+**⚠️ Cross-repo dependency (Product ai-twins 019)**: Product MUST implement ETag generation on `GET /v1/correction-rules` response (compute hash/version of the rule set, return as `ETag` header + `snapshotVersion` in body). Product MUST honor `If-None-Match` header → return `304 Not Modified` when the rule set is unchanged. Without this, Engine falls back to full pull every time (works correctly, but wastes bandwidth + adds latency on every cached check).
+
 ---
 
 ## 2. Engine → Product: Event Push (HTTP)

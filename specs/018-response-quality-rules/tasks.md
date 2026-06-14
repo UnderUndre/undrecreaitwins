@@ -165,6 +165,7 @@
     7. If re-validation passes → use rewritten text, push events with `verdict: 'rewritten'`.
     8. If re-validation fails → rollback to original text, push N events (fan-out, one per triggered rewrite rule) with `verdict: 'rolled_back'`, `rolledBack: true`.
     9. Push overflow-skipped events (`verdict: 'overflow_skipped'`).
+  10. Defensive check: if `rule.turnScope === 'conversation'`, log warning `"turnScope=conversation not yet supported, treating as single-message"` and proceed as single-message (spec edge case).
   - Wrap entire flow in try/catch: any error → log + return original text + empty events (fail-open, FR-014).
   - Return `DARResult: { text, events, latencyMs, stages }`.
   - **Files**: `packages/core/src/services/correction-rules/dar-pipeline.ts` (MODIFY — full pipeline)
