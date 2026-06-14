@@ -2,11 +2,13 @@
 
 ## Overview
 
-Three storage changes: NEW `feedback_memories` table (vector + metadata — does NOT exist despite spec claiming dependency on 017), NEW `conversation_feedback_states` table (dedup tracking), MODIFY `personas` (config fields).
+Three storage changes: NEW `feedback_memories` table (vector + metadata — designed in ai-twins spec 017-hybrid-agent-core Phase 2 but NOT yet implemented), NEW `conversation_feedback_states` table (dedup tracking), MODIFY `personas` (config fields).
+
+**Cross-repo alignment**: The `feedback_memories` table schema is defined in `ai-twins/specs/017-hybrid-agent-core/data-model.md` (Phase 2, lines 101-134). This plan implements it in the Engine Drizzle layer, aligned with the 017 design. Key schema notes from 017: `status` has **3 values** (`pending`/`active`/`archived` — archived for cap-200 rotation, not just 2); 017 uses `assistant_id` column name (Product naming) but Engine tables use `persona_id` — this plan uses `persona_id` for Engine consistency.
 
 ## New Table: `feedback_memories`
 
-**⚠️ This table does NOT exist.** Spec 019 claims dependency on "017-hybrid-agent-core — all built, needs wiring." Incorrect: spec 017 is `language-guard-validator`. No `feedback_memories` in code or migrations (0000–0010). Created here.
+**⚠️ This table is designed in ai-twins spec 017-hybrid-agent-core (Phase 2, data-model.md:101-134) but NOT implemented.** No migration, no Prisma model, no code. Created here, aligned with 017 design.
 
 ```typescript
 // packages/core/src/models/feedback-memories.ts
@@ -16,23 +18,30 @@ import { personas } from './personas';
 import { conversations } from './conversations';
 import { vector } from './types';
 
-export const feedbackStatusEnum = pgEnum('feedback_status', ['pending', 'active']);
+// 3 values per 017 data-model.md:122 — 'archived' for cap-200 rotation (old memories archived, not deleted)
+export const feedbackStatusEnum = pgEnum('feedback_status', ['pending', 'active', 'archived']);
 
 export const feedbackMemories = pgTable('feedback_memories', {
   id: uuid('id').defaultRandom().primaryKey(),
   tenantId: text('tenant_id').notNull(),
-  personaId: text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),
-  contextEmbedding: vector('context_embedding', 1024).notNull(),  // BGE-M3 1024-dim
+  personaId: text('persona_id').notNull().references(() => personas.id, { onDelete: 'cascade' }),  // 017 uses 'assistant_id'; Engine uses 'persona_id' (same entity)
+  contextEmbedding: vector('context_embedding', 1024).notNull(),  // BGE-M3 1024-dim (NOT NULL per 017 final)
   lesson: text('lesson').notNull(),                                // LLM-distilled correction text
   status: feedbackStatusEnum('status').notNull().default('pending'),
-  operatorRole: text('operator_role'),                             // e.g., 'sales_manager', 'qa'
+  operatorRole: text('operator_role'),                             // CHECK IN ('owner','admin','member') per 017
   weight: real('weight').default(1.0),                             // operator_role × recency decay multiplier
   sourceConversationId: uuid('source_conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+  // Additional columns from 017 design (Phase 2):
+  userQuery: text('user_query'),                                   // original user message that triggered correction
+  wrongResponse: text('wrong_response'),                           // the bad assistant reply (nullable)
+  correctedResponse: text('corrected_response'),                   // operator's corrected version (nullable)
+  feedbackType: text('feedback_type'),                             // e.g., 'tone', 'factual', 'style'
+  errorCategory: text('error_category'),                           // e.g., 'false_promise', 'off_topic'
+  operatorId: text('operator_id'),                                 // FK → users (who submitted)
+  embeddingModel: text('embedding_model').default('bge-m3'),       // model used for context_embedding
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
-  // HNSW index for cosine vector search
-  // CREATE INDEX ... USING hnsw (context_embedding vector_cosine_ops)
   tenantPersonaStatusIdx: index('feedback_memories_tenant_persona_status_idx')
     .on(table.tenantId, table.personaId, table.status),
 }));
@@ -50,7 +59,7 @@ CREATE INDEX feedback_memories_context_embedding_hnsw_idx
 |-------|------|---------|
 | `contextEmbedding` | vector(1024) | BGE-M3 embedding of the context that triggered the correction. Cosine-searched at retrieval time. |
 | `lesson` | TEXT | LLM-distilled operator correction (e.g., "Не используй 'Уважаемый клиент' — обращайся по имени"). Injected into prompt. |
-| `status` | ENUM('pending','active') | Approval gate. Only `active` memories are retrieved (SC-004). `pending` = submitted but not yet approved. |
+| `status` | ENUM('pending','active','archived') | Approval gate + cap-200 rotation. Only `active` memories are retrieved (SC-004). `pending` = submitted but not approved. `archived` = old memories rotated out (cap-200, per 017 data-model.md:134). |
 | `operatorRole` | TEXT (nullable) | Role of the submitter (e.g., 'sales_manager'). Affects weight. |
 | `weight` | REAL | Composite: `operatorRole` base × recency decay. Higher = more likely to be retrieved. |
 | `sourceConversationId` | UUID (nullable, FK) | Conversation that generated this feedback. For traceability. |
@@ -154,17 +163,24 @@ interface FeedbackRetrievalResult {
 File: `drizzle/0011_feedback_memories.sql` (review-only per Standing Order #5)
 
 ```sql
--- feedback_memories table
+-- feedback_memories table (aligned with ai-twins 017-hybrid-agent-core Phase 2 design)
 CREATE TABLE feedback_memories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id TEXT NOT NULL,
   persona_id TEXT NOT NULL REFERENCES personas(id) ON DELETE CASCADE,
   context_embedding VECTOR(1024) NOT NULL,
   lesson TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active')),
-  operator_role TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'archived')),
+  operator_role TEXT CHECK (operator_role IN ('owner', 'admin', 'member')),
   weight REAL DEFAULT 1.0,
   source_conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+  user_query TEXT,
+  wrong_response TEXT,
+  corrected_response TEXT,
+  feedback_type TEXT,
+  error_category TEXT,
+  operator_id TEXT,
+  embedding_model TEXT DEFAULT 'bge-m3',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

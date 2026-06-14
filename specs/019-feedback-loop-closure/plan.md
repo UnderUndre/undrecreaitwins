@@ -7,7 +7,7 @@
 
 Close the feedback loop: before generating a reply, retrieve top-K relevant `feedback_memories` via pgvector cosine search, inject as operator lessons into the system prompt alongside persona + RAG docs. Define the **prompt composition contract** that resolves conflicts (RAG-facts > feedback > persona-defaults). Add dedup within conversation stage + reset on funnel stage transition.
 
-**⚠️ CRITICAL prerequisite gap**: The spec claims `feedback_memories` table exists (dependency "017-hybrid-agent-core — all built, needs wiring"). **This is incorrect.** Spec 017 is `language-guard-validator`, not hybrid-agent-core. `feedback_memories` table does NOT exist in code or migrations (0000–0010, no matches). This plan includes the table creation as Phase 0 Foundational.
+**⚠️ CRITICAL prerequisite gap**: The spec claims `feedback_memories` table exists (dependency "017-hybrid-agent-core — all built, needs wiring"). **Partially incorrect.** Spec 017-hybrid-agent-core lives in the **Product repo** (`ai-twins/specs/017-hybrid-agent-core/`), and its `data-model.md` defines `feedback_memories` as **Phase 2 tables (NOT in the initial migration)**. The table schema is designed but NOT implemented — no Prisma model, no SQL migration applied, no TypeScript code. Migration `0011_hybrid_agent_core_schema.sql` (017 Phase 1) creates only `delivery_records` + `llm_retry_jobs`. This plan includes the table creation as Phase 0 Foundational, aligning with the 017 Phase 2 design.
 
 ## Technical Context
 
