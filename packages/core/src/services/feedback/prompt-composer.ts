@@ -29,7 +29,7 @@ export function compose(input: ComposeInput): ComposedPrompt {
   }
   let personaTruncated = false;
   const personaTokens = estimateTokens(personaText);
-  const maxPersonaTokens = budget - PERSONA_HARD_FLOOR;
+  const maxPersonaTokens = Math.max(0, budget - PERSONA_HARD_FLOOR);
   if (personaTokens > maxPersonaTokens) {
     personaText = personaText.slice(0, maxPersonaTokens * 4);
     personaTruncated = true;

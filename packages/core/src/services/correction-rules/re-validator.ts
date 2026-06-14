@@ -9,7 +9,7 @@ export interface ReValidationResult {
   reason?: string;
 }
 
-const PROMISE_LIKE_RE = /\b(?:гарантир|обеща|доставим\s+бесплатн|скидк[аи]\s+\d+|цена\s+\d+|price\s+\d+|%\s*off|free\s+delivery)\b/i;
+const PROMISE_LIKE_RE = /\b(?:гарантир|обеща|доставим\s+бесплатн|скидк[аи]\s+\d+|цена\s+\d+|price\s+\d+|%\s*off|free\s+delivery)\b/gi;
 
 function hasNewPromiseTokens(original: string, rewritten: string): boolean {
   const origMatches = original.match(PROMISE_LIKE_RE) || [];

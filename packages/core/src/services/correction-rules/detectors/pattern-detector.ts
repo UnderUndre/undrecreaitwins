@@ -7,17 +7,23 @@ async function llmClassify(llm: LLMClient, systemPrompt: string, userText: strin
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-  try {
-    const response = await llm.complete({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userText.slice(0, 4000) },
-      ],
-      temperature: 0,
-      maxTokens: 5,
-      tenantId,
-      personaId,
-    });
+    try {
+      const response = await Promise.race([
+        llm.complete({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userText.slice(0, 4000) },
+          ],
+          temperature: 0,
+          maxTokens: 5,
+          tenantId,
+          personaId,
+        }),
+        new Promise<never>((_, reject) => {
+          const t = setTimeout(() => reject(new Error('Detector timeout')), TIMEOUT_MS);
+          controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')); });
+        }),
+      ]);
 
     const answer = response.content.trim().toUpperCase();
     return answer.startsWith('YES');

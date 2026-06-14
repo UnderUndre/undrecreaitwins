@@ -21,6 +21,11 @@ export const retrievedFeedbackRoutes: FastifyPluginAsync = async (fastify) => {
     const { conversationId } = parseResult.data;
     const tenantId = (request as any).tenantId || request.headers['x-tenant-id'] as string;
 
+    if (!tenantId) {
+      reply.code(400).send({ error: 'Missing tenant ID' });
+      return;
+    }
+
     try {
       const state = await withTenantContext(tenantId, async (tx) => {
         const [row] = await tx

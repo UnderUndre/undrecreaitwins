@@ -69,23 +69,7 @@ function isCommon(code: number): boolean {
 }
 
 function isLetter(code: number): boolean {
-  if (code >= 0x0041 && code <= 0x005A) return true;
-  if (code >= 0x0061 && code <= 0x007A) return true;
-  if (code >= 0x00C0 && code <= 0x024F) return true;
-  if (code >= 0x1E00 && code <= 0x1EFF) return true;
-  if (code >= 0x0370 && code <= 0x03FF) return true;
-  if (code >= 0x0400 && code <= 0x052F) return true;
-  if (code >= 0x0530 && code <= 0x058F) return true;
-  if (code >= 0x0590 && code <= 0x05FF) return true;
-  if (code >= 0x0600 && code <= 0x06FF) return true;
-  if (code >= 0x0900 && code <= 0x097F) return true;
-  if (code >= 0x3040 && code <= 0x30FF) return true;
-  if (code >= 0x3400 && code <= 0x4DBF) return true;
-  if (code >= 0x4E00 && code <= 0x9FFF) return true;
-  if (code >= 0xAC00 && code <= 0xD7AF) return true;
-  if (code >= 0x1100 && code <= 0x11FF) return true;
-  if (code >= 0x0E00 && code <= 0x0E7F) return true;
-  return false;
+  return /\p{L}/u.test(String.fromCodePoint(code));
 }
 
 class ScriptClassifier {

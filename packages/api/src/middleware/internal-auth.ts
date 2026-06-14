@@ -1,4 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
+import { timingSafeEqual } from 'crypto';
 
 const INTERNAL_SECRET = process.env.TWIN_INTERNAL_WEBHOOK_SECRET;
 
@@ -15,7 +16,9 @@ export async function internalAuth(request: FastifyRequest, reply: FastifyReply)
   }
 
   const token = auth.slice(7);
-  if (token !== INTERNAL_SECRET) {
+  const a = Buffer.from(token);
+  const b = Buffer.from(INTERNAL_SECRET);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     reply.code(401).send({ error: 'Invalid secret' });
     return;
   }

@@ -59,10 +59,24 @@ export async function retrieveRelevant(
     const queryEmbedding = existingEmbedding ?? await embeddingService.embed(queryText);
     const embeddingStr = JSON.stringify(queryEmbedding);
 
-    // pgvector cosine search
+    // pgvector cosine search — explicitly select cosine distance for scoring
     const candidates = await withTenantContext(tenantId, async (tx) => {
+      const distanceExpr = sql`(${feedbackMemories.contextEmbedding} <=> ${embeddingStr}::vector)`.as('cosine_dist');
       return tx
-        .select()
+        .select({
+          id: feedbackMemories.id,
+          tenantId: feedbackMemories.tenantId,
+          personaId: feedbackMemories.personaId,
+          contextEmbedding: feedbackMemories.contextEmbedding,
+          lesson: feedbackMemories.lesson,
+          status: feedbackMemories.status,
+          operatorRole: feedbackMemories.operatorRole,
+          weight: feedbackMemories.weight,
+          sourceConversationId: feedbackMemories.sourceConversationId,
+          createdAt: feedbackMemories.createdAt,
+          updatedAt: feedbackMemories.updatedAt,
+          cosineDist: distanceExpr,
+        })
         .from(feedbackMemories)
         .where(and(
           eq(feedbackMemories.tenantId, tenantId),
@@ -78,7 +92,7 @@ export async function retrieveRelevant(
     const scored = candidates
       .filter(r => !conversationState.appliedFeedbackIds.includes(r.id))
       .map(r => {
-        const cosineDist = (r as any)._cosineDist ?? 0;
+        const cosineDist = (r as any).cosineDist ?? 0;
         const similarity = 1 - cosineDist;
         const recency = computeRecencyDecay(r.createdAt);
         const roleWeight = getOperatorRoleWeight(r.operatorRole);
