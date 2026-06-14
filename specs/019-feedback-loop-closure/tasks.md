@@ -22,7 +22,7 @@
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
 - [ ] T001 [DB] Create `feedback_memories` Drizzle model in `packages/core/src/models/feedback-memories.ts`
-  - `pgTable('feedback_memories')` with columns: `id` (UUID PK), `tenantId`, `personaId` (FK → personas, cascade), `contextEmbedding` (vector 1024), `lesson` (text), `status` (pgEnum: pending/active), `operatorRole` (text, nullable), `weight` (real, default 1.0), `sourceConversationId` (UUID FK → conversations, set null), `createdAt`, `updatedAt`.
+  - `pgTable('feedback_memories')` with columns: `id` (UUID PK), `tenantId`, `personaId` (FK → personas, cascade), `contextEmbedding` (vector 1024), `lesson` (text), `status` (pgEnum: pending/active/archived), `operatorRole` (text, nullable), `weight` (real, default 1.0), `sourceConversationId` (UUID FK → conversations, set null), `createdAt`, `updatedAt`.
   - Index: `(tenantId, personaId, status)` for filtered retrieval.
   - Re-export from `packages/core/src/models/index.ts`.
   - **Files**: `packages/core/src/models/feedback-memories.ts` (NEW), `packages/core/src/models/index.ts` (MODIFY)

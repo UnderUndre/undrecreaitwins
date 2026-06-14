@@ -99,12 +99,13 @@ class FeedbackRetrievalService {
     personaId: string,
     queryText: string,
     conversationState: { appliedFeedbackIds: string[] },
+    existingEmbedding?: number[],
   ): Promise<FeedbackRetrievalResult>
 }
 ```
 
 **Contract**:
-- Embeds `queryText` via `EmbeddingService.embed()` (BGE-M3, ~10ms)
+- Embeds `queryText` via `EmbeddingService.embed()` (BGE-M3, ~10ms) — **skipped if `existingEmbedding` is provided** (RAG already embedded the same query text; saves 1 TEI round-trip, review F7).
 - pgvector cosine search: `1 - (context_embedding <=> query_embedding) >= FEEDBACK_SIMILARITY_THRESHOLD` (default 0.75)
 - Filters: `status = 'active'`, `personaId` match, `tenantId` match (RLS), NOT IN `appliedFeedbackIds`
 - Scores: similarity × `weight` (which includes operator_role × recency decay)

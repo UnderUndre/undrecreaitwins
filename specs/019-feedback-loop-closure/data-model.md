@@ -13,7 +13,7 @@ Three storage changes: NEW `feedback_memories` table (vector + metadata — desi
 ```typescript
 // packages/core/src/models/feedback-memories.ts
 
-import { pgTable, uuid, text, real, timestamp, pgEnum, index } from 'drizzle-orm';
+import { pgTable, uuid, text, real, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
 import { personas } from './personas';
 import { conversations } from './conversations';
 import { vector } from './types';
@@ -71,7 +71,7 @@ Dedup tracking for feedback memories applied per conversation. Separate from `co
 ```typescript
 // packages/core/src/models/conversation-feedback-states.ts
 
-import { pgTable, uuid, jsonb, integer, timestamp } from 'drizzle-orm';
+import { pgTable, uuid, jsonb, integer, timestamp, text } from 'drizzle-orm/pg-core';
 import { conversations } from './conversations';
 
 export const conversationFeedbackStates = pgTable('conversation_feedback_states', {
