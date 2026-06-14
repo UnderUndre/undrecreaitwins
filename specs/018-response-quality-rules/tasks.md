@@ -75,7 +75,7 @@
 
 - [ ] T006 [BE] [US1] Create detector interface + structural detectors in `packages/core/src/services/correction-rules/detectors/`
   - `detector.ts` — `Detector` interface: `detect(text: string, rule: CorrectionRule): Promise<DetectorResult>`. `DetectorResult = { triggered: boolean; score?: number; latencyMs: number }`.
-  - `regex-detector.ts` — compile `new RegExp(pattern, flags)`, `.test(text)`. Wrap in try/catch for invalid patterns (skip rule, log error). <1ms.
+  - `regex-detector.ts` — compile `new RegExp(pattern, flags)`, `.test(text)`. Wrap in try/catch for invalid patterns (skip rule, log error). **ReDoS defense (review F5)**: wrap regex execution defensively; Product validates complexity at creation. <1ms.
   - `keyword-detector.ts` — check if `any` or `all` words from list appear in text. <1ms.
   - Dispatch function: given `rule.detector.type`, instantiate the right detector.
   - **Files**: `packages/core/src/services/correction-rules/detectors/detector.ts`, `regex-detector.ts`, `keyword-detector.ts` (NEW)
@@ -140,30 +140,34 @@
 - [ ] T011 [BE] [US3] Create rewriter in `packages/core/src/services/correction-rules/rewriter.ts`
   - Single `LLMClient.complete()` call combining: original text + all triggered rewrite instructions (aggregated into one prompt) + rubric items (if any, appended as constraints: "Also ensure: ☑ acknowledged the objection").
   - System prompt: `"You are a response editor. Rewrite the following response to satisfy these instructions. Return ONLY the rewritten text, no commentary."` + aggregated instructions.
+  - **Conflict resolution (review F2)**: instructions listed in priority order (highest first). Prompt explicitly states: `"Instructions are listed in priority order. If two instructions conflict, follow the higher-priority one."`
+  - **Trust boundary (review F8)**: operator instructions wrapped in delimited block: `<operator_instructions>...</operator_instructions>`. System prompt instructs LLM to treat them as editing constraints, not system commands.
   - Empty output → rollback to original (same as 004 FR-019).
   - **Files**: `packages/core/src/services/correction-rules/rewriter.ts` (NEW)
   - **Depends on**: T001
-  - **Acceptance**: Single LLM call; instructions aggregated; rubric items appended; empty output → rollback signal.
+  - **Acceptance**: Single LLM call; instructions aggregated in priority order; rubric items appended; operator instructions wrapped; empty output → rollback signal.
 
 - [ ] T012 [BE] [US3] Create re-validator in `packages/core/src/services/correction-rules/re-validator.ts`
   - Instantiate `FalsePromiseValidator(llm)` + `IdentityGuardValidator()` directly (004 modules at `packages/core/src/services/validators/false-promise.ts` + `identity-guard.ts`).
   - Call `validateAndMutate(rewrittenText, context)` on each. Context: `{ tenantId, personaId, conversationId, rawUserMessage }`.
   - If any validator returns a violation (not pass) → return `{ passed: false, reason }`.
+  - **Conditional false-promise LLM (review F1)**: before calling the false-promise LLM judge (~800ms), run a cheap structural pre-check: compare rewritten text vs pre-DAR text for new promise-like tokens (numerals, commitment phrases, price/guarantee language). If no new promise-like tokens → skip the LLM judge (pass). This keeps common tone-only rewrites under the latency budget.
+  - Identity-guard always runs (regex, ~0ms).
   - 1 pass, no loop (FR-007/FR-013).
   - **Files**: `packages/core/src/services/correction-rules/re-validator.ts` (NEW)
   - **Depends on**: T001
-  - **Acceptance**: Reuses 004 validators directly; detects false-promise or identity-guard violation in rewrite; 1 pass only.
+  - **Acceptance**: Reuses 004 validators directly; detects false-promise or identity-guard violation in rewrite; conditional false-promise skip when no new promise tokens; 1 pass only.
 
 - [ ] T013 [BE] [US3] Complete DAR pipeline — rewrite + re-validation + rollback + fan-out
   - DAR pipeline `execute()` full flow:
     1. `ruleCache.getRules()` → if empty, no-op return.
     2. Run detectors (structural sync + semantic parallel) on input text.
     3. Aggregate triggered rules (T007).
-    4. Score-mode: build events, push async via `setImmediate`. No rewrite.
+    4. Score-mode: build events (with `idempotencyKey` = `${messageId}:${ruleId}:${attempt}` + `snapshotVersion`), push async via `setImmediate`. No rewrite.
     5. Rewrite-mode: call `rewriter.rewrite(text, rewriteRules)` (T011).
-    6. Re-validate rewritten text via `re-validator.validate()` (T012).
+    6. Re-validate rewritten text via `re-validator.validate()` (T012, conditional false-promise).
     7. If re-validation passes → use rewritten text, push events with `verdict: 'rewritten'`.
-    8. If re-validation fails → rollback to original text, push N events (fan-out, one per triggered rewrite rule) with `verdict: 'rolled_back'`, `rolledBack: true`.
+    8. If re-validation fails → rollback to original text, push N events (fan-out, one per triggered rewrite rule) with `verdict: 'rolled_back'`, `rolledBack: true`. Each event has unique `idempotencyKey` (distinct `ruleId` component).
     9. Push overflow-skipped events (`verdict: 'overflow_skipped'`).
   10. Defensive check: if `rule.turnScope === 'conversation'`, log warning `"turnScope=conversation not yet supported, treating as single-message"` and proceed as single-message (spec edge case).
   - Wrap entire flow in try/catch: any error → log + return original text + empty events (fail-open, FR-014).

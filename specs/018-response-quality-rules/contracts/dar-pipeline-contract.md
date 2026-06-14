@@ -70,7 +70,9 @@
       "rewrittenText": "Вот, отличный вариант.",
       "score": null,
       "latencyMs": 1200,
-      "rolledBack": false
+      "rolledBack": false,
+      "idempotencyKey": "msg-uuid:rule-uuid:attempt-1",
+      "snapshotVersion": "etag-hash-v3"
     }
   ]
 }
@@ -78,9 +80,13 @@
 
 **Response**: `204 No Content` (success) or `2xx` (idempotent — Product doesn't need to return data).
 
+**Idempotency (F3)**: Each event carries `idempotencyKey` = `${messageId}:${ruleId}:${attempt}`. Product MUST upsert on this key — if the same key arrives twice (e.g., 015 retry worker re-runs the turn), Product updates the existing row instead of inserting a duplicate. `attempt` increments per DAR re-run on the same turn.
+
 **Fire-and-forget**: Engine logs errors via pino, does NOT retry, does NOT block reply delivery. Events may be lost on crash (Phase 1 trade-off).
 
-**Fan-out**: Aggregated rewrite rollback (multiple rules in one rewrite pass that fails re-validation) → Engine pushes N events (one per triggered rule), all with `verdict: 'rolled_back'`.
+**Fan-out**: Aggregated rewrite rollback (multiple rules in one rewrite pass that fails re-validation) → Engine pushes N events (one per triggered rule), all with `verdict: 'rolled_back'`. Each gets its own `idempotencyKey` (different `ruleId` component).
+
+**PII / retention (F5/F6)**: `originalText` + `rewrittenText` contain customer PII (quoted names, phones, order details). TLS-in-transit assumed (HTTPS between Engine and Product). Product is responsible for at-rest retention policy. Score-mode events carry NO text fields (privacy in advisory mode).
 
 ---
 

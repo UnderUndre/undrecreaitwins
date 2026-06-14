@@ -59,6 +59,8 @@ interface QualityEventPush {
   score?: number;
   latencyMs: number;
   rolledBack: boolean;
+  idempotencyKey: string;              // `${messageId}:${ruleId}:${attempt}` — Product upserts on this key (F3)
+  snapshotVersion: string;             // rule-set snapshot version when event fired — for version attribution (F9)
 }
 
 type QualityVerdict = 'pass' | 'fail' | 'rewritten' | 'rolled_back' | 'overflow_skipped';

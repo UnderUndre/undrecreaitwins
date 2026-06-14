@@ -79,6 +79,7 @@ DAR runs AFTER 004 validation (structural safety baseline first), operates on cu
       tenantId: request.tenantId,
       personaId: persona.id,
       conversationId,
+      messageId,
       rawUserMessage: lastUserMessage,
     });
     const deliveredText = darResult.text;
@@ -149,8 +150,11 @@ packages/core/src/services/chat-service.ts  # MODIFY: integrate DAR at line ~418
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | Product API endpoints not implemented yet | High | Critical | Build against contract; mock Product API in tests/dev. Cache works without Product — just returns empty rules → DAR no-op. |
-| Semantic detector latency exceeds budget | Medium | High | Parallelize ≤3 concurrent LLM calls; structural detectors (regex/keyword) always run first (0 LLM). FR-013: overflow → skip lowest-priority score-mode semantic. |
-| Re-validation via direct validator instantiation breaks if 004 internals change | Low | Medium | Re-validator wraps 004 validators behind a stable internal interface; unit test catches regressions. |
+| Rewrite path latency exceeds 2s p95 (review F1) | High | High | Score-only path stays <2s (0 LLM). Rewrite path: conditional false-promise skip (FR-007) eliminates LLM re-validation on common tone-only rewrites. Hard timeout 5s/turn. Accept p95>2s on rewrite; p99<5s. |
+| Aggregated rewrite conflict (review F2) | Medium | Medium | Rewriter prompt enforces priority order ("follow highest-priority first; if conflict, obey higher"). LLM resolves; operator adjusts priorities via dashboard. |
+| Event duplication on retry (review F3) | Medium | Medium | `idempotencyKey` on every QualityEventPush; Product upserts. `attempt` counter per DAR re-run. |
+| Multi-instance cache staleness (review F4) | Low | Medium | Phase 1 = single-instance. TTL (60s) bounds staleness. Phase 2: Redis pub/sub broadcast. |
+| ReDoS via operator regex (review F5) | Low | High | Product validates regex complexity at creation. Engine wraps in try/catch. Future: RE2 linear-time engine. |
 | Cache invalidation webhook DoS | Low | High | `TWIN_INTERNAL_WEBHOOK_SECRET` auth on route; unauthenticated → 401, cache untouched. |
 | Product push failures silently drop events | Medium | Low | Fire-and-forget is intentional (Phase 1). Events logged via pino. Dashboard has gaps, acceptable. No retry queue. |
 | Score-mode async events lost on crash | Medium | Low | `setImmediate` fire-and-forget is accepted for advisory mode (spec clarification). No BullMQ queue in Phase 1. |
