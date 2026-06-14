@@ -155,6 +155,11 @@ function getLanguageNames(allowedLanguages: string[]): string {
 const SYSTEM_DEFAULT_FALLBACK = (allowedLanguages: string[]) =>
   `I can only respond in ${getLanguageNames(allowedLanguages)}.`;
 
+export function buildLanguageDirective(allowedLanguages: string[]): string {
+  const names = getLanguageNames(allowedLanguages);
+  return `IMPORTANT: You must respond ONLY in ${names}. Do not use any other language or script.`;
+}
+
 export class LanguageGuardValidator implements ResponseValidator<LanguageGuardConfig> {
   name = 'language-guard';
 

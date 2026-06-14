@@ -8,6 +8,7 @@ import { FunnelRepository } from './funnel/funnel-repository.js';
 import { FragmentScorer } from './funnel/scorer.js';
 import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
+import { buildLanguageDirective } from './validators/language-guard.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { AnnotationService } from './annotation-service.js';
 import { EmbeddingService } from './embedding-service.js';
@@ -15,6 +16,7 @@ import { LangfuseService } from './langfuse-service.js';
 import { withTenantContext } from '../db.js';
 import { groundingEngine } from './index.js';
 import { conversations, messages, usageEvents, deliveryRecords, llmRetryJobs } from '../models/index.js';
+import { validatorConfigs } from '../models/validators.js';
 import { ServiceUnavailableError, NotFoundError, AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
 import type { PersonaTraits, ModelPreferences, StreamChunk, FunnelSelectionMetadata } from '@undrecreaitwins/shared';
 import { routeTurn } from './hermes/turn-router.js';
@@ -943,6 +945,33 @@ export class ChatService {
       } catch (err) {
         console.warn({ err }, 'Grounding retrieval failed, proceeding without RAG');
       }
+    }
+
+    // Language directive injection (017 language-guard, US3, DD-003)
+    // Fail-open: if config query fails, skip directive — pipeline still catches violations post-generation
+    try {
+      const langConfig = await withTenantContext(tenantId, async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(validatorConfigs)
+          .where(
+            and(
+              eq(validatorConfigs.tenantId, tenantId),
+              eq(validatorConfigs.personaId, persona.id),
+              eq(validatorConfigs.validatorName, 'language-guard')
+            )
+          );
+        return row;
+      });
+
+      if (langConfig) {
+        const cfg = langConfig.config as any;
+        if (cfg?.allowedLanguages && Array.isArray(cfg.allowedLanguages) && cfg.allowedLanguages.length > 0) {
+          parts.push('\n' + buildLanguageDirective(cfg.allowedLanguages));
+        }
+      }
+    } catch {
+      // DD-003: fail-open — missing directive doesn't break chat path
     }
 
     // Funnel context injection (017-hybrid-agent-core, task 4.5)

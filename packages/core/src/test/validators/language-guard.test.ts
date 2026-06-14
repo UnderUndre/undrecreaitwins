@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { LanguageGuardValidator } from '../../services/validators/language-guard.js';
+import { buildLanguageDirective } from '../../services/validators/language-guard.js';
 import type { LanguageGuardConfig } from '../../types/validator.js';
 import type { ValidatorContext } from '../../types/validator.js';
 
@@ -155,6 +156,26 @@ describe('LanguageGuardValidator', () => {
         makeContext(makeConfig({ allowedLanguages: ['en'] }))
       );
       expect(enResult.verdict.decision).toBe('pass');
+    });
+  });
+
+  describe('language directive (US3)', () => {
+    it('buildLanguageDirective produces correct text for ru+en', () => {
+      const directive = buildLanguageDirective(['ru', 'en']);
+      expect(directive).toContain('Russian');
+      expect(directive).toContain('English');
+      expect(directive).toContain('IMPORTANT');
+    });
+
+    it('buildLanguageDirective produces correct text for zh only', () => {
+      const directive = buildLanguageDirective(['zh']);
+      expect(directive).toContain('Chinese');
+      expect(directive).not.toContain('Russian');
+    });
+
+    it('buildLanguageDirective handles unknown language code gracefully', () => {
+      const directive = buildLanguageDirective(['xx']);
+      expect(directive).toContain('xx');
     });
   });
 });

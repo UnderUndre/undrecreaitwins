@@ -112,12 +112,12 @@
 
 ### Implementation
 
-- [ ] T008 [BE] [US3] **Single config resolution + directive injection (gemini F2/F5, claude F3)**: resolve the `language-guard` config **once** at the chat-lifecycle entry (`ChatService.complete()`, where `tenantId` is in scope) and pass the resolved config to BOTH `buildSystemPrompt()` and the validator pipeline (optional `preloadedConfigs` param / request-scoped holder) — no second DB read for the same row per turn. In `buildSystemPrompt()`:
+- [X] T008 [BE] [US3] **Single config resolution + directive injection (gemini F2/F5, claude F3)**: resolve the `language-guard` config **once** at the chat-lifecycle entry (`ChatService.complete()`, where `tenantId` is in scope) and pass the resolved config to BOTH `buildSystemPrompt()` and the validator pipeline (optional `preloadedConfigs` param / request-scoped holder) — no second DB read for the same row per turn. In `buildSystemPrompt()`:
   - After annotation few-shot injection (line ~596), before `return parts.join('\n')`:
   - If preloaded config exists AND `allowedLanguages` is non-empty → append directive: `"IMPORTANT: You must respond ONLY in [language names from BCP-47 lookup]. Do not use any other language or script."`
   - If config missing or `allowedLanguages` empty → skip (FR-012)
   - **Error handling**: wrap config resolution in try/catch. On failure → `console.warn` and skip directive (fail-open); the pipeline falls back to its own `resolveConfig` if the preload is absent. Matches existing annotation-retrieval pattern (DD-003)
-- [ ] T009 [BE] [US3] Add directive injection tests:
+- [X] T009 [BE] [US3] Add directive injection tests:
   - Persona with `allowedLanguages: ["ru", "en"]` → system prompt contains Russian+English language directive
   - Persona with no language guard config → system prompt unchanged
   - Persona with empty `allowedLanguages: []` → no directive
@@ -149,7 +149,7 @@
 
 **Purpose**: Cross-boundary testing and edge cases.
 
-- [ ] T012 [E2E] Integration test: full pipeline run with language guard + existing validators. Verify ordering (false-promise → language-guard → identity-guard). Verify language guard audit entries appear in `validator_runs` with correct verdicts and `detectedScripts` in `matchedPatterns`.
+- [X] T012 [E2E] Integration test: full pipeline run with language guard + existing validators. Verify ordering (false-promise → language-guard → identity-guard). Verify language guard audit entries appear in `validator_runs` with correct verdicts and `detectedScripts` in `matchedPatterns`.
 
 ---
 
