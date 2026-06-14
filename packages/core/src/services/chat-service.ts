@@ -10,6 +10,8 @@ import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
 import { buildLanguageDirective } from './validators/language-guard.js';
 import { execute as darExecute } from './correction-rules/dar-pipeline.js';
+import { retrieveRelevant as retrieveFeedback } from './feedback/feedback-retrieval.js';
+import { compose as composePrompt } from './feedback/prompt-composer.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { AnnotationService } from './annotation-service.js';
 import { EmbeddingService } from './embedding-service.js';
@@ -983,6 +985,33 @@ export class ChatService {
       }
     } catch {
       // DD-003: fail-open — missing directive doesn't break chat path
+    }
+
+    // Feedback memory retrieval + prompt composition (019 feedback-loop-closure)
+    // Fail-open: retrieval failure → proceed without feedback
+    if ((persona as any).feedbackRetrievalEnabled !== false && userQuery) {
+      try {
+        const feedbackResult = await retrieveFeedback(
+          tenantId,
+          persona.id,
+          userQuery,
+          { appliedFeedbackIds: [] },
+        );
+
+        if (feedbackResult.memories.length > 0) {
+          const composed = composePrompt({
+            personaPrompt: parts.join('\n'),
+            feedbackMemories: feedbackResult.memories,
+            ragChunks: [],
+            feedbackTokenBudget: (persona as any).feedbackTokenBudget ?? 500,
+          });
+          // Replace parts with composed prompt (preserves persona + adds feedback layer)
+          parts.length = 0;
+          parts.push(composed.systemPrompt);
+        }
+      } catch {
+        // Graceful degradation: proceed without feedback
+      }
     }
 
     // Funnel context injection (017-hybrid-agent-core, task 4.5)

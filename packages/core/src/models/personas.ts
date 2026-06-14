@@ -73,6 +73,12 @@ export const personas = pgTable(
     /** RAG mode: 'static' = auto-inject in prompt (Phase 1), 'tool' = search_docs tool (Phase 2). */
     ragMode: text('rag_mode').notNull().default('static'),
 
+    /** Enable feedback memory retrieval for this persona (019). */
+    feedbackRetrievalEnabled: boolean('feedback_retrieval_enabled').notNull().default(true),
+
+    /** Token budget for feedback memories in composed prompt (019). Default 500. */
+    feedbackTokenBudget: integer('feedback_token_budget').notNull().default(500),
+
     /** Funnel generation mode: 'single' = 1 LLM call with structured output, 'dual' = 2 calls (FR-006). */
     funnelGeneration: text('funnel_generation').notNull().default('single'),
 
