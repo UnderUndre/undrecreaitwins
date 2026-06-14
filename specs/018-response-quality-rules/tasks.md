@@ -55,10 +55,10 @@
 
 - [ ] T005 [BE] Create rules-reload Fastify route in `packages/api/src/routes/correction-rules-reload.ts`
   - `POST /v1/internal/rules-reload` — registered in `server.ts`.
-  - Auth: verify `Authorization: Bearer <TWIN_INTERNAL_WEBHOOK_SECRET>`. Unauthenticated or mismatched → `401 Unauthorized`, cache untouched.
+  - **(seam B)** Auth: use shared preHandler `packages/api/src/middleware/internal-auth.ts` (verifies `TWIN_INTERNAL_WEBHOOK_SECRET` Bearer). Same preHandler used by 019's `/retrieved-feedback` route. Do NOT duplicate secret-check logic inline — register the preHandler on the route.
   - Body (Zod validation): `{ assistantId: string, tenantId: string }`.
   - Calls `ruleCache.invalidate(assistantId)`. Returns `204 No Content` (idempotent — works even if entry doesn't exist).
-  - **Files**: `packages/api/src/routes/correction-rules-reload.ts` (NEW), `packages/api/src/server.ts` (MODIFY — register route)
+  - **Files**: `packages/api/src/routes/correction-rules-reload.ts` (NEW), `packages/api/src/server.ts` (MODIFY — register route), `packages/api/src/middleware/internal-auth.ts` (NEW — shared preHandler, co-owned with 019)
   - **Depends on**: T003
   - **Acceptance**: Valid secret → `204` + cache purged; invalid secret → `401` + cache untouched; Zod rejects malformed body → `400`.
 
@@ -141,7 +141,7 @@
   - Single `LLMClient.complete()` call combining: original text + all triggered rewrite instructions (aggregated into one prompt) + rubric items (if any, appended as constraints: "Also ensure: ☑ acknowledged the objection").
   - System prompt: `"You are a response editor. Rewrite the following response to satisfy these instructions. Return ONLY the rewritten text, no commentary."` + aggregated instructions.
   - **Conflict resolution (review F2)**: instructions listed in priority order (highest first). Prompt explicitly states: `"Instructions are listed in priority order. If two instructions conflict, follow the higher-priority one."`
-  - **Trust boundary (review F8)**: operator instructions wrapped in delimited block: `<operator_instructions>...</operator_instructions>`. System prompt instructs LLM to treat them as editing constraints, not system commands.
+  - **Trust boundary (review F8, seam C)**: operator instructions wrapped via shared util `wrapOperatorText()` at `packages/core/src/services/prompt-safety.ts` — same util used by 019 prompt-composer for `lesson` text. Standard delimiter `<operator_instructions>`, escape + length guard. System prompt instructs LLM to treat them as editing constraints, not system commands.
   - Empty output → rollback to original (same as 004 FR-019).
   - **Files**: `packages/core/src/services/correction-rules/rewriter.ts` (NEW)
   - **Depends on**: T001
@@ -153,6 +153,7 @@
   - If any validator returns a violation (not pass) → return `{ passed: false, reason }`.
   - **Conditional false-promise LLM (review F1)**: before calling the false-promise LLM judge (~800ms), run a cheap structural pre-check: compare rewritten text vs pre-DAR text for new promise-like tokens (numerals, commitment phrases, price/guarantee language). If no new promise-like tokens → skip the LLM judge (pass). This keeps common tone-only rewrites under the latency budget.
   - Identity-guard always runs (regex, ~0ms).
+  - **017 seam**: also run `LanguageGuardValidator()` (017) when the module is present — deterministic Unicode-range check (~0 LLM); catches a rewrite that drifts into off-language script → rollback. Soft-dependency: guard on 017 existence (not yet shipped → skip + log once). Re-validation response-guard set = identity-guard + language-guard + conditional false-promise.
   - 1 pass, no loop (FR-007/FR-013).
   - **Files**: `packages/core/src/services/correction-rules/re-validator.ts` (NEW)
   - **Depends on**: T001

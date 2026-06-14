@@ -134,6 +134,35 @@ A tenant runs multiple personas on the same workspace: a Russian customer suppor
 - Language/script detection is deterministic (Unicode code-point range analysis); no ML inference is used.
 - **Terminology — scripts, not languages**: this feature validates response *scripts* (Unicode code-point ranges), not natural-language identification. `allowedLanguages` maps BCP-47 language codes to permitted Unicode scripts — a Ukrainian response (Cyrillic) passes `allowedLanguages: ["ru"]`. That is acceptable for the feature's purpose (blocking cross-script contamination), but maintainers should not expect language ID. (claude F10)
 - The feature integrates into the existing validator pipeline as a new response validator; it runs before rewrite-type validators (consistent with the existing BLOCKING-first ordering).
+- **Downstream consumer (018 seam)**: `LanguageGuardValidator` is ALSO invoked by `018-response-quality-rules` DAR **re-validation** (018 FR-007) — after a DAR rewrite, language-guard re-checks the rewritten reply so a rewrite can't ship off-language script. Implication: the validator must be instantiable standalone (detection-only, no pipeline singleton coupling), same as 004's false-promise/identity-guard are for 018. **NOT folded into 018** — language-guard is a fixed 004-family structural guard; 018 is the dynamic operator-rule layer above it.
+- **Shared verdict/audit vocabulary (seam A — canonical owner)**: 017 verdicts (`pass`/`strip`/`block`) + the validator audit log align with 018's `verdict` enum (`pass`/`fail`/`rewritten`/`rolled_back`/`overflow_skipped`) and 019's retrieval events — one canonical verdict/audit model across the 004-family + DAR + feedback, not three parallel schemas. **Canonical owner: this spec (017) as the latest 004-family member.** The shared types live at `packages/core/src/types/quality-event.ts`:
+
+  ```typescript
+  // CANONICAL — owner: 004-family (017 task T000). Referenced by 018 + 019.
+  type QualityVerdict =
+    | 'pass'              // shared: no violation detected
+    | 'strip'             // 017: minor script contamination removed
+    | 'block'             // 017/004: response replaced with fallback
+    | 'fail'              // 018: violation detected, not rewritten (score mode)
+    | 'rewritten'         // 018: violation fixed via DAR rewrite
+    | 'rolled_back'       // 018: rewrite reverted (re-validation failed)
+    | 'overflow_skipped'; // 018: rule dropped by ≤4 rewrite cap
+
+  interface QualityEvent {
+    verdict: QualityVerdict;
+    source: '004-false-promise' | '004-identity-guard' | '017-language-guard' | '018-dar-pipeline';
+    tenantId: string;
+    personaId: string;
+    conversationId: string | null;
+    messageId: string | null;
+    mode: 'active' | 'dry-run' | 'rewrite' | 'score';
+    isDryRun: boolean;
+    latencyMs: number;
+    metadata?: Record<string, unknown>; // feature-specific payload (detectedScripts, originalText, etc.)
+  }
+  ```
+
+  Each feature maps its internal types to `QualityVerdict` + `QualityEvent` — no parallel schemas. 018's `QualityEventPush` and 019's retrieval log both serialize from `QualityEvent`. Task T000 (below) creates the module; 018 T005 + 019 T011 depend on it.
 - The language directive injection point is the system prompt builder in the AI executor layer — the function that constructs the context forwarded to the AI model on each turn.
 - The configuration is stored in the existing per-persona validator config store (no new database table required), using `validatorName: "language-guard"` as the key.
 - The language-guard config is resolved **once per request** at the chat-lifecycle entry point and the resolved value is shared by both the system-prompt injection and the validator pipeline — no second DB read for the same `(tenant, persona, 'language-guard')` row in one turn. This also guarantees `tenantId` is available at injection time without an extra lookup. (gemini F2/F5, claude F3)

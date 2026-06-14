@@ -45,6 +45,8 @@ type DetectorConfig =
 
 ### QualityEventPush (written to Product via HTTP)
 
+> **(seam A)** `verdict` uses the canonical `QualityVerdict` union from `packages/core/src/types/quality-event.ts` (owner: 017/004-family, task 017-T000). `QualityEventPush` extends `QualityEvent` with 018-specific fields (`ruleId`, `originalText`, `rewrittenText`, `idempotencyKey`, `snapshotVersion`). The canonical type guarantees cross-spec alignment: 017 strip/block + 018 fail/rewritten/rolled_back/overflow_skipped are values of the same enum.
+
 ```typescript
 interface QualityEventPush {
   assistantId: string;

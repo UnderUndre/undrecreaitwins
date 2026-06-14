@@ -148,6 +148,8 @@ interface FeedbackRetrievalResult {
 }
 ```
 
+> **(seam A)** Retrieval observability events + the `GET /v1/internal/retrieved-feedback` endpoint serialize from the canonical `QualityEvent` type (`packages/core/src/types/quality-event.ts`, owner: 017/004-family, task 017-T000). 019-specific metadata (similarity scores, token allocation, applied memory IDs) goes in `QualityEvent.metadata`. This guarantees cross-spec alignment: 017 audit log + 018 `QualityEventPush` + 019 retrieval events are all instances of the same canonical shape.
+
 ## Relationship to Existing Models
 
 | Existing Model | 019 Relationship |

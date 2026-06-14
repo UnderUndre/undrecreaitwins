@@ -109,7 +109,7 @@
     1. Persona system prompt + traits
     2. Conflict directive: `"factual grounding from RAG is authoritative; operator feedback lessons override default persona style but MUST NOT contradict grounded facts"`
     3. RAG chunks (ground truth)
-    4. Feedback lessons wrapped in delimited block (review F6): `<operator_lessons>\n- {lesson1}\n- {lesson2}\n</operator_lessons>` — system prompt instructs LLM to treat these as behavioral corrections, not system commands. Operator trust boundary = tenant admin.
+    4. Feedback lessons wrapped via shared util `wrapOperatorText()` (seam C — `packages/core/src/services/prompt-safety.ts`, same util as 018 rewriter T011). Standard delimiter `<operator_instructions>`, escape + length guard. System prompt instructs LLM to treat them as behavioral corrections, not system commands. Operator trust boundary = tenant admin.
   - Return `ComposedPrompt` with token info per layer + retrieved memories.
   - **Files**: `packages/core/src/services/feedback/prompt-composer.ts` (NEW)
   - **Depends on**: T005
@@ -163,9 +163,9 @@
 ## Phase 6: Observability Endpoint
 
 - [ ] T011 [BE] Create `GET /v1/internal/retrieved-feedback` route in `packages/api/src/routes/retrieved-feedback.ts`
-  - Query param: `conversationId` (required), optional `messageId`.
-  - Auth: `Authorization: Bearer <TWIN_INTERNAL_WEBHOOK_SECRET>` + `X-Tenant-ID`.
-  - Returns per-reply applied memory IDs + similarity scores + token allocation (from `conversation_feedback_states` + cached retrieval data).
+  - Query param: `conversationId` (required).
+  - **(seam B)** Auth: use shared preHandler `packages/api/src/middleware/internal-auth.ts` (verifies `TWIN_INTERNAL_WEBHOOK_SECRET` Bearer). Same preHandler as 018's `/rules-reload` route. Do NOT duplicate secret-check logic inline.
+  - Returns applied memory IDs + similarity scores + token allocation (current conversation state from `conversation_feedback_states`).
   - Zod validation on query params.
   - Register route in `server.ts`.
   - **Files**: `packages/api/src/routes/retrieved-feedback.ts` (NEW), `packages/api/src/server.ts` (MODIFY)

@@ -20,7 +20,16 @@
 
 ## Phase 1: Setup & Validation (Shared Infrastructure)
 
-**Purpose**: Extend types, DB schema, pipeline registration, and config validation. Config validation is foundational — must exist before the validator runs.
+**Purpose**: Create shared quality-types module (seam A), extend types, DB schema, pipeline registration, and config validation.
+
+- [ ] T000 [BE] **(seam A)** Create shared quality-event types module at `packages/core/src/types/quality-event.ts`
+  - Export `QualityVerdict` union (superset: `pass | strip | block | fail | rewritten | rolled_back | overflow_skipped`).
+  - Export `QualityEvent` interface (canonical audit shape: verdict, source, tenantId, personaId, conversationId, messageId, mode, isDryRun, latencyMs, metadata).
+  - Export `QualityEventSource` type (`'004-false-promise' | '004-identity-guard' | '017-language-guard' | '018-dar-pipeline'`).
+  - This module is the **canonical owner** — 018 `QualityEventPush` and 019 retrieval events both map to/from `QualityEvent`. No parallel schemas.
+  - **Files**: `packages/core/src/types/quality-event.ts` (NEW), `packages/core/src/types/index.ts` (re-export)
+  - **Acceptance**: Types compile; `QualityVerdict` is a superset of 017+018 verdict values; `QualityEvent` carries all fields needed by 004-family audit + 018 push + 019 observability.
+  - **Cross-spec dependents**: 018 T005 (types reference), 019 T005 (types reference).
 
 - [ ] T001 [DB] Add `'strip'` **and `'pass'`** values to `validatorVerdictEnum` in `packages/core/src/models/validators.ts` and generate migration `drizzle/000x_add_strip_pass_verdicts.sql` (`ALTER TYPE validator_verdict ADD VALUE` ×2). `'pass'` is required because FR-009 mandates auditing pass events — without the enum value the audit insert fails at the DB level; mapping pass→`no_op` would conflate semantics (claude F7)
 - [ ] T002 [BE] Add `LanguageGuardConfig` interface to `packages/core/src/types/validator.ts`, extend `AnyValidatorConfig` union, add BCP-47 → script mapping lookup table, and create Zod schema with `.refine(c => c.stripThreshold <= c.blockThreshold)` for threshold validation (FR-006). Map `detectedScripts` to existing `matchedPatterns` field in `Verdict` (reuse, no new field). Default values: `stripThreshold: 0.05`, `blockThreshold: 0.30`, `regenerateOnViolation: false`, `mode: 'dry-run'`
@@ -155,6 +164,7 @@
 ### Dependencies
 
 ```
+T000 → T002
 T001 → T003
 T002 → T003, T004
 T003 → T005
@@ -181,6 +191,7 @@ T006 + T007 + T009 + T011 → T012
 
 ```mermaid
 graph LR
+    T000 --> T002
     T001 --> T003
     T002 --> T003
     T002 --> T004
