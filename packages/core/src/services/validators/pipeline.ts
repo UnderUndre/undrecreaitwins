@@ -12,6 +12,7 @@ import { LLMClient } from '../llm-client.js';
 import { FalsePromiseValidator } from './false-promise.js';
 import { FormatInjectionValidator } from './format-injection.js';
 import { IdentityGuardValidator } from './identity-guard.js';
+import { LanguageGuardValidator } from './language-guard.js';
 
 export class ValidatorPipeline {
   private responseValidators: ResponseValidator[] = [];
@@ -20,6 +21,7 @@ export class ValidatorPipeline {
   constructor(llm: LLMClient) {
     this.responseValidators = [
       new FalsePromiseValidator(llm),
+      new LanguageGuardValidator(),
       new IdentityGuardValidator()
     ];
     this.inputValidators = [
@@ -67,6 +69,14 @@ export class ValidatorPipeline {
             ...context,
             config
           });
+
+          // Pipeline-level convention (claude F6): language-guard with empty allowedLanguages
+          // is a complete no-op — skip audit persistence for this validator (DD-005, FR-012)
+          if (validator.name === 'language-guard' &&
+              (config as any).allowedLanguages !== undefined &&
+              (config as any).allowedLanguages.length === 0) {
+            continue;
+          }
 
           results.push({
             validatorName: validator.name,
@@ -181,12 +191,12 @@ tenantId: string, personaId: string, validatorName: string): Promise<AnyValidato
         }
 
         // FR-015: Defaults
-        const defaultMode: ValidatorMode = (validatorName === 'identity-and-provider-guard') ? 'dry-run' : 'active';
+        const defaultMode: ValidatorMode = (validatorName === 'identity-and-provider-guard' || validatorName === 'language-guard') ? 'dry-run' : 'active';
         return { mode: defaultMode } as AnyValidatorConfig;
       });
     } catch (err) {
       // Fail-safe defaults if DB is down
-      const defaultMode: ValidatorMode = (validatorName === 'identity-and-provider-guard') ? 'dry-run' : 'active';
+      const defaultMode: ValidatorMode = (validatorName === 'identity-and-provider-guard' || validatorName === 'language-guard') ? 'dry-run' : 'active';
       return { mode: defaultMode } as AnyValidatorConfig;
     }
   }

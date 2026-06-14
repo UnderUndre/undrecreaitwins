@@ -37,10 +37,19 @@ export interface IdentityGuardConfig extends BaseValidatorConfig {
   maxInputChars?: number;
 }
 
+export interface LanguageGuardConfig extends BaseValidatorConfig {
+  allowedLanguages: string[];
+  stripThreshold: number;
+  blockThreshold: number;
+  fallbackMessage?: string;
+  regenerateOnViolation: boolean;
+}
+
 export type AnyValidatorConfig =
   | FalsePromiseConfig
   | FormatInjectionConfig
-  | IdentityGuardConfig;
+  | IdentityGuardConfig
+  | LanguageGuardConfig;
 
 export interface Verdict {
   decision: VerdictDecision;

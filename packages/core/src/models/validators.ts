@@ -5,7 +5,7 @@ import { conversations } from './conversations.js';
 import { messages } from './messages.js';
 
 export const validatorModeEnum = pgEnum('validator_mode', ['active', 'dry-run']);
-export const validatorVerdictEnum = pgEnum('validator_verdict', ['no_op', 'append_disclaimer', 'block', 'rewrite', 'error']);
+export const validatorVerdictEnum = pgEnum('validator_verdict', ['no_op', 'append_disclaimer', 'block', 'rewrite', 'error', 'strip', 'pass']);
 
 export const validatorConfigs = pgTable(
   'validator_configs',

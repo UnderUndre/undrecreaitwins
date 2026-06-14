@@ -8,6 +8,10 @@ import { FunnelRepository } from './funnel/funnel-repository.js';
 import { FragmentScorer } from './funnel/scorer.js';
 import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
+import { buildLanguageDirective } from './validators/language-guard.js';
+import { execute as darExecute } from './correction-rules/dar-pipeline.js';
+import { retrieveRelevant as retrieveFeedback } from './feedback/feedback-retrieval.js';
+import { compose as composePrompt } from './feedback/prompt-composer.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { AnnotationService } from './annotation-service.js';
 import { EmbeddingService } from './embedding-service.js';
@@ -15,6 +19,7 @@ import { LangfuseService } from './langfuse-service.js';
 import { withTenantContext } from '../db.js';
 import { groundingEngine } from './index.js';
 import { conversations, messages, usageEvents, deliveryRecords, llmRetryJobs } from '../models/index.js';
+import { validatorConfigs } from '../models/validators.js';
 import { ServiceUnavailableError, NotFoundError, AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
 import type { PersonaTraits, ModelPreferences, StreamChunk, FunnelSelectionMetadata } from '@undrecreaitwins/shared';
 import { routeTurn } from './hermes/turn-router.js';
@@ -415,12 +420,22 @@ export class ChatService {
       const latencyMs = Date.now() - startTime;
 
       // FR-001: Response validation (post-generation)
-      const finalContent = await validatorPipeline.validateResponse(llmResponse.content, {
+      const validatedContent = await validatorPipeline.validateResponse(llmResponse.content, {
         tenantId: request.tenantId,
         personaId: persona.id,
         conversationId,
         rawUserMessage: lastUserMessage
       });
+
+      // 018 DAR pipeline (post-validation, pre-persistence)
+      const darResult = await darExecute(llm, validatedContent, {
+        tenantId: request.tenantId,
+        personaId: persona.id,
+        conversationId,
+        messageId: undefined,
+        rawUserMessage: lastUserMessage,
+      });
+      const finalContent = darResult.text;
 
       if (request.persist !== false) {
         await this.persistMessages(
@@ -942,6 +957,60 @@ export class ChatService {
         }
       } catch (err) {
         console.warn({ err }, 'Grounding retrieval failed, proceeding without RAG');
+      }
+    }
+
+    // Language directive injection (017 language-guard, US3, DD-003)
+    // Fail-open: if config query fails, skip directive — pipeline still catches violations post-generation
+    try {
+      const langConfig = await withTenantContext(tenantId, async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(validatorConfigs)
+          .where(
+            and(
+              eq(validatorConfigs.tenantId, tenantId),
+              eq(validatorConfigs.personaId, persona.id),
+              eq(validatorConfigs.validatorName, 'language-guard')
+            )
+          );
+        return row;
+      });
+
+      if (langConfig) {
+        const cfg = langConfig.config as any;
+        if (cfg?.allowedLanguages && Array.isArray(cfg.allowedLanguages) && cfg.allowedLanguages.length > 0) {
+          parts.push('\n' + buildLanguageDirective(cfg.allowedLanguages));
+        }
+      }
+    } catch {
+      // DD-003: fail-open — missing directive doesn't break chat path
+    }
+
+    // Feedback memory retrieval + prompt composition (019 feedback-loop-closure)
+    // Fail-open: retrieval failure → proceed without feedback
+    if ((persona as any).feedbackRetrievalEnabled !== false && userQuery) {
+      try {
+        const feedbackResult = await retrieveFeedback(
+          tenantId,
+          persona.id,
+          userQuery,
+          { appliedFeedbackIds: [] },
+        );
+
+        if (feedbackResult.memories.length > 0) {
+          const composed = composePrompt({
+            personaPrompt: parts.join('\n'),
+            feedbackMemories: feedbackResult.memories,
+            ragChunks: [],
+            feedbackTokenBudget: (persona as any).feedbackTokenBudget ?? 500,
+          });
+          // Replace parts with composed prompt (preserves persona + adds feedback layer)
+          parts.length = 0;
+          parts.push(composed.systemPrompt);
+        }
+      } catch {
+        // Graceful degradation: proceed without feedback
       }
     }
 

@@ -22,7 +22,7 @@
 
 **Purpose**: Create shared quality-types module (seam A), extend types, DB schema, pipeline registration, and config validation.
 
-- [ ] T000 [BE] **(seam A)** Create shared quality-event types module at `packages/core/src/types/quality-event.ts`
+- [X] T000 [BE] **(seam A)** Create shared quality-event types module at `packages/core/src/types/quality-event.ts`
   - Export `QualityVerdict` union (superset: `pass | strip | block | fail | rewritten | rolled_back | overflow_skipped`).
   - Export `QualityEvent` interface (canonical audit shape: verdict, source, tenantId, personaId, conversationId, messageId, mode, isDryRun, latencyMs, metadata).
   - Export `QualityEventSource` type (`'004-false-promise' | '004-identity-guard' | '017-language-guard' | '018-dar-pipeline'`).
@@ -31,10 +31,10 @@
   - **Acceptance**: Types compile; `QualityVerdict` is a superset of 017+018 verdict values; `QualityEvent` carries all fields needed by 004-family audit + 018 push + 019 observability.
   - **Cross-spec dependents**: 018 T005 (types reference), 019 T005 (types reference).
 
-- [ ] T001 [DB] Add `'strip'` **and `'pass'`** values to `validatorVerdictEnum` in `packages/core/src/models/validators.ts` and generate migration `drizzle/000x_add_strip_pass_verdicts.sql` (`ALTER TYPE validator_verdict ADD VALUE` ×2). `'pass'` is required because FR-009 mandates auditing pass events — without the enum value the audit insert fails at the DB level; mapping pass→`no_op` would conflate semantics (claude F7)
-- [ ] T002 [BE] Add `LanguageGuardConfig` interface to `packages/core/src/types/validator.ts`, extend `AnyValidatorConfig` union, add BCP-47 → script mapping lookup table, and create Zod schema with `.refine(c => c.stripThreshold <= c.blockThreshold)` for threshold validation (FR-006). Map `detectedScripts` to existing `matchedPatterns` field in `Verdict` (reuse, no new field). Default values: `stripThreshold: 0.05`, `blockThreshold: 0.30`, `regenerateOnViolation: false`, `mode: 'dry-run'`
-- [ ] T003 [BE] Register `LanguageGuardValidator` in `packages/core/src/services/validators/pipeline.ts` constructor, insert after `FalsePromiseValidator` and before `IdentityGuardValidator`; update `resolveConfig` default to `dry-run` for `language-guard`; add pipeline-level skip: when language-guard returns `pass` and config has empty `allowedLanguages`, do NOT push to `results` (no audit entry for no-op, per DD-005). **This is an explicit pipeline-level convention (claude F6, option 3): document it with a code comment at the skip-site — the `ResponseValidator` interface deliberately carries no skip-audit signal**
-- [ ] T004 [BE] Verify config validation: ensure Zod schema from T002 is wired into the config-write path (API/seed) so that `stripThreshold > blockThreshold` is rejected at write time (FR-006). Confirm with unit test: invalid config → ZodError with clear message
+- [X] T001 [DB] Add `'strip'` **and `'pass'`** values to `validatorVerdictEnum` in `packages/core/src/models/validators.ts` and generate migration `drizzle/000x_add_strip_pass_verdicts.sql` (`ALTER TYPE validator_verdict ADD VALUE` ×2). `'pass'` is required because FR-009 mandates auditing pass events — without the enum value the audit insert fails at the DB level; mapping pass→`no_op` would conflate semantics (claude F7)
+- [X] T002 [BE] Add `LanguageGuardConfig` interface to `packages/core/src/types/validator.ts`, extend `AnyValidatorConfig` union, add BCP-47 → script mapping lookup table, and create Zod schema with `.refine(c => c.stripThreshold <= c.blockThreshold)` for threshold validation (FR-006). Map `detectedScripts` to existing `matchedPatterns` field in `Verdict` (reuse, no new field). Default values: `stripThreshold: 0.05`, `blockThreshold: 0.30`, `regenerateOnViolation: false`, `mode: 'dry-run'`
+- [X] T003 [BE] Register `LanguageGuardValidator` in `packages/core/src/services/validators/pipeline.ts` constructor, insert after `FalsePromiseValidator` and before `IdentityGuardValidator`; update `resolveConfig` default to `dry-run` for `language-guard`; add pipeline-level skip: when language-guard returns `pass` and config has empty `allowedLanguages`, do NOT push to `results` (no audit entry for no-op, per DD-005). **This is an explicit pipeline-level convention (claude F6, option 3): document it with a code comment at the skip-site — the `ResponseValidator` interface deliberately carries no skip-audit signal**
+- [X] T004 [BE] Verify config validation: ensure Zod schema from T002 is wired into the config-write path (API/seed) so that `stripThreshold > blockThreshold` is rejected at write time (FR-006). Confirm with unit test: invalid config → ZodError with clear message
 
 **Checkpoint**: Types + pipeline extension + config validation ready. Validator can be scaffolded safely.
 
@@ -44,7 +44,7 @@
 
 **Purpose**: Implement the core language detection and remediation logic — required by ALL user stories.
 
-- [ ] T005 [BE] Implement `packages/core/src/services/validators/language-guard.ts`:
+- [X] T005 [BE] Implement `packages/core/src/services/validators/language-guard.ts`:
   - **Masking pre-pass (DD-008 / FR-014, gemini F1 / claude F1+F5)**: before classification, mask fenced code blocks, inline code spans, URLs, and emails (deterministic regex); masked chars count toward neither numerator nor denominator
   - `ScriptClassifier` class: static Unicode range table (Latin **U+0041**–U+024F letters-only + U+1E00–U+1EFF, claude F8 / gemini PR#32; extensibility comment), `classify(char) → ScriptName`, `analyze(maskedText) → Map<ScriptName, number>` (character counts per script). **Precedence**: Common (strict: whitespace/punctuation/digits/symbols/emoji/control) checked first; a letter (`\p{L}`) matching no known range → `Unknown`, counted **non-compliant** (no fallback-to-Common bypass — gemini PR#32)
   - **Fraction (FR-015)**: `nonCompliantFraction = nonCompliantScriptChars / scriptChars` with `scriptChars = totalChars − commonChars − maskedChars`; `scriptChars === 0` → fraction 0 → `pass`
@@ -68,7 +68,7 @@
 
 ### Implementation
 
-- [ ] T006 [BE] [US1] Write unit tests in `packages/core/src/test/validators/language-guard.test.ts`:
+- [X] T006 [BE] [US1] Write unit tests in `packages/core/src/test/validators/language-guard.test.ts`:
   - Clean Russian response → `pass`, unchanged
   - 3% Chinese characters → `strip`, Chinese chars removed
   - 40% Chinese characters → `block`, fallback substituted
@@ -94,7 +94,7 @@
 
 ### Implementation
 
-- [ ] T007 [BE] [US2] Add dry-run test cases to `language-guard.test.ts`:
+- [X] T007 [BE] [US2] Add dry-run test cases to `language-guard.test.ts`:
   - `mode: dry-run` + violating response → original delivered, audit entry with `isDryRun: true`
   - `mode: dry-run` + clean response → `pass` with audit entry (FR-009: all events audited when `allowedLanguages` non-empty)
   - Verify that `isDryRun` flag is correctly set in `persistRuns` (inherited from pipeline, no new code needed)
@@ -112,12 +112,12 @@
 
 ### Implementation
 
-- [ ] T008 [BE] [US3] **Single config resolution + directive injection (gemini F2/F5, claude F3)**: resolve the `language-guard` config **once** at the chat-lifecycle entry (`ChatService.complete()`, where `tenantId` is in scope) and pass the resolved config to BOTH `buildSystemPrompt()` and the validator pipeline (optional `preloadedConfigs` param / request-scoped holder) — no second DB read for the same row per turn. In `buildSystemPrompt()`:
+- [X] T008 [BE] [US3] **Single config resolution + directive injection (gemini F2/F5, claude F3)**: resolve the `language-guard` config **once** at the chat-lifecycle entry (`ChatService.complete()`, where `tenantId` is in scope) and pass the resolved config to BOTH `buildSystemPrompt()` and the validator pipeline (optional `preloadedConfigs` param / request-scoped holder) — no second DB read for the same row per turn. In `buildSystemPrompt()`:
   - After annotation few-shot injection (line ~596), before `return parts.join('\n')`:
   - If preloaded config exists AND `allowedLanguages` is non-empty → append directive: `"IMPORTANT: You must respond ONLY in [language names from BCP-47 lookup]. Do not use any other language or script."`
   - If config missing or `allowedLanguages` empty → skip (FR-012)
   - **Error handling**: wrap config resolution in try/catch. On failure → `console.warn` and skip directive (fail-open); the pipeline falls back to its own `resolveConfig` if the preload is absent. Matches existing annotation-retrieval pattern (DD-003)
-- [ ] T009 [BE] [US3] Add directive injection tests:
+- [X] T009 [BE] [US3] Add directive injection tests:
   - Persona with `allowedLanguages: ["ru", "en"]` → system prompt contains Russian+English language directive
   - Persona with no language guard config → system prompt unchanged
   - Persona with empty `allowedLanguages: []` → no directive
@@ -136,8 +136,8 @@
 
 ### Implementation
 
-- [ ] T010 [BE] [US4] Verify per-persona scoping: existing `validator_configs` table already has unique index on `(tenant_id, persona_id, validator_name)`. Each persona gets its own config row. Pipeline's `resolveConfig` already queries by `(tenantId, personaId, validatorName)`. No structural change needed — confirm with integration test.
-- [ ] T011 [BE] [US4] Add per-persona test cases:
+- [X] T010 [BE] [US4] Verify per-persona scoping: existing `validator_configs` table already has unique index on `(tenant_id, persona_id, validator_name)`. Each persona gets its own config row. Pipeline's `resolveConfig` already queries by `(tenantId, personaId, validatorName)`. No structural change needed — confirm with integration test.
+- [X] T011 [BE] [US4] Add per-persona test cases:
   - Two personas, different `allowedLanguages` → same response gets different verdicts
   - One persona with config, one without → unconfigured persona gets no-op (FR-012)
 
@@ -149,7 +149,7 @@
 
 **Purpose**: Cross-boundary testing and edge cases.
 
-- [ ] T012 [E2E] Integration test: full pipeline run with language guard + existing validators. Verify ordering (false-promise → language-guard → identity-guard). Verify language guard audit entries appear in `validator_runs` with correct verdicts and `detectedScripts` in `matchedPatterns`.
+- [X] T012 [E2E] Integration test: full pipeline run with language guard + existing validators. Verify ordering (false-promise → language-guard → identity-guard). Verify language guard audit entries appear in `validator_runs` with correct verdicts and `detectedScripts` in `matchedPatterns`.
 
 ---
 
