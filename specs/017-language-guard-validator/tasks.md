@@ -34,7 +34,7 @@
 - [X] T001 [DB] Add `'strip'` **and `'pass'`** values to `validatorVerdictEnum` in `packages/core/src/models/validators.ts` and generate migration `drizzle/000x_add_strip_pass_verdicts.sql` (`ALTER TYPE validator_verdict ADD VALUE` ×2). `'pass'` is required because FR-009 mandates auditing pass events — without the enum value the audit insert fails at the DB level; mapping pass→`no_op` would conflate semantics (claude F7)
 - [X] T002 [BE] Add `LanguageGuardConfig` interface to `packages/core/src/types/validator.ts`, extend `AnyValidatorConfig` union, add BCP-47 → script mapping lookup table, and create Zod schema with `.refine(c => c.stripThreshold <= c.blockThreshold)` for threshold validation (FR-006). Map `detectedScripts` to existing `matchedPatterns` field in `Verdict` (reuse, no new field). Default values: `stripThreshold: 0.05`, `blockThreshold: 0.30`, `regenerateOnViolation: false`, `mode: 'dry-run'`
 - [X] T003 [BE] Register `LanguageGuardValidator` in `packages/core/src/services/validators/pipeline.ts` constructor, insert after `FalsePromiseValidator` and before `IdentityGuardValidator`; update `resolveConfig` default to `dry-run` for `language-guard`; add pipeline-level skip: when language-guard returns `pass` and config has empty `allowedLanguages`, do NOT push to `results` (no audit entry for no-op, per DD-005). **This is an explicit pipeline-level convention (claude F6, option 3): document it with a code comment at the skip-site — the `ResponseValidator` interface deliberately carries no skip-audit signal**
-- [ ] T004 [BE] Verify config validation: ensure Zod schema from T002 is wired into the config-write path (API/seed) so that `stripThreshold > blockThreshold` is rejected at write time (FR-006). Confirm with unit test: invalid config → ZodError with clear message
+- [X] T004 [BE] Verify config validation: ensure Zod schema from T002 is wired into the config-write path (API/seed) so that `stripThreshold > blockThreshold` is rejected at write time (FR-006). Confirm with unit test: invalid config → ZodError with clear message
 
 **Checkpoint**: Types + pipeline extension + config validation ready. Validator can be scaffolded safely.
 
@@ -68,7 +68,7 @@
 
 ### Implementation
 
-- [ ] T006 [BE] [US1] Write unit tests in `packages/core/src/test/validators/language-guard.test.ts`:
+- [X] T006 [BE] [US1] Write unit tests in `packages/core/src/test/validators/language-guard.test.ts`:
   - Clean Russian response → `pass`, unchanged
   - 3% Chinese characters → `strip`, Chinese chars removed
   - 40% Chinese characters → `block`, fallback substituted
@@ -94,7 +94,7 @@
 
 ### Implementation
 
-- [ ] T007 [BE] [US2] Add dry-run test cases to `language-guard.test.ts`:
+- [X] T007 [BE] [US2] Add dry-run test cases to `language-guard.test.ts`:
   - `mode: dry-run` + violating response → original delivered, audit entry with `isDryRun: true`
   - `mode: dry-run` + clean response → `pass` with audit entry (FR-009: all events audited when `allowedLanguages` non-empty)
   - Verify that `isDryRun` flag is correctly set in `persistRuns` (inherited from pipeline, no new code needed)
@@ -136,8 +136,8 @@
 
 ### Implementation
 
-- [ ] T010 [BE] [US4] Verify per-persona scoping: existing `validator_configs` table already has unique index on `(tenant_id, persona_id, validator_name)`. Each persona gets its own config row. Pipeline's `resolveConfig` already queries by `(tenantId, personaId, validatorName)`. No structural change needed — confirm with integration test.
-- [ ] T011 [BE] [US4] Add per-persona test cases:
+- [X] T010 [BE] [US4] Verify per-persona scoping: existing `validator_configs` table already has unique index on `(tenant_id, persona_id, validator_name)`. Each persona gets its own config row. Pipeline's `resolveConfig` already queries by `(tenantId, personaId, validatorName)`. No structural change needed — confirm with integration test.
+- [X] T011 [BE] [US4] Add per-persona test cases:
   - Two personas, different `allowedLanguages` → same response gets different verdicts
   - One persona with config, one without → unconfigured persona gets no-op (FR-012)
 
