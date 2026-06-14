@@ -2,17 +2,18 @@
 
 ## 1. Internal Read Endpoint: Retrieved Feedback Observability
 
-### `GET /v1/internal/retrieved-feedback?conversationId=<id>[&messageId=<id>]`
+### `GET /v1/internal/retrieved-feedback?conversationId=<id>`
 
 **Direction**: Product calls Engine (inbound, read-only)
 
 **Auth**: `Authorization: Bearer <TWIN_INTERNAL_WEBHOOK_SECRET>` + `X-Tenant-ID: <tenantId>`
 
+**Scope (review G-F1)**: Returns the **current** `conversation_feedback_states` for this conversation — i.e., memories applied in the current dedup window. NOT per-message historical data. Per-message history requires Langfuse trace (FR-005). The `messageId` query param is NOT supported in Phase 1.
+
 **Response (200 OK)**:
 ```json
 {
   "conversationId": "uuid",
-  "messageId": "uuid-or-null",
   "appliedMemories": [
     {
       "memoryId": "uuid",
@@ -33,7 +34,11 @@
 
 **Response (404)**: conversation not found or wrong tenant.
 
-**Purpose**: Product admin UI can show "which feedback lessons were applied" per reply without coupling to Langfuse. Langfuse trace (FR-005) is the primary observability path; this endpoint is the structural query path.
+**PII / lesson redaction (review F8)**: `lesson` field contains operator-authored text that may reference customer conversation content. By default, the endpoint returns `lesson` text. Add `?redact=true` query param to redact `lesson` (returns `"***"` instead) — for dashboards that don't need the full text. Product is responsible for retention/erasure of feedback PII at rest.
+
+**Shared secret blast radius (review F9)**: `TWIN_INTERNAL_WEBHOOK_SECRET` is shared between 018 `/rules-reload` and this endpoint. One leak compromises both. Accepted for Phase 1 (same trust boundary). Phase 2: per-route secrets.
+
+**Purpose**: Product admin UI can show "which feedback lessons were applied" (current state) without coupling to Langfuse. Langfuse trace (FR-005) is the primary observability path (per-message); this endpoint is the structural query path (current conversation state).
 
 ---
 

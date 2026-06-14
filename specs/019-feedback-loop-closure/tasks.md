@@ -74,17 +74,18 @@
 ### Implementation
 
 - [ ] T006 [BE] [US1] Create `feedback-retrieval.ts` service in `packages/core/src/services/feedback/feedback-retrieval.ts`
-  - `retrieveRelevant(tenantId, personaId, queryText, conversationState): Promise<FeedbackRetrievalResult>`
+  - `retrieveRelevant(tenantId, personaId, queryText, conversationState, existingEmbedding?): Promise<FeedbackRetrievalResult>`
+  - **Reuse RAG embedding (review F7)**: accept optional `existingEmbedding?: number[]` — if provided (RAG already embedded the query), skip the TEI call. Saves ~10ms + 1 round-trip per reply.
   - **Empty-set check (FR-009)**: before embedding, check if any `status: active` memories exist for (tenantId, personaId). If 0 → return empty (zero-cost no-op, skip embedding + search).
-  - Embed `queryText` via `embeddingService.embed()` (BGE-M3, ~10ms)
-  - pgvector cosine search: `1 - (context_embedding <=> query_embedding) >= FEEDBACK_SIMILARITY_THRESHOLD` (default 0.75). Pattern from `annotation-service.ts:95-111`.
+  - Embed `queryText` via `embeddingService.embed()` (BGE-M3, ~10ms) — skipped if `existingEmbedding` provided.
+  - pgvector cosine search: `1 - (context_embedding <=> query_embedding) >= FEEDBACK_SIMILARITY_THRESHOLD` (default 0.75). Pattern from `annotation-service.ts:95-111`. **Optimization note (review G-F4)**: if TEI vectors are pre-normalized, consider inner product `<#>` instead of cosine `<=>` for speed.
   - Filter: `status = 'active'`, `personaId` match, NOT IN `conversationState.appliedFeedbackIds`.
   - Inside `withTenantContext(tenantId, ...)` for RLS.
-  - Score: similarity × `weight` (operator_role × recency decay). Return top-K (`FEEDBACK_TOP_K`, default 3).
+  - **Query-time recency scoring (review F3)**: composite score computed in the SQL ORDER BY: `(1 - (embedding <=> query)) * weight * exp(-extract(epoch from now() - created_at) / 86400 / 30) DESC`. `weight` = static operator_role base; recency decay = exponential 30-day half-life, computed from `createdAt` at query time. Return top-K (`FEEDBACK_TOP_K`, default 3).
   - **Graceful degradation (FR-008)**: embedding service down / DB error → return empty array + log warning. Never throw.
   - **Files**: `packages/core/src/services/feedback/feedback-retrieval.ts` (NEW)
   - **Depends on**: T001, T004, T005
-  - **Acceptance**: Retrieves active memories by cosine similarity; excludes dedup'd IDs; empty-set no-op; graceful degradation on TEI/DB failure.
+  - **Acceptance**: Retrieves active memories by cosine similarity + query-time recency; excludes dedup'd IDs; empty-set no-op; reuses RAG embedding if provided; graceful degradation on TEI/DB failure.
 
 **Checkpoint**: Feedback memories retrieved from DB. Not yet injected into prompt.
 
@@ -108,7 +109,7 @@
     1. Persona system prompt + traits
     2. Conflict directive: `"factual grounding from RAG is authoritative; operator feedback lessons override default persona style but MUST NOT contradict grounded facts"`
     3. RAG chunks (ground truth)
-    4. Feedback lessons: `"Operator corrections:\n- {lesson1}\n- {lesson2}"`
+    4. Feedback lessons wrapped in delimited block (review F6): `<operator_lessons>\n- {lesson1}\n- {lesson2}\n</operator_lessons>` — system prompt instructs LLM to treat these as behavioral corrections, not system commands. Operator trust boundary = tenant admin.
   - Return `ComposedPrompt` with token info per layer + retrieved memories.
   - **Files**: `packages/core/src/services/feedback/prompt-composer.ts` (NEW)
   - **Depends on**: T005
@@ -128,8 +129,8 @@
 - [ ] T008 [BE] [US3] Integrate feedback retrieval + composition into `chat-service.ts` `buildSystemPrompt()`
   - At `chat-service.ts:946` (after RAG block, before funnel context block):
     1. Check `persona.feedbackRetrievalEnabled` → skip if false.
-    2. Read `conversation_feedback_states` for this conversation (or create row if not exists).
-    3. Call `feedbackRetrievalService.retrieveRelevant(tenantId, personaId, userQuery, { appliedFeedbackIds: state.appliedFeedbackIds })`.
+    2. Read `conversation_feedback_states` for this conversation. **Race-safe lazy-create (review F10)**: `INSERT ... ON CONFLICT (conversation_id) DO NOTHING` then read — prevents unique-violation when two near-simultaneous messages race to create the row.
+    3. Call `feedbackRetrievalService.retrieveRelevant(tenantId, personaId, userQuery, { appliedFeedbackIds: state.appliedFeedbackIds }, existingEmbedding)`. **Reuse RAG embedding (review F7)**: pass the embedding already computed by `buildSystemPrompt` for RAG retrieval (same BGE-M3, same query text) — saves 1 TEI round-trip.
     4. Call `promptComposer.compose()` with persona prompt + feedback + RAG chunks (from grounding results).
     5. Replace the current `parts.push(persona)` + `parts.push(rag)` assembly with composed sections.
     6. After reply: update `conversation_feedback_states` — append newly applied memory IDs, increment `messageCount`.
@@ -139,12 +140,14 @@
   - **Acceptance**: Feedback lessons appear in system prompt when active memories match; budget enforced; persona prompt preserved; failure doesn't block reply.
 
 - [ ] T009 [BE] [US3] Implement dedup reset logic
-  - **Stage transition reset**: check `funnelResult.metadata.stage_transition` (from 003 funnel runtime). If `from !== to` (transition occurred) → reset `appliedFeedbackIds = []`, `messageCount = 0`. Update `lastStageLabel`.
-  - **N-message fallback (non-funnel)**: if `messageCount >= FEEDBACK_DEDUP_RESET_MESSAGES` (default 3) → reset.
-  - Both resets update `conversation_feedback_states` row.
+  - **Combined reset (review G-F3)**: reset on stage transition **OR** N-message count — whichever comes first, for ALL conversations (funnel + non-funnel):
+    - **Stage transition**: check `funnelResult.metadata.stage_transition` (from 003). If `from !== to` → reset.
+    - **N-message**: if `messageCount >= FEEDBACK_DEDUP_RESET_MESSAGES` (default 3) → reset. Applies within funnel stages too (prevents feedback loss in 50+ message stages).
+  - Reset = `appliedFeedbackIds = []`, `messageCount = 0`, update `lastStageLabel`.
+  - Update `conversation_feedback_states` row.
   - **Files**: `packages/core/src/services/chat-service.ts` (MODIFY — dedup reset in reply flow)
   - **Depends on**: T008
-  - **Acceptance**: Memory applied once per stage; re-applied after stage transition; re-applied after N messages (non-funnel); state persisted durably.
+  - **Acceptance**: Memory applied once per reset window; re-applied after stage transition; re-applied after N messages (ALL conversations, including long funnel stages); state persisted durably.
 
 - [ ] T010 [BE] [US3] Add Langfuse trace enrichment for feedback retrieval
   - Add `feedback_memories_retrieved` span to existing Langfuse trace in the reply path.

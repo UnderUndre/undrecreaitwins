@@ -1,6 +1,6 @@
 # Implementation Plan: 019 Feedback Loop Closure (Prompt-Time Retrieval)
 
-**Branch**: `specs/018-response-quality-rules` (worktree: `019-feedback-loop-closure`) | **Date**: 2026-06-14 | **Spec**: [spec.md](./spec.md)
+**Branch**: `specs/019-feedback-loop-closure` | **Date**: 2026-06-14 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature spec + 017 codebase audit + 005 RAG patterns + 003 funnel stage detection
 
 ## Summary
@@ -115,7 +115,8 @@ Close the feedback loop: before generating a reply, retrieve top-K relevant `fee
 
 9. **Engine read endpoint** — `GET /v1/internal/retrieved-feedback?conversationId=<id>`
    - Auth: dedicated internal secret (mirror 018 `TWIN_INTERNAL_WEBHOOK_SECRET` pattern) + `X-Tenant-ID`
-   - Returns per-reply applied memory IDs + similarity scores + token allocation
+   - **Shared secret blast radius (review F9)**: `TWIN_INTERNAL_WEBHOOK_SECRET` is shared between 018 `/rules-reload` and 019 `/retrieved-feedback`. One leak compromises both routes. Accepted for Phase 1 (2 routes, same trust boundary = internal Product→Engine). Phase 2: per-route secrets or shared internal-auth preHandler with route-scoped claims.
+   - Returns applied memory IDs + similarity scores + token allocation (current conversation state, not per-message history — review G-F1). Lesson text optional (can be redacted per F8).
    - Lets Product query "which lessons applied" without coupling to Langfuse
    - **Files**: `packages/api/src/routes/retrieved-feedback.ts` (NEW), `packages/api/src/server.ts` (MODIFY — register)
 
@@ -129,9 +130,11 @@ Close the feedback loop: before generating a reply, retrieve top-K relevant `fee
 | Endpoint | Direction | Purpose |
 |----------|-----------|---------|
 | `POST /v1/feedback-memories` | Product → Engine | Product submits operator corrections → Engine distills lesson, embeds, stores `feedback_memories` row (status=pending). *(Not in 019 scope — future Product annotation spec 021. Included here for contract completeness.)* |
-| `GET /v1/internal/retrieved-feedback?conversationId=<id>` | Product → Engine | Product queries "which lessons applied" for observability. Internal secret auth. |
+| `GET /v1/internal/retrieved-feedback?conversationId=<id>` | Product → Engine | Product queries "which lessons applied" for observability. Returns current conversation state (not per-message history). Internal secret auth. |
 
 **⚠️ Feedback memory ingestion** (the write path: operator submits correction → LLM distill → embed → store) is NOT in 019 scope. 019 is the READ path (retrieval + composition). The write path is a future spec (or part of Product 021). For 019 to be testable, memories must be insertable — either via direct DB seed or a minimal ingestion endpoint.
+
+**Schema ownership (review F11)**: `feedback_memories` is **designed** in ai-twins 017-hybrid-agent-core (Phase 2 data-model.md) but **implemented/migrated** in Engine 019. **Engine 019 owns the migration** (single owner of the SQL lifecycle). The 017 data-model.md is the design source of truth; Engine aligns to it. If 017 adds columns in the future, a new Engine migration extends the table — 017 does not migrate directly.
 
 ## Project Structure
 

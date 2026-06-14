@@ -50,11 +50,13 @@ This spec closes the loop: before generating a reply, retrieve top-K relevant `f
 
 ## User Scenarios & Testing
 
-### User Story 1 — Operator correction improves next reply (Priority: P1)
+### User Story 1 — Seeded correction improves next reply (Priority: P1)
 
-An operator notices the twin keeps calling customers "Уважаемый клиент" (too formal). Operator submits feedback: lesson = "Не используй 'Уважаемый клиент' — обращайся по имени или дружелюбно". Lesson is LLM-distilled, embedded, `status: active`. On the next reply where the twin would say "Уважаемый клиент", the feedback memory is retrieved (vector similarity to the user message context) and injected into the prompt. The twin says "Алексей, ..." instead.
+**Given** a seeded active `feedback_memories` row (ingestion/write path = future spec — see Dependencies), **when** the twin would exhibit the corrected behavior, the feedback memory is retrieved (vector similarity to the user message context) and injected into the prompt.
 
-**Independent Test**: Submit a feedback memory with a clear lesson. Send a message that would trigger the old behavior. Confirm: (a) the feedback memory appears in the Langfuse trace as "retrieved", (b) the generated reply reflects the correction.
+> **⚠️ Scope note (review F2)**: 019 implements the **read/retrieval path only**. The ingestion path (operator submits correction → LLM-distill → embed → store) is a **future spec** (Product: ai-twins 021 annotation UI + Engine ingestion endpoint). For 019 testing, memories are seeded via SQL. US1 is scoped to "given a seeded memory" — end-to-end "operator submits → reply changes" requires the ingestion spec.
+
+**Independent Test**: Seed a feedback memory with a clear lesson via SQL. Send a message that would trigger the old behavior. Confirm: (a) the feedback memory appears in the Langfuse trace as "retrieved", (b) the generated reply reflects the correction.
 
 **Acceptance Scenarios**:
 1. **Given** an active feedback memory matching the current message context, **When** the reply is generated, **Then** the memory is retrieved and injected into the system prompt, and the reply reflects the lesson.
@@ -84,7 +86,7 @@ A feedback memory "don't promise discounts" is retrieved for message 1, 2, 3 in 
 - **FR-003**: Prompt composition service — new module `packages/core/src/services/prompt-composer.ts`. Method: `compose({ persona, feedbackMemories, ragChunks, conversationContext }): ComposedPrompt`. Allocates token budget per layer (persona hard floor, feedback cap ~500 tokens, RAG remainder). Returns composed system prompt string + metadata (which memories were included, token counts per layer). **Content-conflict precedence (CL Round 2)**: при противоречии по содержанию — **RAG-факты > feedback > persona-дефолты**. Composer (a) располагает слои в этом порядке и (b) добавляет директиву: «factual grounding from RAG is authoritative; operator feedback lessons override default persona style but MUST NOT contradict grounded facts». (Ось feedback↔CorrectionRule — пост-генерация, DAR 018, не в промпте.)
 - **FR-004**: Integration into `chat-service.ts` — after existing RAG retrieval (spec 005) and before `LLMClient.complete()` call, invoke `feedback-retrieval.retrieveRelevant()`, then `prompt-composer.compose()`. Replace the current system prompt construction with the composed output.
 - **FR-005**: Langfuse trace enrichment — add `feedback_memories_retrieved` span to the existing Langfuse trace. Includes: memory IDs, similarity scores, lesson text (truncated), token budget allocation per layer.
-- **FR-006**: Conversation state tracking — add `appliedFeedbackIds: string[]` to the conversation state, stored in the **Postgres `conversation_feedback_states` table** (CL Round 2 — durable, multi-worker-consistent; не in-memory; separate from `conversation_funnel_states` which only exists for funnel conversations). Updated after each reply with the IDs of injected memories. **Reset trigger (CL Round 2)**: смена funnel stage-label (003) → reset; разговор без воронки (нет stage) → fallback reset каждые N сообщений (default N = dedup-окно = 3, env `FEEDBACK_DEDUP_RESET_MESSAGES`).
+- **FR-006**: Conversation state tracking — add `appliedFeedbackIds: string[]` to the conversation state, stored in the **Postgres `conversation_feedback_states` table** (CL Round 2 — durable, multi-worker-consistent; не in-memory; separate from `conversation_funnel_states` which only exists for funnel conversations). Updated after each reply with the IDs of injected memories. **Reset trigger (review G-F3)**: reset on funnel stage-label change (003) **OR** every N messages (`FEEDBACK_DEDUP_RESET_MESSAGES`, default 3) — whichever comes first, for ALL conversations (funnel + non-funnel). Prevents feedback loss in long funnel stages (50+ messages without stage transition).
 - **FR-007**: Per-persona config — add `feedbackRetrievalEnabled: boolean` (default true) and `feedbackTokenBudget: number` (default 500) to persona config. Operators can disable feedback retrieval for specific personas (e.g., during A/B testing).
 - **FR-008**: Error handling — if feedback retrieval fails (embedding service down, DB error), the reply proceeds WITHOUT feedback memories (graceful degradation). Log warning. Never block reply on feedback retrieval.
 - **FR-009**: Empty feedback set — if no `status: active` feedback memories exist for the tenant/persona, retrieval is a no-op (zero vector search calls). Skip entirely.
@@ -108,6 +110,10 @@ A feedback memory "don't promise discounts" is retrieved for message 1, 2, 3 in 
 - **RAG and feedback compete for same budget** → feedback gets priority allocation (it's operator-curated), RAG gets remainder. If RAG budget < 200 tokens, skip RAG for this reply (better no RAG than truncated context).
 - **Stage transition mid-conversation** → `appliedFeedbackIds` resets. Same feedback memory can be re-applied in the new stage.
 - **Embedding service (TEI) down** → feedback retrieval skipped (graceful degradation). RAG also affected (same embedding service) — both degrade together. Reply proceeds with persona-only prompt.
+- **Prompt-injection via operator lesson (review F6)** → `lesson` is operator-authored free text injected into the system prompt. A compromised/careless lesson could steer generation. Mitigation: lessons wrapped in a delimited block (`<operator_lessons>...</operator_lessons>`); system prompt instructs LLM to treat them as behavioral corrections, not system commands. Operator trust boundary = tenant admin role (same as all Product config).
+- **PII in feedback memories (review F8)** → `feedback_memories` stores `lesson`, `userQuery`, `wrongResponse`, `correctedResponse` — customer conversation content. TLS-in-transit assumed (HTTPS). Product responsible for at-rest retention + right-to-erasure. `GET /v1/internal/retrieved-feedback` returns IDs + scores by default; `lesson` text optional (can be redacted). `archived` status is for cap-200 rotation, NOT PII lifetime.
+- **Bot-initiated message, no user query (review G-F2)** → in proactive flows (bot starts conversation), there is no user message to embed for feedback retrieval. Fallback: use the persona's stage objective/topic as the retrieval query, or skip feedback retrieval for bot-initiated turns (empty query → no-op per FR-009).
+- **Query/index embedding asymmetry (review F12)** → memories are indexed on `context_embedding` (the correction's triggering context), retrieval embeds the current user message. Different semantic roles may reduce recall. Phase 1 accepts this asymmetry; Phase 2 may add a user-message-context embedding column for better recall matching.
 
 ## Key Entities
 
@@ -137,3 +143,14 @@ A feedback memory "don't promise discounts" is retrieved for message 1, 2, 3 in 
 - **Prompt composition** — the process of assembling the final system prompt from persona + feedback + RAG layers within a token budget.
 - **Dedup** — preventing the same feedback memory from being injected multiple times in the same conversation stage.
 - **Budget allocation** — fixed token cap per prompt layer (persona, feedback, RAG) to prevent context window overflow.
+
+## Which Correction Mechanism When (review F13)
+
+Four mechanisms shape assistant responses. Decision guide for operators/PMs:
+
+| Mechanism | Spec | When to use | How it works |
+|-----------|------|-------------|--------------|
+| **Feedback memory** | 019 (this) | Operator noticed a **recurring behavioral pattern** to correct (e.g., "too formal", "doesn't close objections") | Injected into system prompt **before generation** as a lesson. Shapes how the LLM generates. |
+| **CorrectionRule** | 018 | Operator needs **deterministic detection + rewrite** of specific artifacts (e.g., "remove em-dashes", "block off-topic") | DAR pipeline runs **after generation**. Detects pattern, rewrites text. Gate (rewrite) or advisory (score). |
+| **Annotation** | 008 | Operator has **good/bad response pairs** to teach style via few-shot | Few-shot examples injected into prompt **before generation**. Shows desired style by example. |
+| **RAG document** | 005 | Operator needs **factual knowledge** in responses (product specs, pricing, policies) | Document chunks retrieved and injected as **ground truth** in the prompt. Authoritative facts. |

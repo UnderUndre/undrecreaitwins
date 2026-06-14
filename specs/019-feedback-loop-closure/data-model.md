@@ -61,7 +61,7 @@ CREATE INDEX feedback_memories_context_embedding_hnsw_idx
 | `lesson` | TEXT | LLM-distilled operator correction (e.g., "Не используй 'Уважаемый клиент' — обращайся по имени"). Injected into prompt. |
 | `status` | ENUM('pending','active','archived') | Approval gate + cap-200 rotation. Only `active` memories are retrieved (SC-004). `pending` = submitted but not approved. `archived` = old memories rotated out (cap-200, per 017 data-model.md:134). |
 | `operatorRole` | TEXT (nullable) | Role of the submitter (e.g., 'sales_manager'). Affects weight. |
-| `weight` | REAL | Composite: `operatorRole` base × recency decay. Higher = more likely to be retrieved. |
+| `weight` | REAL | **Static base weight** = `operator_role` multiplier (e.g., owner=1.5, admin=1.2, member=1.0). Written once at creation. **Recency decay is NOT stored** — computed at query time from `createdAt`: `decay = exp(-age_days / 30)`. Composite retrieval score = `cosine_similarity × weight × decay`. (review F3) |
 | `sourceConversationId` | UUID (nullable, FK) | Conversation that generated this feedback. For traceability. |
 
 ## New Table: `conversation_feedback_states`
@@ -118,9 +118,9 @@ interface FeedbackMemory {
   personaId: string;
   contextEmbedding: number[];    // not sent to LLM — used only for retrieval
   lesson: string;
-  status: 'pending' | 'active';
+  status: 'pending' | 'active' | 'archived';
   operatorRole: string | null;
-  weight: number;
+  weight: number;                  // STATIC base weight (operator_role multiplier). Recency decay computed at query time from createdAt — NOT stored.
   createdAt: Date;
 }
 
