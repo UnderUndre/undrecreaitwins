@@ -32,6 +32,7 @@
   - `pgTable('conversation_feedback_states')` with: `conversationId` (UUID PK, FK → conversations, cascade), `appliedFeedbackIds` (jsonb string[], default []), `messageCount` (int, default 0), `lastStageLabel` (text, nullable), `updatedAt`.
   - Re-export from `packages/core/src/models/index.ts`.
   - **Files**: `packages/core/src/models/conversation-feedback-states.ts` (NEW), `packages/core/src/models/index.ts` (MODIFY)
+  - **Depends on**: T001 (T001 before T002 for `index.ts` ordering)
   - **Acceptance**: Model compiles; jsonb typed as `string[]`.
 
 - [ ] T003 [DB] Extend `personas` model with feedback config fields
@@ -207,7 +208,7 @@
 ### Dependencies
 
 ```
-T001 → T004
+T001 → T002, T003
 T002 → T004
 T003 → T004
 T001 → T006
@@ -237,7 +238,8 @@ T013 → T014
 
 ```mermaid
 graph LR
-    T001 --> T004
+    T001 --> T002
+    T001 --> T003
     T002 --> T004
     T003 --> T004
     T001 --> T006
