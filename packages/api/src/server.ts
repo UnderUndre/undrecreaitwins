@@ -20,6 +20,7 @@ import { channelRoutes } from './routes/channels.js';
 import { fallbackRoutes } from './routes/fallback.js';
 import { behaviorRoutes } from './routes/behavior.js';
 import { retryJobsRoutes } from './routes/retry-jobs.js';
+import { correctionRulesReloadRoutes } from './routes/correction-rules-reload.js';
 import { authPublicPlugin } from './middleware/auth-public.js';
 import { publicModelsRoute } from './routes/v1/openai/models.js';
 import { publicChatRoute } from './routes/v1/openai/chat.js';
@@ -166,6 +167,7 @@ export async function buildServer() {
   await fastify.register(fallbackRoutes);
   await fastify.register(behaviorRoutes);
   await fastify.register(retryJobsRoutes);
+  await fastify.register(correctionRulesReloadRoutes);
 
   await fastify.register(async (publicApi) => {
     await publicApi.register(authPublicPlugin);

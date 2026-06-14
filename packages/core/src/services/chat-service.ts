@@ -9,6 +9,7 @@ import { FragmentScorer } from './funnel/scorer.js';
 import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
 import { buildLanguageDirective } from './validators/language-guard.js';
+import { execute as darExecute } from './correction-rules/dar-pipeline.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
 import { AnnotationService } from './annotation-service.js';
 import { EmbeddingService } from './embedding-service.js';
@@ -417,12 +418,22 @@ export class ChatService {
       const latencyMs = Date.now() - startTime;
 
       // FR-001: Response validation (post-generation)
-      const finalContent = await validatorPipeline.validateResponse(llmResponse.content, {
+      const validatedContent = await validatorPipeline.validateResponse(llmResponse.content, {
         tenantId: request.tenantId,
         personaId: persona.id,
         conversationId,
         rawUserMessage: lastUserMessage
       });
+
+      // 018 DAR pipeline (post-validation, pre-persistence)
+      const darResult = await darExecute(llm, validatedContent, {
+        tenantId: request.tenantId,
+        personaId: persona.id,
+        conversationId,
+        messageId: undefined,
+        rawUserMessage: lastUserMessage,
+      });
+      const finalContent = darResult.text;
 
       if (request.persist !== false) {
         await this.persistMessages(
