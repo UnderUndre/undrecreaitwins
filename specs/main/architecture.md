@@ -38,9 +38,9 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 ## 3. Core Service Patterns
 
 - **Repositories**: Drizzle CRUD, tenant-scoped via `withTenantContext(tenantId, fn)`.
-- **Services**: `chat` (reply path + streaming), `embedding` (TEI client), `annotation` (few-shot loop), `document` (parse/chunk/embed), `grounding` (RAG retrieval), `reengagement` (scan/worker), `langfuse` (trace emit), **`hermes`** (agentic: `runAgentTurn` via self-host hermes-agent; engine-mediated tool-gateway = allow-list + per-tenant write-permission + `reserve→execute→finalize` idempotency + audit; validators/guardrail outbound gate + fallback; Honcho working-memory; spawn/hibernate lifecycle).
+- **Services**: `chat` (reply path + streaming), `embedding` (TEI client), `annotation` (few-shot loop), `document` (parse/chunk/embed), `grounding` (RAG retrieval), `reengagement` (scan/worker), `langfuse` (trace emit), **`hermes`** (agentic: `runAgentTurn` via self-host hermes-agent; engine-mediated tool-gateway = allow-list + per-tenant write-permission + `reserve→execute→finalize` idempotency + audit; validators/guardrail outbound gate + fallback; Honcho working-memory; spawn/hibernate lifecycle), **`correction-rules`** (DAR pipeline: rule cache pull from Product HTTP, detect→aggregate→rewrite→re-validate, quality event push back to Product; spec 018).
 - **Middleware**: auth (Bearer, server-to-server), tenant resolution, error handling.
-- **Reply path** (`ChatService.buildSystemPrompt` → `complete`): KB/RAG context → annotation few-shot (pre-gen, fail-open on embedder outage) → generate → stream (002) or `complete()` → persist + Langfuse emit.
+- **Reply path** (`ChatService.buildSystemPrompt` → `complete`): KB/RAG context → annotation few-shot (pre-gen, fail-open on embedder outage) → generate → stream (002) or `complete()` → 004 validators → **018 DAR pipeline** (detect→aggregate→rewrite→re-validate, fail-open) → persist + Langfuse emit.
 
 ## 4. Data Flow
 
@@ -65,6 +65,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | 011-llm-configuration | **Per-assistant BYOK LLM provider** (custom OpenAI-compatible: `base_url` + encrypted key + model + temperature/max_tokens). Resolves `assistant → tenant → platform`; injected into Hermes per spawn via a throwaway `HERMES_HOME` profile (`config.yaml` model.* + `OPENAI_API_KEY` env, never on disk; verified vs hermes-agent v0.15.1); `base_url` SSRF-guarded (DNS-resolve-and-pin via undici dispatcher); key encrypted at rest. Admin UI = Product (`ai-twins/011`). **Live path = thin completion** (`LLMClient.complete`); the agentic executor (`runAgentTurn`) is not yet wired. Durable-retry (US2) **deferred** → `specs/011-llm-configuration/followup-Y-durable-retry.md` |
 | 013-agentic-runtime-readiness | **Runtime readiness for the 010 agentic loop.** (1) Engine image now carries the **Hermes CLI** — converted `packages/api/Dockerfile` (Node 20 + Python 3.11 + `pipx hermes-agent[acp]==0.15.1`) **and** a documented host-prereq path; **startup preflight** (`hermes acp --check` + ACP protocolVersion) fails at boot, not on first turn. (2) `honcho-client.ts` migrated from legacy `apps/users` → **Honcho v3** (`workspaces/peers`, workspace-per-tenant) so working memory persists instead of silent no-op; degradation now **observable** (transient vs permanent API mismatch). No DB change. Engine-only (worker/channel Dockerfiles deferred) |
 | 014-per-assistant-mcp | **Per-assistant external MCP servers, brokered.** Tenant-admin curates a catalog of registered **HTTP** MCP servers (stdio = platform-admin only); per-assistant bindings. At a turn the engine acts as an MCP **client**, discovers external tools (TTL-cached), and **re-exposes them through the engine gateway** (010) — same allow-list + permission + audit + **full write-treatment** (010 T015) for external writes. **No raw `session/new` passthrough** (preserves 010 gateway-as-sole-authority). Reuses 011 KMS (encrypted MCP auth) + SSRF-pin. New tables `mcp_catalog_entry` + `assistant_mcp_binding` (RLS). Admin UI = Product (`ai-twins`) |
+| 018-response-quality-rules | **DAR pipeline runtime (Detect→Aggregate→Rewrite).** Dynamic rule execution layer on top of 004 ValidatorPipeline. Pulls correction rules from Product via HTTP (`GET /v1/correction-rules`), caches per-assistant (TTL + webhook invalidation `POST /v1/internal/rules-reload`). Executes: structural detectors (regex/keyword, <1ms) + semantic detectors (LLM binary classifier, parallelized ≤3) → aggregate (priority sort, cap ≤4 rewrite rules) → single rewrite LLM pass → re-validate through 004 false-promise + identity-guard (1 pass) → rollback on violation. Pushes quality events back to Product (`POST /v1/quality-events`, fire-and-forget). Non-streaming Phase 1; fail-open on any error. No Engine DB tables. Admin UI = Product (`ai-twins/019`). |
 
 ## 6. Cross-repo boundary (runtime ↔ admin)
 
@@ -77,6 +78,7 @@ Engine (`undrecreaitwins`) owns the **RUNTIME**; Product (`ai-twins`) owns the *
 | 006-mtproto-channel | 005-mtproto-session |
 | 008-agent-builder | 010-agent-builder-admin |
 | 009-reengagement-runtime | 006-reengagement-admin |
+| 018-response-quality-rules | 019-response-quality-rules |
 
 Product → engine is **server-to-server** (Bearer + `X-Tenant-ID`, via a Product BFF); engine RLS enforces tenant isolation. Shared tables with singular migration ownership (e.g. `followup_*` for re-engagement) coordinated cross-repo before either side migrates.
 
