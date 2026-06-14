@@ -22,7 +22,7 @@
 
 **Purpose**: Create shared quality-types module (seam A), extend types, DB schema, pipeline registration, and config validation.
 
-- [ ] T000 [BE] **(seam A)** Create shared quality-event types module at `packages/core/src/types/quality-event.ts`
+- [X] T000 [BE] **(seam A)** Create shared quality-event types module at `packages/core/src/types/quality-event.ts`
   - Export `QualityVerdict` union (superset: `pass | strip | block | fail | rewritten | rolled_back | overflow_skipped`).
   - Export `QualityEvent` interface (canonical audit shape: verdict, source, tenantId, personaId, conversationId, messageId, mode, isDryRun, latencyMs, metadata).
   - Export `QualityEventSource` type (`'004-false-promise' | '004-identity-guard' | '017-language-guard' | '018-dar-pipeline'`).
@@ -31,9 +31,9 @@
   - **Acceptance**: Types compile; `QualityVerdict` is a superset of 017+018 verdict values; `QualityEvent` carries all fields needed by 004-family audit + 018 push + 019 observability.
   - **Cross-spec dependents**: 018 T005 (types reference), 019 T005 (types reference).
 
-- [ ] T001 [DB] Add `'strip'` **and `'pass'`** values to `validatorVerdictEnum` in `packages/core/src/models/validators.ts` and generate migration `drizzle/000x_add_strip_pass_verdicts.sql` (`ALTER TYPE validator_verdict ADD VALUE` ×2). `'pass'` is required because FR-009 mandates auditing pass events — without the enum value the audit insert fails at the DB level; mapping pass→`no_op` would conflate semantics (claude F7)
-- [ ] T002 [BE] Add `LanguageGuardConfig` interface to `packages/core/src/types/validator.ts`, extend `AnyValidatorConfig` union, add BCP-47 → script mapping lookup table, and create Zod schema with `.refine(c => c.stripThreshold <= c.blockThreshold)` for threshold validation (FR-006). Map `detectedScripts` to existing `matchedPatterns` field in `Verdict` (reuse, no new field). Default values: `stripThreshold: 0.05`, `blockThreshold: 0.30`, `regenerateOnViolation: false`, `mode: 'dry-run'`
-- [ ] T003 [BE] Register `LanguageGuardValidator` in `packages/core/src/services/validators/pipeline.ts` constructor, insert after `FalsePromiseValidator` and before `IdentityGuardValidator`; update `resolveConfig` default to `dry-run` for `language-guard`; add pipeline-level skip: when language-guard returns `pass` and config has empty `allowedLanguages`, do NOT push to `results` (no audit entry for no-op, per DD-005). **This is an explicit pipeline-level convention (claude F6, option 3): document it with a code comment at the skip-site — the `ResponseValidator` interface deliberately carries no skip-audit signal**
+- [X] T001 [DB] Add `'strip'` **and `'pass'`** values to `validatorVerdictEnum` in `packages/core/src/models/validators.ts` and generate migration `drizzle/000x_add_strip_pass_verdicts.sql` (`ALTER TYPE validator_verdict ADD VALUE` ×2). `'pass'` is required because FR-009 mandates auditing pass events — without the enum value the audit insert fails at the DB level; mapping pass→`no_op` would conflate semantics (claude F7)
+- [X] T002 [BE] Add `LanguageGuardConfig` interface to `packages/core/src/types/validator.ts`, extend `AnyValidatorConfig` union, add BCP-47 → script mapping lookup table, and create Zod schema with `.refine(c => c.stripThreshold <= c.blockThreshold)` for threshold validation (FR-006). Map `detectedScripts` to existing `matchedPatterns` field in `Verdict` (reuse, no new field). Default values: `stripThreshold: 0.05`, `blockThreshold: 0.30`, `regenerateOnViolation: false`, `mode: 'dry-run'`
+- [X] T003 [BE] Register `LanguageGuardValidator` in `packages/core/src/services/validators/pipeline.ts` constructor, insert after `FalsePromiseValidator` and before `IdentityGuardValidator`; update `resolveConfig` default to `dry-run` for `language-guard`; add pipeline-level skip: when language-guard returns `pass` and config has empty `allowedLanguages`, do NOT push to `results` (no audit entry for no-op, per DD-005). **This is an explicit pipeline-level convention (claude F6, option 3): document it with a code comment at the skip-site — the `ResponseValidator` interface deliberately carries no skip-audit signal**
 - [ ] T004 [BE] Verify config validation: ensure Zod schema from T002 is wired into the config-write path (API/seed) so that `stripThreshold > blockThreshold` is rejected at write time (FR-006). Confirm with unit test: invalid config → ZodError with clear message
 
 **Checkpoint**: Types + pipeline extension + config validation ready. Validator can be scaffolded safely.
@@ -44,7 +44,7 @@
 
 **Purpose**: Implement the core language detection and remediation logic — required by ALL user stories.
 
-- [ ] T005 [BE] Implement `packages/core/src/services/validators/language-guard.ts`:
+- [X] T005 [BE] Implement `packages/core/src/services/validators/language-guard.ts`:
   - **Masking pre-pass (DD-008 / FR-014, gemini F1 / claude F1+F5)**: before classification, mask fenced code blocks, inline code spans, URLs, and emails (deterministic regex); masked chars count toward neither numerator nor denominator
   - `ScriptClassifier` class: static Unicode range table (Latin **U+0041**–U+024F letters-only + U+1E00–U+1EFF, claude F8 / gemini PR#32; extensibility comment), `classify(char) → ScriptName`, `analyze(maskedText) → Map<ScriptName, number>` (character counts per script). **Precedence**: Common (strict: whitespace/punctuation/digits/symbols/emoji/control) checked first; a letter (`\p{L}`) matching no known range → `Unknown`, counted **non-compliant** (no fallback-to-Common bypass — gemini PR#32)
   - **Fraction (FR-015)**: `nonCompliantFraction = nonCompliantScriptChars / scriptChars` with `scriptChars = totalChars − commonChars − maskedChars`; `scriptChars === 0` → fraction 0 → `pass`
