@@ -153,6 +153,18 @@
     "./services/llm-provider/index.js": {
       "types": "./dist/services/llm-provider/index.d.ts",
       "default": "./dist/services/llm-provider/index.js"
+    },
+    "./services/correction-rules/rule-cache.js": {
+      "types": "./dist/services/correction-rules/rule-cache.d.ts",
+      "default": "./dist/services/correction-rules/rule-cache.js"
+    },
+    "./services/validators/pipeline.js": {
+      "types": "./dist/services/validators/pipeline.d.ts",
+      "default": "./dist/services/validators/pipeline.js"
+    },
+    "./services/validators/language-guard.js": {
+      "types": "./dist/services/validators/language-guard.d.ts",
+      "default": "./dist/services/validators/language-guard.js"
     }
   },
   "scripts": {

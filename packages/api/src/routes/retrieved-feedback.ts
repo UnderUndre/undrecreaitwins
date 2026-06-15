@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { withTenantContext, eq } from '@undrecreaitwins/core/db.js';
+import { eq } from 'drizzle-orm';
+import { withTenantContext } from '@undrecreaitwins/core/db.js';
 import { conversationFeedbackStates } from '@undrecreaitwins/core/models/index.js';
 import { internalAuth } from '../middleware/internal-auth.js';
 

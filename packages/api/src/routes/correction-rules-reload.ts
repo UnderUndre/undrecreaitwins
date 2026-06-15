@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { invalidate } from '../../../core/src/services/correction-rules/rule-cache.js';
+import { invalidate } from '@undrecreaitwins/core/services/correction-rules/rule-cache.js';
 import { internalAuth } from '../middleware/internal-auth.js';
 
 const bodySchema = z.object({
