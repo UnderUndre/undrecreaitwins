@@ -202,6 +202,10 @@ export interface FunnelConfig {
   stuck_threshold: number;
   stuck_action: 'yield_generation' | 'handoff' | 'exit_stage';
   scoring_weights: ScoringWeights;
+  /** NFR-6: max reruns (banned retry + anti-repeat + retell) per turn. Default 2. */
+  maxTurnReruns: number;
+  /** NFR-6: max total LLM calls per turn (intro + gen + guards + extraction + intent). Default 6. */
+  maxTurnLLMCalls: number;
 }
 
 export interface ScoringWeights {
@@ -223,12 +227,19 @@ export interface FunnelStage {
   nextStageId?: string;
   stuckAction?: 'yield_generation' | 'handoff' | 'exit_stage';
   exitStageId?: string;
+  requiredSlots: string[];
+  requiresConfirmation: boolean;
+  confirmationPrompt?: string;
+  isAnytime: boolean;
+  anytimeTriggers?: string[];
 }
 
 export type ResolutionCriteria =
   | { type: 'fragment_selected'; fragment_id: string }
   | { type: 'slot_filled'; slot_name: string }
   | { type: 'all_slots_filled' };
+
+export type FragmentDeliveryMode = 'verbatim' | 'template' | 'llm';
 
 export interface FunnelFragment {
   id: string;
@@ -238,6 +249,10 @@ export interface FunnelFragment {
   content: string;
   triggers: TriggerDefinition;
   scoreWeight: number;
+  deliveryMode: FragmentDeliveryMode;
+  adaptiveIntro: boolean;
+  mediaUrl?: string;
+  deliveryCondition?: Record<string, unknown>;
 }
 
 export interface TriggerDefinition {
@@ -252,6 +267,8 @@ export interface FunnelSlot {
   name: string;
   description?: string;
   validationRules?: Record<string, unknown>;
+  locked: boolean;
+  enumValues?: string[];
 }
 
 export interface FullFunnel extends FunnelVersion {
@@ -266,6 +283,7 @@ export interface ConversationFunnelState {
   currentStageId: string;
   consecutiveStuckCount: number;
   capturedSlots: Record<string, CapturedSlot>;
+  returnStack: string[];
   /** Active topics in current conversation (017-hybrid-agent-core, task 4.6) */
   activeTopics: string[];
   /** Unresolved objections raised by user (017-hybrid-agent-core, task 4.6) */
@@ -274,6 +292,8 @@ export interface ConversationFunnelState {
   messagesOnCurrentStage: number;
   /** Stage name offered by bot, awaiting affirmative response (017-hybrid-agent-core, task 4.6) */
   pendingStageOffer: string | null;
+  /** Confirmation gate pending: stage ID awaiting user confirmation (T025) */
+  pendingConfirmation: string | null;
   version: number;
   updatedAt: Date;
 }
@@ -285,15 +305,36 @@ export interface CapturedSlot {
 }
 
 export interface FunnelSelectionMetadata {
-  fragment_id?: string;
-  score?: number;
-  type: 'scripted' | 'steer' | 'abstain' | 'catch_all' | 'no_funnel';
-  signals?: Record<string, number>;
-  stage_transition?: {
-    from: string;
-    to: string;
-    type: 'advance' | 'regression' | 'stay';
-    blocked?: boolean;
-    blockedReason?: string;
+  funnel?: {
+    fragment_id?: string;
+    delivery_mode?: FragmentDeliveryMode;
+    score?: number;
+    type: 'scripted' | 'steer' | 'abstain' | 'catch_all' | 'no_funnel' | 'affirmative_advance';
+    signals?: Record<string, number>;
+    stage_transition?: {
+      from: string;
+      to: string;
+      type: 'advance' | 'regression' | 'stay';
+      blocked?: boolean;
+      blockedReason?: string;
+    };
   };
+  humanization?: {
+    delay_ms: number;
+    typing_chunks: string[];
+    backspace_simulation: {
+      enabled: boolean;
+      chance: number;
+    };
+  };
+  media?: {
+    url: string;
+    kind: 'image' | 'audio' | 'video' | 'file';
+    mime?: string;
+  }[];
+  extraction?: {
+    slots_extracted: string[];
+    confidence: number;
+  };
+  type?: 'scripted' | 'steer' | 'abstain' | 'catch_all' | 'no_funnel' | 'affirmative_advance'; // Legacy fallback
 }

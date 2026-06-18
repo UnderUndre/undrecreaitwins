@@ -1,0 +1,4 @@
+{
+  "bannedWords": "Avoid these phrases: {{bannedPhrases}}. Reformulate.",
+  "antiRepeat": "Do not repeat the previous answer. Reformulate."
+}

@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, index, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, index, boolean, jsonb } from 'drizzle-orm/pg-core';
 
 export const conversations = pgTable(
   'conversations',
@@ -22,6 +22,7 @@ export const conversations = pgTable(
     lastReengagementAt: timestamp('last_reengagement_at', { withTimezone: true }),
     reengagementCount: integer('reengagement_count').notNull().default(0),
     optedOut: boolean('opted_out').notNull().default(false),
+    slots: jsonb('slots').notNull().default({}),
   },
   (table) => ({
     tenantPersonaIdx: index('idx_conversations_tenant_persona').on(table.tenantId, table.personaId),
