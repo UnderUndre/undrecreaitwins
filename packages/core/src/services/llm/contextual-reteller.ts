@@ -1,5 +1,7 @@
 import { LLMClient } from '../llm-client.js';
 import type { TurnMetrics } from '../funnel/turn-metrics.js';
+import { getPrompt, interpolate } from '../../prompts/index.js';
+import type { Locale } from '../../prompts/types.js';
 
 export interface RetellResult {
   text: string;
@@ -16,6 +18,7 @@ export async function contextualRetell(params: {
   personaId: string;
   remainingReruns: number;
   metrics?: TurnMetrics;
+  locale?: Locale;
 }): Promise<RetellResult> {
   const {
     fragmentContent,
@@ -27,21 +30,19 @@ export async function contextualRetell(params: {
     personaId,
     remainingReruns,
     metrics,
+    locale = 'ru',
   } = params;
 
-  // First visit — no retell needed
   if (!isRevisit) {
     if (metrics) metrics.stepSkipped('contextual_retell', 'first_visit');
     return { text: fragmentContent, retellTriggered: false };
   }
 
-  // Verbatim fragments always deliver literally — skip retell (FR-017 / US-8)
   if (deliveryMode === 'verbatim') {
     if (metrics) metrics.stepSkipped('contextual_retell', 'verbatim_mode');
     return { text: fragmentContent, retellTriggered: false };
   }
 
-  // Budget exhausted — skip retell, deliver as-is
   if (remainingReruns <= 0) {
     if (metrics) metrics.stepSkipped('contextual_retell', 'rerun_budget_exhausted');
     return { text: fragmentContent, retellTriggered: false };
@@ -51,22 +52,14 @@ export async function contextualRetell(params: {
     .map((line, i) => `${i % 2 === 0 ? 'User' : 'Bot'}: ${line}`)
     .join('\n');
 
-  const systemPrompt = `Ты — редактор диалоговых фраз. Переформулируй предложенный фрагмент, сохраняя смысл, но меняя формулировку.
+  const tpl = getPrompt('contextual-retell', locale);
 
-ПРАВИЛА:
-1. Не повторяй дословно — перефразируй.
-2. Сохраняй тон и стиль персоны.
-3. Учитывай контекст диалога ниже.
-4. Длина ответа — близка к оригиналу (±30%).
-5. Не добавляй информацию, которой нет в оригинале.
-6. Только переформулированный текст, без кавычек и комментариев.`;
+  const systemPrompt = tpl.system;
 
-  const userPrompt = `Контекст диалога:
-${historyBlock}
-
-Исходный фрагмент: «${fragmentContent}»
-
-Переформулируй фрагмент с учётом контекста:`;
+  const userPrompt = interpolate(tpl.userTemplate!, {
+    historyBlock,
+    fragmentContent,
+  });
 
   try {
     const response = await llmClient.complete({
@@ -92,7 +85,7 @@ ${historyBlock}
 
     return { text, retellTriggered: true };
   } catch (error) {
-    console.error('[ContextualRetell] LLM rewrite failed:', error);
+    console.warn('[ContextualRetell] LLM rewrite failed:', error);
     if (metrics) metrics.stepSkipped('contextual_retell', 'llm_error');
     return { text: fragmentContent, retellTriggered: false };
   }

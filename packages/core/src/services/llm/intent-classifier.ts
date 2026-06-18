@@ -1,5 +1,7 @@
 import { LLMClient } from '../llm-client.js';
 import type { TurnMetrics } from '../funnel/turn-metrics.js';
+import { getPrompt } from '../../prompts/index.js';
+import type { Locale } from '../../prompts/types.js';
 
 export interface IntentClassificationResult {
   affirmative: boolean;
@@ -11,7 +13,7 @@ const AFFIRMATIVE_REGEX = /\b(да|ок|давайте|хорошо|соглас
 const NEGATION_REGEX = /\b(нет|не\s*(хочу|надо|нужно|буду|думаю|планирую|собираюсь))\b/i;
 
 export class IntentClassifier {
-  constructor(private llmClient: LLMClient) {}
+  constructor(private llmClient: LLMClient, private locale: Locale = 'ru') {}
 
   async classify(
     message: string,
@@ -27,6 +29,8 @@ export class IntentClassifier {
       return { affirmative: true, source: 'regex' };
     }
 
+    const tpl = getPrompt('intent-classifier', this.locale);
+
     try {
       const response = await this.llmClient.complete({
         tenantId: ctx.tenantId,
@@ -34,8 +38,7 @@ export class IntentClassifier {
         messages: [
           {
             role: 'system',
-            content:
-              "You are a binary intent classifier. Determine if the user's message is affirmative (agreement, confirmation, consent). Reply ONLY 'yes' or 'no'.",
+            content: tpl.system,
           },
           {
             role: 'user',

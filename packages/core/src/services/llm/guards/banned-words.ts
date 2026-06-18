@@ -6,6 +6,9 @@
  * Verbatim fragments are NOT filtered — caller is responsible for skipping.
  */
 
+import { getPrompt } from '../../../prompts/index.js';
+import type { Locale } from '../../../prompts/types.js';
+
 export interface BannedWordsConfig {
   /** Regex patterns that hard-block the reply (e.g. /я языковая модель/i) */
   hard: RegExp[];
@@ -17,6 +20,14 @@ export interface BannedWordsResult {
   blocked: boolean;
   matches: string[];
   warnings: string[];
+}
+
+export function getDefaultBannedWordsConfig(locale: Locale = 'ru'): BannedWordsConfig {
+  const tpl = getPrompt('banned-words', locale) as unknown as { hard: string[]; soft: string[] };
+  return {
+    hard: tpl.hard.map(pattern => new RegExp(pattern, 'i')),
+    soft: tpl.soft,
+  };
 }
 
 export function filterBannedWords(

@@ -40,7 +40,7 @@ function splitIntoChunks(text: string): string[] {
   if (text.length === 0) return [''];
 
   const segmenter = typeof Intl !== 'undefined' && (Intl as any).Segmenter
-    ? new (Intl as any).Segmenter('en', { granularity: 'grapheme' })
+    ? new (Intl as any).Segmenter('und', { granularity: 'grapheme' })
     : null;
 
   const graphemes: string[] = [];

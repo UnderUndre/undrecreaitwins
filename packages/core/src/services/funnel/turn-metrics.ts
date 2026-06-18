@@ -97,6 +97,11 @@ export class TurnMetrics {
     return this.rerunsUsed;
   }
 
+  /** Remaining reruns in budget. */
+  get rerunsRemaining(): number {
+    return Math.max(0, this.rerunsMax - this.rerunsUsed);
+  }
+
   /** Build the snapshot for emission. */
   snapshot(): TurnMetricsSnapshot {
     const allSteps: PipelineStep[] = [

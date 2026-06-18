@@ -15,8 +15,8 @@ export function evaluateDeliveryCondition(
   for (const [slotName, expectedValue] of Object.entries(condition)) {
     const actualValue = slots[slotName];
 
-    // If slot is missing or value doesn't match, condition fails
-    if (actualValue !== expectedValue) {
+    // If slot is missing or value doesn't match, condition fails (String coercion for robust comparison)
+    if (String(actualValue) !== String(expectedValue)) {
       return false;
     }
   }

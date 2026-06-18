@@ -117,8 +117,7 @@ export class FunnelRuntime {
       }
 
       // 2.5. Affirmative Advance (017-hybrid-agent-core, task 4.8)
-      const stateAny = state as any;
-      const pendingOffer: string | null = stateAny.pendingStageOffer ?? null;
+      const pendingOffer: string | null = state.pendingStageOffer;
       if (pendingOffer) {
         let affirmative: boolean;
         if (this.intentClassifier) {
@@ -164,7 +163,7 @@ export class FunnelRuntime {
       }
 
       // 2.6. Confirmation Gate (T025 — FR-014)
-      const pendingConfStageId: string | null = stateAny.pendingConfirmation ?? null;
+      const pendingConfStageId: string | null = state.pendingConfirmation;
       if (pendingConfStageId) {
         const pendingStage = funnel.stages.find((s: FunnelStage) => s.id === pendingConfStageId);
         if (pendingStage) {
@@ -221,7 +220,7 @@ export class FunnelRuntime {
           if (anytimeStage.id === state!.currentStageId) continue;
 
           // Duplicate prevention: already in returnStack → no-op
-          const returnStack: string[] = stateAny.returnStack ?? [];
+          const returnStack: string[] = state.returnStack ?? [];
           if (returnStack.includes(anytimeStage.id)) continue;
 
           const triggered = this.detectAnytimeTrigger(message, anytimeStage, returnStack.length);
@@ -264,7 +263,7 @@ export class FunnelRuntime {
         Object.entries(state.capturedSlots).map(([k, v]) => [k, v.value])
       );
       // Also include global conversation slots (FR-012)
-      const globalSlots = (state as any).slots ?? {};
+      const globalSlots: Record<string, unknown> = (state as Record<string, unknown>).slots ?? {};
       const allSlots = { ...globalSlots, ...slotsMap };
 
       const allFragments = funnel.stages.flatMap((s: any) => s.fragments);
@@ -293,7 +292,7 @@ export class FunnelRuntime {
 
       // 2.8. Anytime Stage Resolution → Pop LIFO (T026 — FR-015)
       if (currentStageForAnytime?.isAnytime) {
-        const returnStack: string[] = stateAny.returnStack ?? [];
+        const returnStack: string[] = state.returnStack ?? [];
         if (returnStack.length > 0) {
           const resolved = this.checkResolutionCriteria(currentStageForAnytime, state!, funnel, best);
           if (resolved) {
@@ -379,24 +378,23 @@ export class FunnelRuntime {
         const transition = await this.evaluateTransitions(state, funnel, currentStage, best);
         
         let updatedStuckCount = state.consecutiveStuckCount;
-        let updatedMsgsOnStage = (state as any).messagesOnCurrentStage ?? 0;
+        let updatedMsgsOnStage = state.messagesOnCurrentStage ?? 0;
         updatedMsgsOnStage++; // Increment per message (task 4.6)
 
-        if (transition.type === 'stay') {
+        // ── Stage Advance Guard (computed ONCE, reused) ──
+        const targetForGuard = transition.type !== 'stay'
+          ? funnel.stages.find((s: FunnelStage) => s.id === transition.to)
+          : undefined;
+        const skipGuard = targetForGuard?.requiresConfirmation === true;
+        const advanceGuard = (transition.type !== 'stay' && !skipGuard)
+          ? this.evaluateAdvanceGuard(state, currentStage, message)
+          : { blocked: false };
+
+        if (transition.type === 'stay' || advanceGuard.blocked) {
           updatedStuckCount++;
         } else {
-          // ── Stage Advance Guard (017-hybrid-agent-core, task 4.7) ──
-          // T025: Skip advance guard if target requires confirmation (confirmation is its own gate)
-          const targetForGuard = funnel.stages.find((s: FunnelStage) => s.id === transition.to);
-          const skipGuard = targetForGuard?.requiresConfirmation === true;
-          const guard = skipGuard ? { blocked: false } : this.evaluateAdvanceGuard(state, currentStage, message);
-          if (guard.blocked) {
-            // Transition blocked — deliver answer without stage change
-            updatedStuckCount++;
-          } else {
-            updatedStuckCount = 0;
-            updatedMsgsOnStage = 0; // Reset on stage advance (task 4.6)
-          }
+          updatedStuckCount = 0;
+          updatedMsgsOnStage = 0; // Reset on stage advance (task 4.6)
         }
 
         const stuckAction = this.handleStuck(updatedStuckCount, currentStage, funnel.config);
@@ -405,12 +403,6 @@ export class FunnelRuntime {
           consecutiveStuckCount: updatedStuckCount,
           messagesOnCurrentStage: updatedMsgsOnStage,
         };
-
-        const advanceGuard = transition.type !== 'stay' ? (() => {
-          const targetForGuard = funnel.stages.find((s: FunnelStage) => s.id === transition.to);
-          if (targetForGuard?.requiresConfirmation) return { blocked: false };
-          return this.evaluateAdvanceGuard(state, currentStage, message);
-        })() : { blocked: false };
 
         if (transition.type !== 'stay' && !advanceGuard.blocked) {
           // T025: Confirmation Gate — intercept advance to requiresConfirmation stage
@@ -471,7 +463,8 @@ export class FunnelRuntime {
         scriptedReply &&
         effectiveDeliveryMode !== 'verbatim' &&
         this.outputGuardConfig &&
-        this.regenerateFn
+        this.regenerateFn &&
+        metrics?.hasRerunBudget() === true
       ) {
         if (metrics) metrics.stepFired('banned_check');
         outputGuardResult = await runOutputGuard({
@@ -504,7 +497,7 @@ export class FunnelRuntime {
           previousReply,
           embeddingFn: this.embeddingFn,
           regenerateFn: this.regenerateFn,
-          remainingReruns: metrics ? (metrics as any).rerunsMax - (metrics as any).rerunsUsed : remainingReruns,
+          remainingReruns: metrics ? metrics.rerunsRemaining : remainingReruns,
         });
         scriptedReply = antiRepeatResult.reply;
         if (antiRepeatResult.rerunTriggered) {
@@ -532,7 +525,7 @@ export class FunnelRuntime {
           llmClient: this.llmClient,
           tenantId,
           personaId,
-          remainingReruns: metrics ? (metrics as any).rerunsMax - (metrics as any).rerunsUsed : remainingReruns,
+          remainingReruns: metrics ? metrics.rerunsRemaining : remainingReruns,
           metrics,
         });
         scriptedReply = retellResult.text;
@@ -552,7 +545,7 @@ export class FunnelRuntime {
       // 7. Post-turn slot extraction (FR-010, FR-012)
       // Runs under conversation lock, BEFORE lock release, BEFORE turn-done.
       // Lock must remain held during extraction — next turn sees fresh slots.
-      if (scriptedReply && this.slotExtractor && funnel.slots.length > 0) {
+      if (scriptedReply && this.slotExtractor && funnel.slots.length > 0 && metrics?.hasLLMBudget() !== false) {
         if (metrics) metrics.stepFired('slot_extraction');
         try {
           const allSlotDefs = funnel.slots;
@@ -597,26 +590,27 @@ export class FunnelRuntime {
 
   /**
    * Affirmative Advance detection (017-hybrid-agent-core, task 4.8)
-   * Word-boundary regex on common Russian affirmative phrases with negation guards.
+   * Uses word-boundary matching with Cyrillic-safe split (not \b which doesn't work for Cyrillic).
    * Returns true if user message is affirmative.
    */
   private detectAffirmative(message: string): boolean {
     const normalized = message.trim().toLowerCase();
+    const words = normalized.split(/[\s,.!?;:]+/).filter(Boolean);
 
     // Negation guard — if negation pattern found, NOT affirmative
-    const negationPatterns = ['не хочу', 'не надо', 'не нужно', 'не буду', 'не думаю', 'не планирую', 'не собираюсь'];
-    if (negationPatterns.some(p => normalized.includes(p))) return false;
-    if (normalized.includes('нет') && !normalized.includes('да')) return false;
+    const negationWords = ['не', 'нет', 'никогда', 'отказываюсь'];
+    const negationPhrases = ['не хочу', 'не надо', 'не нужно', 'не буду', 'не думаю', 'не планирую', 'не собираюсь'];
+    if (negationPhrases.some(p => normalized.includes(p))) return false;
 
-    // Affirmative patterns — using includes() for Cyrillic compatibility (\b doesn't work with Cyrillic in JS)
-    const affirmativeWords = [
+    // Word-level match (avoids false positives like "когда" containing "да")
+    const affirmativeWords = new Set([
       'да', 'давайте', 'давай', 'ок', 'окей', 'хорошо',
       'согласен', 'согласна', 'согласны', 'хочу', 'готов', 'готова', 'готовы',
-      'пожалуйста', 'конечно', 'без проблем', 'точно', 'офк',
-      'yes', 'sure', 'ok', 'okay', "let's", 'go ahead', 'please',
-    ];
+      'конечно', 'точно', 'офк', 'угу', 'ага', 'поехали',
+      'yes', 'sure', 'ok', 'okay', "let's", 'please', 'yep', 'yeah',
+    ]);
 
-    return affirmativeWords.some(w => normalized.includes(w));
+    return words.some(w => affirmativeWords.has(w));
   }
 
   /**
@@ -629,17 +623,15 @@ export class FunnelRuntime {
     currentStage: FunnelStage,
     userMessage: string
   ): { blocked: boolean; reason?: string } {
-    const stateAny = state as any;
-
     // (1) Unresolved objections → BLOCK
-    const unresolvedObjections: string[] = stateAny.unresolvedObjections ?? [];
+    const unresolvedObjections: string[] = state.unresolvedObjections ?? [];
     if (unresolvedObjections.length > 0) {
       return { blocked: true, reason: 'unresolved_objections' };
     }
 
     // (2) Min messages on stage not reached → BLOCK
-    const msgsOnStage: number = stateAny.messagesOnCurrentStage ?? 0;
-    const minMessages: number = (currentStage as any).minMessages ?? 1;
+    const msgsOnStage: number = state.messagesOnCurrentStage ?? 0;
+    const minMessages: number = (currentStage as { minMessages?: number }).minMessages ?? 1;
     if (msgsOnStage < minMessages) {
       return { blocked: true, reason: 'min_messages' };
     }
@@ -664,7 +656,7 @@ export class FunnelRuntime {
     }
 
     // (4) Topic continues in current stage → BLOCK
-    const activeTopics: string[] = stateAny.activeTopics ?? [];
+    const activeTopics: string[] = state.activeTopics ?? [];
     const stageSlotNames: string[] = currentStage.requiredSlots ?? [];
     if (activeTopics.length > 0 && stageSlotNames.length > 0) {
       const overlap = activeTopics.some(t =>
@@ -677,7 +669,7 @@ export class FunnelRuntime {
 
     // (5) Required slots not filled → BLOCK (T023)
     if (stageSlotNames.length > 0) {
-      const globalSlots = (state as any).slots ?? {};
+      const globalSlots: Record<string, unknown> = (state as Record<string, unknown>).slots ?? {};
       const capturedSlots = state.capturedSlots ?? {};
       const missingSlots = stageSlotNames.filter(slotName => {
         const fromGlobal = globalSlots[slotName];
@@ -806,11 +798,13 @@ export class FunnelRuntime {
    * Load recent conversation history (last 10 messages) for contextual retell.
    * Returns alternating User/Bot lines.
    */
-  private async loadConversationHistory(conversationId: string, _tenantId: string): Promise<string[]> {
+  private async loadConversationHistory(conversationId: string, tenantId: string): Promise<string[]> {
     try {
       const rows = await db.select({ role: messages.role, content: messages.content })
         .from(messages)
-        .where(eq(messages.conversationId, conversationId))
+        .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+        .where(eq(conversations.id, conversationId))
+        .where(eq(conversations.tenantId, tenantId))
         .orderBy(desc(messages.createdAt))
         .limit(10);
 

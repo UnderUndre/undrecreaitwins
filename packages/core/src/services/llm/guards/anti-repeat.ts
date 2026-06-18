@@ -12,6 +12,7 @@ export interface AntiRepeatResult {
   reply: string;
   rerunTriggered: boolean;
   similarity?: number;
+  stillSimilar?: boolean;
 }
 
 /**
@@ -76,8 +77,9 @@ export async function checkAntiRepeat(params: {
   const rerunSimilarity = cosineSimilarity(rerunEmb, prevEmb);
 
   if (rerunSimilarity > SIMILARITY_THRESHOLD) {
-    return { reply, rerunTriggered: true, similarity: rerunSimilarity };
+    // Still similar after rerun — send with warning
+    return { reply, rerunTriggered: true, similarity: rerunSimilarity, stillSimilar: true };
   }
 
-  return { reply, rerunTriggered: true, similarity: rerunSimilarity };
+  return { reply, rerunTriggered: true, similarity: rerunSimilarity, stillSimilar: false };
 }

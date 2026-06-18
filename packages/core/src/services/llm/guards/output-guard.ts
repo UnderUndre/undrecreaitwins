@@ -8,6 +8,8 @@
  */
 
 import { filterBannedWords, type BannedWordsConfig } from './banned-words.js';
+import { getPrompt, interpolate } from '../../../prompts/index.js';
+import type { Locale } from '../../../prompts/types.js';
 
 export interface OutputGuardResult {
   /** Final reply text (may be original or re-generated) */
@@ -25,8 +27,9 @@ export async function runOutputGuard(params: {
   config: BannedWordsConfig;
   remainingReruns: number;
   regenerateFn: (repairPrompt: string) => Promise<string>;
+  locale?: Locale;
 }): Promise<OutputGuardResult> {
-  const { reply, config, remainingReruns, regenerateFn } = params;
+  const { reply, config, remainingReruns, regenerateFn, locale = 'ru' } = params;
 
   const initial = filterBannedWords(reply, config);
   const allWarnings: string[] = [...initial.warnings];
@@ -35,11 +38,15 @@ export async function runOutputGuard(params: {
     return { reply, blocked: false, rerunsUsed: 0, warnings: allWarnings };
   }
 
+  const repairTpl = getPrompt('repair-prompts', locale) as unknown as { bannedWords: string };
+
   let currentReply = reply;
   let rerunsUsed = 0;
 
   for (let i = 0; i < remainingReruns; i++) {
-    const repairPrompt = `Избегай фраз: ${initial.matches.join(', ')}. Переформулируй.`;
+    const repairPrompt = interpolate(repairTpl.bannedWords, {
+      bannedPhrases: initial.matches.join(', '),
+    });
     currentReply = await regenerateFn(repairPrompt);
     rerunsUsed++;
 
