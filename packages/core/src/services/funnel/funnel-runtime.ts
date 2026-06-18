@@ -5,10 +5,20 @@ import type {
   FunnelSelectionMetadata,
   FunnelStage,
   FullFunnel,
+  FragmentDeliveryMode,
 } from '@undrecreaitwins/shared';
 import { FragmentScorer, ScoredFragment } from './scorer.js';
 import { FunnelRepository } from './funnel-repository.js';
 import { Redis } from 'ioredis';
+import { evaluateDeliveryCondition } from './utils/condition-evaluator.js';
+import { parseVariables } from './utils/variable-parser.js';
+import { AdaptiveIntroService } from '../llm/adaptive-intro.js';
+
+export interface FunnelProcessResult {
+  scriptedReply?: string;
+  metadata: FunnelSelectionMetadata;
+  introPromise?: Promise<string | null>;
+}
 
 export class FunnelRuntime {
   private cache = new Map<string, FullFunnel>();
@@ -17,7 +27,8 @@ export class FunnelRuntime {
   constructor(
     private repository: FunnelRepository,
     private scorerFactory: (config: FunnelConfig) => FragmentScorer,
-    private redis?: Redis
+    private redis?: Redis,
+    private adaptiveIntroService?: AdaptiveIntroService
   ) {}
 
   public async processMessage(
@@ -25,7 +36,7 @@ export class FunnelRuntime {
     personaId: string,
     conversationId: string,
     message: string
-  ): Promise<{ scriptedReply?: string; metadata: FunnelSelectionMetadata }> {
+  ): Promise<FunnelProcessResult> {
     const lockKey = `lock:funnel:conv:${conversationId}`;
     let lockAcquired = false;
 
@@ -48,7 +59,7 @@ export class FunnelRuntime {
         // New conversation or first time funnel - use active version
         funnel = await this.repository.getActiveVersion(tenantId, personaId);
         if (!funnel || funnel.stages.length === 0) {
-          return { metadata: { type: 'no_funnel' } };
+          return { metadata: { type: 'no_funnel', funnel: { type: 'no_funnel' } } };
         }
 
         const firstStage = funnel.stages[0];
@@ -62,7 +73,8 @@ export class FunnelRuntime {
           unresolvedObjections: [],
           messagesOnCurrentStage: 0,
           pendingStageOffer: null,
-          version: 0
+          version: 0,
+          returnStack: []
         };
         await this.repository.createConversationState(newState as any);
         state = { ...newState, updatedAt: new Date() } as ConversationFunnelState;
@@ -71,7 +83,7 @@ export class FunnelRuntime {
       }
 
       if (!funnel || !state) {
-        return { metadata: { type: 'no_funnel' } };
+        return { metadata: { type: 'no_funnel', funnel: { type: 'no_funnel' } } };
       }
 
       // 2.5. Affirmative Advance (017-hybrid-agent-core, task 4.8)
@@ -93,7 +105,10 @@ export class FunnelRuntime {
             return {
               metadata: {
                 type: 'affirmative_advance',
-                stage_transition: { from: state.currentStageId, to: offeredStage.id, type: 'advance' },
+                funnel: {
+                  type: 'affirmative_advance',
+                  stage_transition: { from: state.currentStageId, to: offeredStage.id, type: 'advance' },
+                },
               } as any,
             };
           }
@@ -111,8 +126,21 @@ export class FunnelRuntime {
       const currentStage = funnel.stages.find((s: FunnelStage) => s.id === state!.currentStageId);
       const nextStage = funnel.stages.find((s: FunnelStage) => s.order === (currentStage?.order ?? 0) + 1);
 
+      // 3.1. Filter fragments by delivery condition (US15)
+      const slotsMap = Object.fromEntries(
+        Object.entries(state.capturedSlots).map(([k, v]) => [k, v.value])
+      );
+      // Also include global conversation slots (FR-012)
+      const globalSlots = (state as any).slots ?? {};
+      const allSlots = { ...globalSlots, ...slotsMap };
+
+      const allFragments = funnel.stages.flatMap((s: any) => s.fragments);
+      const eligibleFragments = allFragments.filter(f => 
+        evaluateDeliveryCondition(f.deliveryCondition, allSlots)
+      );
+
       const scorer = this.scorerFactory(funnel.config);
-      const scoredFragments = scorer.score(message, funnel.stages.flatMap((s: any) => s.fragments), {
+      const scoredFragments = scorer.score(message, eligibleFragments, {
         currentStageId: state!.currentStageId,
         nextStageId: nextStage?.id,
         isObjectionDetected: false, // TODO: Simple objection detection
@@ -125,29 +153,57 @@ export class FunnelRuntime {
       });
 
       const best = sorted[0];
-      const selectionMetadata: FunnelSelectionMetadata = { type: 'no_funnel' };
+      const selectionMetadata: FunnelSelectionMetadata = { 
+        type: 'no_funnel',
+        funnel: { type: 'no_funnel' }
+      };
 
       // 4. Threshold Check & Reply Selection
       let scriptedReply: string | undefined;
 
       if (best && best.score >= funnel.config.relevance_threshold) {
-        scriptedReply = best.fragment.content;
+        const fragment = best.fragment;
+        const deliveryMode: FragmentDeliveryMode = fragment.deliveryMode || 'llm';
+
+        if (deliveryMode === 'verbatim') {
+          scriptedReply = fragment.content;
+        } else if (deliveryMode === 'template') {
+          const parsed = parseVariables(fragment.content, { slots: allSlots });
+          scriptedReply = parsed.text;
+          // TODO: Log unresolved variables if needed
+        } else {
+          // 'llm' mode - content is used as instruction for LLM downstream
+          scriptedReply = fragment.content;
+        }
+
         selectionMetadata.type = 'scripted';
-        selectionMetadata.fragment_id = best.fragment.id;
-        selectionMetadata.score = best.score;
-        selectionMetadata.signals = best.signals;
+        selectionMetadata.funnel = {
+          type: 'scripted',
+          fragment_id: best.fragment.id,
+          delivery_mode: deliveryMode,
+          score: best.score,
+          signals: best.signals,
+        };
       } else {
         const behavior = funnel.config.off_script_behavior;
         if (behavior === 'catch_all' && funnel.config.catch_all_fragment_id) {
-          const catchAll = funnel.stages.flatMap((s: any) => s.fragments).find((f: FunnelFragment) => f.id === funnel!.config.catch_all_fragment_id);
+          const catchAll = allFragments.find((f: FunnelFragment) => f.id === funnel!.config.catch_all_fragment_id);
           if (catchAll) {
             scriptedReply = catchAll.content;
             selectionMetadata.type = 'catch_all';
-            selectionMetadata.fragment_id = catchAll.id;
+            selectionMetadata.funnel = {
+              type: 'catch_all',
+              fragment_id: catchAll.id,
+              delivery_mode: catchAll.deliveryMode || 'llm',
+            };
           }
         } else {
-          selectionMetadata.type = behavior === 'abstain' ? 'abstain' : 'steer';
-          selectionMetadata.score = best?.score;
+          const type = behavior === 'abstain' ? 'abstain' : 'steer';
+          selectionMetadata.type = type;
+          selectionMetadata.funnel = {
+            type: type,
+            score: best?.score,
+          };
         }
       }
 
@@ -184,25 +240,31 @@ export class FunnelRuntime {
 
         if (transition.type !== 'stay' && !advanceBlocked) {
           update.currentStageId = transition.to;
-          selectionMetadata.stage_transition = transition;
+          if (selectionMetadata.funnel) {
+            selectionMetadata.funnel.stage_transition = transition;
+          }
         } else if (advanceBlocked) {
           // Guard blocked the transition — metadata reflects block
-          selectionMetadata.stage_transition = {
-            ...transition,
-            blocked: true,
-            blockedReason: 'advance_guard',
-          };
+          if (selectionMetadata.funnel) {
+            selectionMetadata.funnel.stage_transition = {
+              ...transition,
+              blocked: true,
+              blockedReason: 'advance_guard',
+            };
+          }
         }
 
         if (stuckAction) {
           if (stuckAction === 'exit_stage' && currentStage.exitStageId) {
               update.currentStageId = currentStage.exitStageId;
               update.consecutiveStuckCount = 0;
-              selectionMetadata.stage_transition = {
-                  from: currentStage.id,
-                  to: currentStage.exitStageId,
-                  type: 'advance'
-              };
+              if (selectionMetadata.funnel) {
+                selectionMetadata.funnel.stage_transition = {
+                    from: currentStage.id,
+                    to: currentStage.exitStageId,
+                    type: 'advance'
+                };
+              }
           }
         }
 

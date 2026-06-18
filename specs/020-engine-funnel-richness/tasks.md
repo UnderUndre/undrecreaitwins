@@ -22,16 +22,16 @@ description: "Task list for Engine Funnel Richness implementation"
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 [SETUP] Create directory structure: `specs/020-engine-funnel-richness/contracts/`
-- [ ] T002 [SETUP] Verify dependencies: `drizzle-orm`, `ioredis`, `langfuse` (already present)
+- [X] T001 [SETUP] Create directory structure: `specs/020-engine-funnel-richness/contracts/`
+- [X] T002 [SETUP] Verify dependencies: `drizzle-orm`, `ioredis`, `langfuse` (already present)
 
 ## Phase 2: Foundational (Blocking Prerequisites)
 
 **⚠️ CRITICAL**: Database and Shared Types must be updated first.
 
-- [ ] T003 [DB] Update `packages/core/src/models/` schemas (fragments, stages, slots, conversations, state) per data-model.md
-- [ ] T004 [SETUP] Update `packages/shared/src/types.ts` with new Funnel fields per data-model.md
-- [ ] T005 [DB] Create migration SQL for the schema changes (**review-only, do NOT apply** — review fix C-F9)
+- [X] T003 [DB] Update `packages/core/src/models/` schemas (fragments, stages, slots, conversations, state) per data-model.md
+- [X] T004 [SETUP] Update `packages/shared/src/types.ts` with new Funnel fields per data-model.md
+- [X] T005 [DB] Create migration SQL for the schema changes (**review-only, do NOT apply** — review fix C-F9)
 
 **Checkpoint**: Foundation ready — new fields accessible in code.
 
@@ -41,10 +41,10 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Support verbatim delivery, template substitution, delivery conditions, and LLM mode.
 
-- [ ] T006 [BE] [US2] Implement `VariableParser` utility in `packages/core/src/services/funnel/utils/variable-parser.ts`
-- [ ] T007 [BE] [US1] Update `FunnelRuntime.processMessage` to handle `deliveryMode`: `verbatim` (skip LLM), `template` (use VariableParser), `llm` (default)
-- [ ] T008 [BE] [US15] Implement `DeliveryConditionEvaluator` in `packages/core/src/services/funnel/utils/condition-evaluator.ts` and integrate into `FunnelRuntime` selection logic
-- [ ] T009 [BE] [US1] Add unit tests for `VariableParser`, `deliveryMode` branching, and `DeliveryCondition` filtering in `packages/core/tests/unit/funnel-delivery.test.ts`
+- [X] T006 [BE] [US2] Implement `VariableParser` utility in `packages/core/src/services/funnel/utils/variable-parser.ts`
+- [X] T007 [BE] [US1] Update `FunnelRuntime.processMessage` to handle `deliveryMode`: `verbatim` (skip LLM), `template` (use VariableParser), `llm` (default)
+- [X] T008 [BE] [US15] Implement `DeliveryConditionEvaluator` in `packages/core/src/services/funnel/utils/condition-evaluator.ts` and integrate into `FunnelRuntime` selection logic
+- [X] T009 [BE] [US1] Add unit tests for `VariableParser`, `deliveryMode` branching, and `DeliveryCondition` filtering in `packages/core/tests/unit/funnel-delivery.test.ts`
 
 ---
 
@@ -52,9 +52,9 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Smooth bridges between user questions and scripted fragments.
 
-- [ ] T010 [BE] [US3] Implement `AdaptiveIntroService` in `packages/core/src/services/llm/adaptive-intro.ts` using lightweight LLM call. **Intro runs in parallel with main generation** (review fix C-F1). **Failure → graceful skip** (review fix C-F4).
-- [ ] T011 [BE] [US3] Integrate `AdaptiveIntroService` into `FunnelRuntime` pre-generation step (**parallel with main gen — race-to-merge**; if intro not ready by time main gen completes → skip intro)
-- [ ] T012 [BE] [US3] Unit test bridge generation ensuring conversational particles (ну, же, ведь) and lower-case short phrases are produced. **Plus test: intro LLM failure → skip, fragment delivered without intro** (review fix C-F4)
+- [X] T010 [BE] [US3] Implement `AdaptiveIntroService` in `packages/core/src/services/llm/adaptive-intro.ts` using lightweight LLM call. **Intro runs in parallel with main generation** (review fix C-F1). **Failure → graceful skip** (review fix C-F4).
+- [X] T011 [BE] [US3] Integrate `AdaptiveIntroService` into `FunnelRuntime` pre-generation step (**parallel with main gen — race-to-merge**; if intro not ready by time main gen completes → skip intro)
+- [X] T012 [BE] [US3] Unit test bridge generation ensuring conversational particles (ну, же, ведь) and lower-case short phrases are produced. **Plus test: intro LLM failure → skip, fragment delivered without intro** (review fix C-F4)
 
 ---
 
@@ -63,6 +63,53 @@ description: "Task list for Engine Funnel Richness implementation"
 **Goal**: Sync post-turn extraction of structured data into `conversations.slots`.
 
 - [ ] T013 [BE] [US4] Implement `SlotExtractorService` in `packages/core/src/services/llm/slot-extractor.ts`
+- [ ] T014 [BE] [US4] Integrate `SlotExtractorService` into conversation post-turn pipeline to persist into `conversations.slots`
+- [ ] T015 [BE] [US4] Add unit and integration tests for slot extraction (`packages/core/tests/unit/slot-extractor.test.ts`, `packages/core/tests/integration/slot-persistence.test.ts`)
+
+---
+
+## Phase 6: Media & Humanization (P2)
+
+**Goal**: Support media attachments, adaptive humanization metadata, and response-level extraction.
+
+- [ ] T016 [BE] [US6] Add `mediaUrl` handling into fragment rendering and `ResponseMetadata.media` enrichment
+- [ ] T017 [BE] [US6] Implement `HumanizationService` to adjust phrasing (tone/minor edits) and populate `ResponseMetadata.humanization`
+- [ ] T018 [BE] [US6] Unit tests for media and humanization services (`packages/core/tests/unit/humanization.test.ts`)
+
+---
+
+## Phase 7: Delivery Modes & Template Engine (P1)
+
+**Goal**: Ensure template rendering and verbatim bypass behave reliably across runtime.
+
+- [ ] T019 [BE] [US1] Implement robust `TemplateRenderer` util (handles missing vars, filters, escapes)
+- [ ] T020 [BE] [US1] Add integration tests: `deliveryMode=verbatim`, `template` with missing/extra vars, `llm` fallback
+- [ ] T021 [BE] [US1] Update `FunnelRuntime` telemetry to record deliveryMode and template render time
+
+---
+
+## Phase 8: DB Migration & Release Prep (Blocking for DB teams)
+
+- [ ] T022 [DB] Generate final review-only Drizzle migration under `drizzle/migrations/<timestamp>_funnel_richness/migration.sql` (includes `CREATE TYPE delivery_mode` and column additions)
+- [ ] T023 [DB] Add SQL rollback section in migration for review
+- [ ] T024 [SETUP] Update `packages/core/package.json`/`packages/shared/package.json` `version` patch and changelog draft for this feature (for release notes)
+
+---
+
+## Phase 9: QA, E2E & Docs
+
+- [ ] T025 [E2E] Create end-to-end tests simulating funnel delivery cascade with adaptive intro, template substitution, and slot extraction (`tests/e2e/funnel-richness.spec.ts`)
+- [ ] T026 [SETUP] Update `specs/020-engine-funnel-richness/contracts/metadata.md` with concrete JSON examples for fragments, stages, slots, and conversation state
+- [ ] T027 [DOCS] Write short dev docs: `docs/features/funnel-richness.md` describing new fields, runtime behavior, and migration notes
+
+---
+
+## Notes & Acceptance Criteria
+
+- All new TypeScript types live in `packages/shared/src/types.ts` and are imported by `packages/core`.
+- Drizzle schema changes compile and generated types align with shared types.
+- Migrations are review-only; DO NOT APPLY TO PRODUCTION without DB team approval.
+- Tests must pass locally with `pnpm -w test` before requesting review.
 - [ ] T014 [BE] [US4] Add `locked` and `enum` enforcement in `SlotExtractorService`
 - [ ] T015 [BE] [US4] Hook `SlotExtractorService` into `ChatService` or `FunnelRuntime` post-turn (sync before turn done). **Uses conversation-level lock (Redis SET NX) + JSONB merge write** (review fix C-F3). **Extraction runs against ALL funnel slot definitions** (not per-stage — review fix C-F2).
 - [ ] T016 [BE] [US4] Unit test extraction with phone numbers, emails, and enum validation cases in `packages/core/tests/unit/slot-extraction.test.ts`. **Plus concurrency test**: two overlapping extractions updating different slots → both preserved (JSONB merge) (review fix C-F3).

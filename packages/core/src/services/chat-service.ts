@@ -6,6 +6,7 @@ import { PersonaRepository } from './persona-repository.js';
 import { FunnelRuntime } from './funnel/funnel-runtime.js';
 import { FunnelRepository } from './funnel/funnel-repository.js';
 import { FragmentScorer } from './funnel/scorer.js';
+import { AdaptiveIntroService } from './llm/adaptive-intro.js';
 import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
 import { buildLanguageDirective } from './validators/language-guard.js';
@@ -782,6 +783,28 @@ export class ChatService {
     }
 
     let accumulatedContent = '';
+
+    // Parallel Intro (US3 / FR-008)
+    if (funnelResult.introPromise) {
+      const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000));
+      const intro = await Promise.race([funnelResult.introPromise, timeoutPromise]);
+      if (intro) {
+        const chunk: StreamChunk = {
+          id: randomUUID(),
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: 'adaptive-intro',
+          choices: [{
+            index: 0,
+            delta: { content: intro + ' ' },
+            finish_reason: null,
+          }],
+        };
+        yield chunk;
+        accumulatedContent += intro + ' ';
+      }
+    }
+
     let finalUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
     let modelName = persona.modelPreferences?.model || 'gpt-4o';
     const includeUsage = request.streamOptions?.include_usage === true;
@@ -1263,3 +1286,4 @@ export class ChatService {
 }
 
 export type { ChatRequest, ChatResponse };
+ ChatResponse };

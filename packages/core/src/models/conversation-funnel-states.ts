@@ -12,6 +12,7 @@ export const conversationFunnelStates = pgTable(
     currentStageId: uuid('current_stage_id').notNull().references(() => funnelStages.id),
     consecutiveStuckCount: integer('consecutive_stuck_count').notNull().default(0),
     capturedSlots: jsonb('captured_slots').notNull().$type<Record<string, CapturedSlot>>().default({}),
+    returnStack: jsonb('return_stack').notNull().$type<string[]>().default([]),
     version: bigint('version', { mode: 'number' }).notNull().default(0),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   }

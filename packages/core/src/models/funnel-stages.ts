@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, integer, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, integer, jsonb, boolean } from 'drizzle-orm/pg-core';
 import { funnelVersions } from './funnels.js';
 import type { ResolutionCriteria } from '@undrecreaitwins/shared';
 
@@ -14,5 +14,8 @@ export const funnelStages = pgTable(
     nextStageId: uuid('next_stage_id').references((): any => funnelStages.id),
     stuckAction: text('stuck_action'),
     exitStageId: uuid('exit_stage_id').references((): any => funnelStages.id),
+    requiredSlots: jsonb('required_slots').notNull().$type<string[]>().default([]),
+    requiresConfirmation: boolean('requires_confirmation').notNull().default(false),
+    isAnytime: boolean('is_anytime').notNull().default(false),
   }
 );
