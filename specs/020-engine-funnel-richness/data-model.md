@@ -42,9 +42,12 @@ Schema extensions for funnel entities and conversation state.
 
 ```typescript
 // packages/core/src/models/funnel-fragments.ts
+// deliveryModeEnum — follows existing pattern (fragmentTypeEnum, etc.)
+export const deliveryModeEnum = pgEnum('delivery_mode', ['verbatim', 'template', 'llm']);
+
 export const funnelFragments = pgTable('funnel_fragments', {
   // ... existing
-  deliveryMode: text('delivery_mode').notNull().default('llm'),
+  deliveryMode: deliveryModeEnum('delivery_mode').notNull().default('llm'),
   adaptiveIntro: boolean('adaptive_intro').notNull().default(false),
   mediaUrl: text('media_url'),
   deliveryCondition: jsonb('delivery_condition'),

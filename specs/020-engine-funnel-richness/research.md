@@ -44,7 +44,7 @@ We need a consistent pipeline to process LLM outputs before sending.
 
 ## 3. Slot Extraction (Sync Post-Turn)
 
-- **Timing**: Executed after `scriptedReply` is selected/generated, but before the turn is marked "done" in DB.
+- **Timing**: Executed after `scriptedReply` is selected/generated, **within the `FunnelRuntime` conversation lock** (before lock release + before turn marked "done" in DB). This prevents a rapid second message from acquiring the lock and reading stale slots before extraction completes (review fix Gemini-F2).
 - **Scope**: Runs against ALL funnel slot definitions (not per-stage — review fix C-F2: anytime trigger may switch stages mid-turn; all-slots extraction covers the new stage).
 - **Concurrency (review fix C-F3)**: Acquires conversation-level lock (Redis `SET NX conv:lock:{id} TTL 30s`). Write = JSONB merge (`||`) — preserves concurrent updates. Locked slots never overwritten at DB level.
 - **Process**:
