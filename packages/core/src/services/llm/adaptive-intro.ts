@@ -1,4 +1,5 @@
 import { LLMClient } from '../llm-client.js';
+import type { TurnMetrics } from '../funnel/turn-metrics.js';
 
 export class AdaptiveIntroService {
   constructor(private llmClient: LLMClient) {}
@@ -12,6 +13,7 @@ export class AdaptiveIntroService {
     fragmentObjective: string;
     tenantId: string;
     personaId: string;
+    metrics?: TurnMetrics;
   }): Promise<string | null> {
     const systemPrompt = `Ты — помощник, который пишет очень короткие (1 предложение) переходные фразы в диалоге.
 Твоя задача: связать последнее сообщение пользователя с целью следующего этапа разговора.
@@ -49,6 +51,11 @@ export class AdaptiveIntroService {
       // Remove quotes if LLM added them
       if (content.startsWith('"') && content.endsWith('"')) {
         content = content.slice(1, -1);
+      }
+
+      if (params.metrics) {
+        params.metrics.stepFired('adaptive_intro');
+        params.metrics.recordLLMCall(response.usage);
       }
 
       return content;

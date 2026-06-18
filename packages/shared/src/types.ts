@@ -202,6 +202,10 @@ export interface FunnelConfig {
   stuck_threshold: number;
   stuck_action: 'yield_generation' | 'handoff' | 'exit_stage';
   scoring_weights: ScoringWeights;
+  /** NFR-6: max reruns (banned retry + anti-repeat + retell) per turn. Default 2. */
+  maxTurnReruns: number;
+  /** NFR-6: max total LLM calls per turn (intro + gen + guards + extraction + intent). Default 6. */
+  maxTurnLLMCalls: number;
 }
 
 export interface ScoringWeights {
@@ -225,7 +229,9 @@ export interface FunnelStage {
   exitStageId?: string;
   requiredSlots: string[];
   requiresConfirmation: boolean;
+  confirmationPrompt?: string;
   isAnytime: boolean;
+  anytimeTriggers?: string[];
 }
 
 export type ResolutionCriteria =
@@ -286,6 +292,8 @@ export interface ConversationFunnelState {
   messagesOnCurrentStage: number;
   /** Stage name offered by bot, awaiting affirmative response (017-hybrid-agent-core, task 4.6) */
   pendingStageOffer: string | null;
+  /** Confirmation gate pending: stage ID awaiting user confirmation (T025) */
+  pendingConfirmation: string | null;
   version: number;
   updatedAt: Date;
 }

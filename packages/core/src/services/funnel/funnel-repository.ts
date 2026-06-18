@@ -5,7 +5,8 @@ import {
   funnelStages, 
   funnelFragments,
   funnelSlots,
-  conversationFunnelStates 
+  conversationFunnelStates,
+  conversations,
 } from '../../models/index.js';
 import { eq, and, isNull, sql, desc } from 'drizzle-orm';
 import type { 
@@ -110,6 +111,34 @@ export class FunnelRepository {
 
   public async resetConversationState(conversationId: string): Promise<void> {
     await db.delete(conversationFunnelStates).where(eq(conversationFunnelStates.conversationId, conversationId));
+  }
+
+  /**
+   * JSONB merge (||) of new slots into conversations.slots.
+   * Locked slots are filtered out at DB write time (FR-019 safety net).
+   */
+  public async mergeConversationSlots(
+    conversationId: string,
+    newSlots: Record<string, unknown>,
+    lockedSlotNames: string[]
+  ): Promise<boolean> {
+    if (Object.keys(newSlots).length === 0) return true;
+
+    // Filter locked slots — enforced at DB write time, not just in extractor
+    const filtered = Object.fromEntries(
+      Object.entries(newSlots).filter(([k]) => !lockedSlotNames.includes(k))
+    );
+
+    if (Object.keys(filtered).length === 0) return true;
+
+    const result = await db.update(conversations)
+      .set({
+        slots: sql`${conversations.slots} || ${JSON.stringify(filtered)}::jsonb`,
+      })
+      .where(eq(conversations.id, conversationId))
+      .returning({ id: conversations.id });
+
+    return result.length > 0;
   }
 
   public async createFunnel(tenantId: string, personaId: string, name: string): Promise<FunnelDefinition> {

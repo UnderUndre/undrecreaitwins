@@ -62,9 +62,9 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Sync post-turn extraction of structured data into `conversations.slots`.
 
-- [ ] T013 [BE] [US4] Implement `SlotExtractorService` in `packages/core/src/services/llm/slot-extractor.ts`
-- [ ] T014 [BE] [US4] Integrate `SlotExtractorService` into conversation post-turn pipeline to persist into `conversations.slots`
-- [ ] T015 [BE] [US4] Add unit and integration tests for slot extraction (`packages/core/tests/unit/slot-extractor.test.ts`, `packages/core/tests/integration/slot-persistence.test.ts`)
+- [X] T013 [BE] [US4] Implement `SlotExtractorService` in `packages/core/src/services/llm/slot-extractor.ts`
+- [X] T014 [BE] [US4] Integrate `SlotExtractorService` into conversation post-turn pipeline to persist into `conversations.slots`
+- [X] T015 [BE] [US4] Add unit and integration tests for slot extraction (`packages/core/tests/unit/slot-extractor.test.ts`, `packages/core/tests/integration/slot-persistence.test.ts`)
 
 ---
 
@@ -72,9 +72,9 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Support media attachments, adaptive humanization metadata, and response-level extraction.
 
-- [ ] T016 [BE] [US6] Add `mediaUrl` handling into fragment rendering and `ResponseMetadata.media` enrichment
-- [ ] T017 [BE] [US6] Implement `HumanizationService` to adjust phrasing (tone/minor edits) and populate `ResponseMetadata.humanization`
-- [ ] T018 [BE] [US6] Unit tests for media and humanization services (`packages/core/tests/unit/humanization.test.ts`)
+- [X] T016 [BE] [US6] Add `mediaUrl` handling into fragment rendering and `ResponseMetadata.media` enrichment
+- [X] T017 [BE] [US6] Implement `HumanizationService` to adjust phrasing (tone/minor edits) and populate `ResponseMetadata.humanization`
+- [X] T018 [BE] [US6] Unit tests for media and humanization services (`packages/core/tests/unit/humanization.test.ts`)
 
 ---
 
@@ -82,25 +82,25 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Ensure template rendering and verbatim bypass behave reliably across runtime.
 
-- [ ] T019 [BE] [US1] Implement robust `TemplateRenderer` util (handles missing vars, filters, escapes)
-- [ ] T020 [BE] [US1] Add integration tests: `deliveryMode=verbatim`, `template` with missing/extra vars, `llm` fallback
-- [ ] T021 [BE] [US1] Update `FunnelRuntime` telemetry to record deliveryMode and template render time
+- [X] T019 [BE] [US1] Implement robust `TemplateRenderer` util (handles missing vars, filters, escapes)
+- [X] T020 [BE] [US1] Add integration tests: `deliveryMode=verbatim`, `template` with missing/extra vars, `llm` fallback
+- [X] T021 [BE] [US1] Update `FunnelRuntime` telemetry to record deliveryMode and template render time
 
 ---
 
 ## Phase 8: DB Migration & Release Prep (Blocking for DB teams)
 
-- [ ] T022 [DB] Generate final review-only Drizzle migration under `drizzle/migrations/<timestamp>_funnel_richness/migration.sql` (includes `CREATE TYPE delivery_mode` and column additions)
-- [ ] T023 [DB] Add SQL rollback section in migration for review
-- [ ] T024 [SETUP] Update `packages/core/package.json`/`packages/shared/package.json` `version` patch and changelog draft for this feature (for release notes)
+- [X] T022 [DB] Generate final review-only Drizzle migration under `drizzle/migrations/<timestamp>_funnel_richness/migration.sql` (includes `CREATE TYPE delivery_mode` and column additions)
+- [X] T023 [DB] Add SQL rollback section in migration for review
+- [X] T024 [SETUP] Update `packages/core/package.json`/`packages/shared/package.json` `version` patch and changelog draft for this feature (for release notes)
 
 ---
 
 ## Phase 9: QA, E2E & Docs
 
-- [ ] T025 [E2E] Create end-to-end tests simulating funnel delivery cascade with adaptive intro, template substitution, and slot extraction (`tests/e2e/funnel-richness.spec.ts`)
-- [ ] T026 [SETUP] Update `specs/020-engine-funnel-richness/contracts/metadata.md` with concrete JSON examples for fragments, stages, slots, and conversation state
-- [ ] T027 [DOCS] Write short dev docs: `docs/features/funnel-richness.md` describing new fields, runtime behavior, and migration notes
+- [X] T025 [E2E] Create end-to-end tests simulating funnel delivery cascade with adaptive intro, template substitution, and slot extraction (`tests/e2e/funnel-richness.spec.ts`)
+- [X] T026 [SETUP] Update `specs/020-engine-funnel-richness/contracts/metadata.md` with concrete JSON examples for fragments, stages, slots, and conversation state
+- [X] T027 [DOCS] Write short dev docs: `docs/features/funnel-richness.md` describing new fields, runtime behavior, and migration notes
 
 ---
 
@@ -110,9 +110,9 @@ description: "Task list for Engine Funnel Richness implementation"
 - Drizzle schema changes compile and generated types align with shared types.
 - Migrations are review-only; DO NOT APPLY TO PRODUCTION without DB team approval.
 - Tests must pass locally with `pnpm -w test` before requesting review.
-- [ ] T014 [BE] [US4] Add `locked` and `enum` enforcement in `SlotExtractorService`
-- [ ] T015 [BE] [US4] Hook `SlotExtractorService` into `ChatService` or `FunnelRuntime` post-turn (sync before turn done). **Uses conversation-level lock (Redis SET NX) + JSONB merge write** (review fix C-F3). **Extraction runs against ALL funnel slot definitions** (not per-stage — review fix C-F2).
-- [ ] T016 [BE] [US4] Unit test extraction with phone numbers, emails, and enum validation cases in `packages/core/tests/unit/slot-extraction.test.ts`. **Plus concurrency test**: two overlapping extractions updating different slots → both preserved (JSONB merge) (review fix C-F3).
+- [X] T014 [BE] [US4] Add `locked` and `enum` enforcement in `SlotExtractorService`
+- [X] T015 [BE] [US4] Hook `SlotExtractorService` into `ChatService` or `FunnelRuntime` post-turn (sync before turn done). **Uses conversation-level lock (Redis SET NX) + JSONB merge write** (review fix C-F3). **Extraction runs against ALL funnel slot definitions** (not per-stage — review fix C-F2).
+- [X] T016 [BE] [US4] Unit test extraction with phone numbers, emails, and enum validation cases in `packages/core/tests/unit/slot-extraction.test.ts`. **Plus concurrency test**: two overlapping extractions updating different slots → both preserved (JSONB merge) (review fix C-F3).
 
 ---
 
@@ -120,9 +120,9 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Prevent AI-sounding or forbidden phrases.
 
-- [ ] T017 [BE] [US5] Implement `BannedWordsFilter` in `packages/core/src/services/llm/guards/banned-words.ts` (Hard regex, Soft keyword)
-- [ ] T018 [BE] [US5] Implement `OutputGuard` pipeline with rerun logic (max 2) and global budget check
-- [ ] T019 [BE] [US5] Unit test hard-blocking and soft-warning
+- [X] T017 [BE] [US5] Implement `BannedWordsFilter` in `packages/core/src/services/llm/guards/banned-words.ts` (Hard regex, Soft keyword)
+- [X] T018 [BE] [US5] Implement `OutputGuard` pipeline with rerun logic (max 2) and global budget check
+- [X] T019 [BE] [US5] Unit test hard-blocking and soft-warning
 
 ---
 
@@ -130,9 +130,9 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Add `delay_ms` and `typing_chunks` metadata.
 
-- [ ] T020 [BE] [US6] Implement `PacingCalculator` in `packages/core/src/services/funnel/utils/pacing.ts`
-- [ ] T021 [BE] [US6] Enrich `metadata.humanization` in `FunnelRuntime` response
-- [ ] T022 [BE] [US6] Add `backspace_simulation` metadata generation
+- [X] T020 [BE] [US6] Implement `PacingCalculator` in `packages/core/src/services/funnel/utils/pacing.ts`
+- [X] T021 [BE] [US6] Enrich `metadata.humanization` in `FunnelRuntime` response
+- [X] T022 [BE] [US6] Add `backspace_simulation` metadata generation
 
 ---
 
@@ -140,13 +140,13 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Required slots, confirmation gates, and LIFO anytime stages.
 
-- [ ] T023 [BE] [US10] Update `evaluateAdvanceGuard` to check `requiredSlots` match in `conversations.slots`
-- [ ] T024 [BE] [US11] Implement `IntentClassifier` for affirmative advance LLM-fallback in `packages/core/src/services/llm/intent-classifier.ts`
-- [ ] T025 [BE] [US12] Implement `ConfirmationGate` in `FunnelRuntime` (stay on stage + prompt if confirmation required)
-- [ ] T026 [BE] [US9] Implement `AnytimeTrigger` check and `returnStack` (LIFO) management in `FunnelRuntime`
-- [ ] T027 [E2E] [US9] E2E test: Trigger anytime stage → Pop back to original stage. **Plus nested anytime (depth 2→3), self-trigger (no-op), stale-stage pop, max-depth reject** (review fix Codex-F3).
-- [ ] T032 [E2E] [NFR-4] Backward-compat regression E2E: existing 003 funnel (no new fields) → identical behavior (`deliveryMode: 'llm'`, no intro, no guards, unchanged metadata) (review fix Codex-F7).
-- [ ] T033 [BE] [FR-026] Integration test: budget exhaustion — intro + gen + banned rerun + anti-repeat + intent fallback + extraction → `maxTurnLLMCalls` hit → skip non-critical steps → best-effort delivery (review fix C-F1).
+- [X] T023 [BE] [US10] Update `evaluateAdvanceGuard` to check `requiredSlots` match in `conversations.slots`
+- [X] T024 [BE] [US11] Implement `IntentClassifier` for affirmative advance LLM-fallback in `packages/core/src/services/llm/intent-classifier.ts`
+- [X] T025 [BE] [US12] Implement `ConfirmationGate` in `FunnelRuntime` (stay on stage + prompt if confirmation required)
+- [X] T026 [BE] [US9] Implement `AnytimeTrigger` check and `returnStack` (LIFO) management in `FunnelRuntime`
+- [X] T027 [E2E] [US9] E2E test: Trigger anytime stage → Pop back to original stage. **Plus nested anytime (depth 2→3), self-trigger (no-op), stale-stage pop, max-depth reject** (review fix Codex-F3).
+- [X] T032 [E2E] [NFR-4] Backward-compat regression E2E: existing 003 funnel (no new fields) → identical behavior (`deliveryMode: 'llm'`, no intro, no guards, unchanged metadata) (review fix Codex-F7).
+- [X] T033 [BE] [FR-026] Integration test: budget exhaustion — intro + gen + banned rerun + anti-repeat + intent fallback + extraction → `maxTurnLLMCalls` hit → skip non-critical steps → best-effort delivery (review fix C-F1).
 
 ---
 
@@ -154,10 +154,10 @@ description: "Task list for Engine Funnel Richness implementation"
 
 **Goal**: Similarity-based reruns, contextual rephrasing, and observability.
 
-- [ ] T028 [BE] [US7] Implement `AntiRepeatGuard` using embedding similarity (threshold 0.85)
-- [ ] T029 [BE] [US8] Implement `ContextualReteller` for stage revisits
-- [ ] T030 [BE] [US7] Integrate into post-gen pipeline within global rerun budget
-- [ ] T031 [BE] [NFR-6] Implement metrics emission for all new generative paths (firing counts, costs, reruns) in `FunnelRuntime`
+- [X] T028 [BE] [US7] Implement `AntiRepeatGuard` using embedding similarity (threshold 0.85)
+- [X] T029 [BE] [US8] Implement `ContextualReteller` for stage revisits
+- [X] T030 [BE] [US7] Integrate into post-gen pipeline within global rerun budget
+- [X] T031 [BE] [NFR-6] Implement metrics emission for all new generative paths (firing counts, costs, reruns) in `FunnelRuntime`
 
 ---
 

@@ -6,6 +6,7 @@ import { PersonaRepository } from './persona-repository.js';
 import { FunnelRuntime } from './funnel/funnel-runtime.js';
 import { FunnelRepository } from './funnel/funnel-repository.js';
 import { FragmentScorer } from './funnel/scorer.js';
+import { TurnMetrics } from './funnel/turn-metrics.js';
 import { AdaptiveIntroService } from './llm/adaptive-intro.js';
 import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
@@ -260,12 +261,17 @@ export class ChatService {
     let allMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
 
     try {
+      // NFR-6: Per-turn metrics tracker (defaults until funnel config is loaded)
+      const turnMetrics = new TurnMetrics(2, 6);
+
       // Funnel Processing
       const funnelResult = await funnelRuntime.processMessage(
         request.tenantId,
         persona.id,
         conversationId,
-        sanitizedUserMessage
+        sanitizedUserMessage,
+        undefined, // remainingReruns
+        turnMetrics,
       );
 
       if (funnelResult.scriptedReply) {
@@ -420,6 +426,10 @@ export class ChatService {
       }
       const latencyMs = Date.now() - startTime;
 
+      // NFR-6: Record main generation LLM call
+      turnMetrics.stepFired('main_gen');
+      turnMetrics.recordLLMCall(llmResponse.usage);
+
       // FR-001: Response validation (post-generation)
       const validatedContent = await validatorPipeline.validateResponse(llmResponse.content, {
         tenantId: request.tenantId,
@@ -457,6 +467,20 @@ export class ChatService {
         allMessages,
         finalContent,
       );
+
+      // NFR-6: Emit funnel turn metrics to langfuse
+      const metricsSnapshot = turnMetrics.snapshot();
+      langfuseService.emitTrace({
+        id: randomUUID(),
+        name: 'funnel-turn-metrics',
+        userId: request.tenantId,
+        metadata: {
+          personaId: persona.id,
+          conversationId,
+          tenantId: request.tenantId,
+          ...metricsSnapshot,
+        },
+      });
 
       // CAS deliver + cancel fallback for channel conversations (017-hybrid-agent-core, task 1.5)
       if (isChannel && request.channelContext) {
@@ -1286,4 +1310,3 @@ export class ChatService {
 }
 
 export type { ChatRequest, ChatResponse };
- ChatResponse };

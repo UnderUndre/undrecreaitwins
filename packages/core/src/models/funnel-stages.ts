@@ -16,6 +16,8 @@ export const funnelStages = pgTable(
     exitStageId: uuid('exit_stage_id').references((): any => funnelStages.id),
     requiredSlots: jsonb('required_slots').notNull().$type<string[]>().default([]),
     requiresConfirmation: boolean('requires_confirmation').notNull().default(false),
+    confirmationPrompt: text('confirmation_prompt'),
     isAnytime: boolean('is_anytime').notNull().default(false),
+    anytimeTriggers: jsonb('anytime_triggers').$type<string[]>().default([]),
   }
 );
