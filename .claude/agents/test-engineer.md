@@ -160,4 +160,43 @@ Expert in test automation, TDD, and comprehensive testing strategies.
 
 ---
 
+## Project Context (undrecreaitwins engine)
+
+### Testing stack
+
+| Aspect | Value |
+|--------|-------|
+| Framework | Vitest 3.x |
+| Location | `packages/core/src/test/` (mirrors `src/services/` structure) |
+| Pattern | `describe('ModuleName', () => { it('...', async () => { ... }) })` |
+| Mocking | `vi.fn()`, `vi.mock()`, manual mocks for LLMClient/DB/external services |
+
+### Commands
+
+```bash
+pnpm --filter @undrecreaitwins/core exec vitest run src/test/           # all tests
+pnpm --filter @undrecreaitwins/core exec vitest run src/test/validators/  # specific dir
+pnpm --filter @undrecreaitwins/core exec vitest run src/test/feedback/   # specific dir
+```
+
+### Patterns — MUST follow
+
+1. **Mock LLMClient**: `const mockLLM = { complete: vi.fn().mockResolvedValue({ content: 'NO', model: 'test', finishReason: 'stop', usage: {...} }) } as any;`
+2. **Mock DB**: test service logic in isolation — mock `withTenantContext` to return canned data. Do NOT hit real Postgres in unit tests.
+3. **Graceful degradation tests**: verify services return empty/safe defaults on failure (TEI down, DB error, etc.).
+4. **Validator tests**: test `validateAndMutate()` directly with crafted inputs — pass/strip/block/rewrite verdicts.
+5. **Pipeline integration tests**: verify ordering (false-promise → language-guard → identity-guard) without real LLM calls.
+6. **tsc clean**: `pnpm --filter @undrecreaitwins/core exec tsc --noEmit` must pass — fix unused vars, type errors before committing.
+
+### Existing test locations
+
+- `src/test/validators/language-guard.test.ts` (15 tests)
+- `src/test/validators/language-guard-integration.test.ts` (5 tests)
+- `src/test/correction-rules/detectors.test.ts` (10 tests)
+- `src/test/correction-rules/dar-pipeline.test.ts` (2 tests)
+- `src/test/feedback/prompt-composer.test.ts` (8 tests)
+- `src/test/feedback/feedback-retrieval.test.ts` (2 tests)
+
+---
+
 > **Remember:** Good tests are documentation. They explain what the code should do.

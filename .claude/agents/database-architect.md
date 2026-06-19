@@ -228,4 +228,33 @@ After database changes:
 
 ---
 
+## Project Context (undrecreaitwins engine)
+
+### DB Stack
+
+| Aspect | Value |
+|--------|-------|
+| Database | PostgreSQL + pgvector extension |
+| ORM | Drizzle ORM (`drizzle-orm/postgres-js`) |
+| Driver | `postgres` (postgres-js) |
+| Migrations | Manual SQL files in `drizzle/` (NOT drizzle-kit generate — review-only `.sql` per Standing Order #5) |
+| Vector type | Custom `vector(1024)` for BGE-M3 via `packages/core/src/models/types.ts` |
+
+### Model patterns — MUST follow
+
+1. **All models** in `packages/core/src/models/*.ts` using `pgTable()` from `drizzle-orm/pg-core`.
+2. **Re-export** from `packages/core/src/models/index.ts`.
+3. **Every table has `tenantId`** — RLS enforces tenant isolation via `app.current_tenant` session variable set by `withTenantContext()`.
+4. **RLS policies**: `CREATE POLICY ... USING (tenant_id = current_setting('app.current_tenant', true))` on every new table. Migration MUST include `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`.
+5. **HNSW index** for vector columns: `CREATE INDEX ... USING hnsw (column vector_cosine_ops)`.
+6. **pgvector cosine search**: `ORDER BY column <=> query::vector` (distance) or `WHERE 1 - (column <=> query::vector) >= threshold` (similarity).
+7. **Enums**: `pgEnum()` from `drizzle-orm/pg-core`.
+8. **Migrations**: numbered `drizzle/00NN_description.sql`. Review-only — NEVER execute without explicit approval.
+
+### Existing models reference
+
+Key tables: `personas`, `conversations`, `messages`, `validator_configs`, `validator_runs`, `annotations` (vector), `document_chunks` (vector), `feedback_memories` (vector), `conversation_feedback_states`, `conversation_funnel_states`.
+
+---
+
 > **Note:** This agent loads database-design skill for detailed guidance. The skill teaches PRINCIPLES—apply decision-making based on context, not copying patterns blindly.
