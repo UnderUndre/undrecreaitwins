@@ -29,10 +29,21 @@ function encodeCursor(createdAt: string, id: string): string {
 }
 
 function decodeCursor(cursor: string): { createdAt: string; id: string } {
-  const decoded = Buffer.from(cursor, 'base64').toString('utf-8');
-  const sep = decoded.indexOf('_');
-  if (sep === -1) throw new AppError('Invalid cursor', 400, 'invalid_cursor');
-  return { createdAt: decoded.slice(0, sep), id: decoded.slice(sep + 1) };
+  try {
+    const decoded = Buffer.from(cursor, 'base64').toString('utf-8');
+    const sep = decoded.indexOf('_');
+    if (sep === -1) throw new Error();
+    const createdAt = decoded.slice(0, sep);
+    const id = decoded.slice(sep + 1);
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id) || isNaN(Date.parse(createdAt))) {
+      throw new Error();
+    }
+    return { createdAt, id };
+  } catch {
+    throw new AppError('Invalid cursor', 400, 'invalid_cursor');
+  }
 }
 
 type FieldError = { code: string; message: string };
@@ -164,8 +175,12 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
     // Dedupe allowedLanguages
     const dedupedLanguages = [...new Set(config.allowedLanguages)];
 
+    type PutResult =
+      | { conflict: true; currentConfig: Record<string, unknown> | null; currentVersion: number; error?: { code: string; message: string } }
+      | { conflict: false; config: typeof config; configVersion: number };
+
     // D-1: Use SELECT FOR UPDATE + conditional INSERT/UPDATE (not UPSERT) for correct version checking
-    const result = await withTenantContext(tenantId, async (tx) => {
+    const result = (await withTenantContext(tenantId, async (tx) => {
       // Lock the row (or detect absence)
       const [existing] = await tx
         .select()
@@ -236,7 +251,7 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       // Overflow protection
-      if (existing.version >= Number.MAX_SAFE_INTEGER) {
+      if (existing.version >= 2147483647) {
         const cfg = existing.config as Record<string, unknown>;
         return {
           conflict: true,
@@ -286,7 +301,12 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
         config: { ...config, allowedLanguages: dedupedLanguages },
         configVersion: row.version,
       };
-    });
+    }).catch((err: any) => {
+      if (err.code === '23505') {
+        return { conflict: true, currentConfig: null, currentVersion: 0 };
+      }
+      throw err;
+    })) as PutResult;
 
     if (result.conflict) {
       if (result.error) {
@@ -319,8 +339,8 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
     await verifyPersonaExists(tenantId, personaId);
 
     // D-3: limit < 1 → 400 (per FR-006), not silent clamp
-    const parsedLimit = parseInt(query.limit ?? '20', 10) || 20;
-    if (parsedLimit < 1) {
+    const parsedLimit = query.limit !== undefined ? parseInt(query.limit, 10) : 20;
+    if (Number.isNaN(parsedLimit) || parsedLimit < 1) {
       return reply.status(400).send({
         error: 'VALIDATION_FAILED',
         fields: { limit: 'limit must be >= 1' },
@@ -332,7 +352,7 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
     if (query.cursor) {
       try {
         const { createdAt, id } = decodeCursor(query.cursor);
-        cursorFilter = sql`(${validatorRuns.createdAt} < ${createdAt}::timestamp OR (${validatorRuns.createdAt} = ${createdAt}::timestamp AND ${validatorRuns.id} < ${id}::uuid))`;
+        cursorFilter = sql`(${validatorRuns.createdAt} < ${createdAt}::timestamptz OR (${validatorRuns.createdAt} = ${createdAt}::timestamptz AND ${validatorRuns.id} < ${id}::uuid))`;
       } catch {
         return reply.status(400).send({ error: 'INVALID_CURSOR', message: 'Malformed cursor' });
       }

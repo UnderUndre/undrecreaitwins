@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { withTenantContext } from '@undrecreaitwins/core/db.js';
 
 type ResolveQueue = unknown[][];
 let resolveQueue: ResolveQueue = [[]];
 
 function shiftResolve(): unknown[] {
-  return resolveQueue.shift() ?? [];
+  const next = resolveQueue.shift();
+  if (next instanceof Error) {
+    throw next;
+  }
+  return (next as unknown[]) ?? [];
 }
 
 function createChainableMock() {
@@ -398,6 +403,132 @@ describe('Validators routes', () => {
       expect(body.error).toBe('CONFLICT');
       expect(body.currentVersion).toBe(5);
       expect(body.currentConfig).toBeDefined();
+    });
+
+    it('returns 409 when unique violation 23505 occurs', async () => {
+      const dbError = new Error('Unique violation');
+      (dbError as any).code = '23505';
+
+      resolveQueue = [
+        [{ id: 'test-tenant', status: 'active' }],
+        [{ id: 'persona-001' }],
+        [],
+        dbError,
+      ];
+
+      const response = await server.inject({
+        method: 'PUT',
+        url: '/v1/personas/persona-001/validators/language-guard',
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          config: {
+            enabled: true,
+            allowedLanguages: ['en'],
+            mode: 'active',
+            stripThreshold: 0.05,
+            blockThreshold: 0.30,
+          },
+          expectedVersion: 0,
+        }),
+      });
+
+      expect(response.statusCode).toBe(409);
+      const body = response.json();
+      expect(body.error).toBe('CONFLICT');
+      expect(body.currentConfig).toBeNull();
+      expect(body.currentVersion).toBe(0);
+    });
+  });
+
+  describe('GET /v1/personas/:personaId/validators/language-guard/logs', () => {
+    it('returns 400 when limit is 0', async () => {
+      resolveQueue = [
+        [{ id: 'test-tenant', status: 'active' }],
+        [{ id: 'persona-001' }],
+      ];
+
+      const response = await server.inject({
+        method: 'GET',
+        url: '/v1/personas/persona-001/validators/language-guard/logs?limit=0',
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = response.json();
+      expect(body.error).toBe('VALIDATION_FAILED');
+      expect(body.fields.limit).toBe('limit must be >= 1');
+    });
+
+    it('returns 400 when cursor is invalid base64', async () => {
+      resolveQueue = [
+        [{ id: 'test-tenant', status: 'active' }],
+        [{ id: 'persona-001' }],
+      ];
+
+      const response = await server.inject({
+        method: 'GET',
+        url: '/v1/personas/persona-001/validators/language-guard/logs?cursor=not-base64!',
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = response.json();
+      expect(body.error).toBe('INVALID_CURSOR');
+    });
+
+    it('returns 400 when cursor has invalid UUID', async () => {
+      resolveQueue = [
+        [{ id: 'test-tenant', status: 'active' }],
+        [{ id: 'persona-001' }],
+      ];
+
+      const badUuidCursor = Buffer.from('2025-01-01T00:00:00.000Z_not-a-uuid').toString('base64');
+      const response = await server.inject({
+        method: 'GET',
+        url: `/v1/personas/persona-001/validators/language-guard/logs?cursor=${badUuidCursor}`,
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = response.json();
+      expect(body.error).toBe('INVALID_CURSOR');
+    });
+
+    it('returns 400 when cursor has invalid date', async () => {
+      resolveQueue = [
+        [{ id: 'test-tenant', status: 'active' }],
+        [{ id: 'persona-001' }],
+      ];
+
+      const badDateCursor = Buffer.from('invalid-date_12345678-1234-1234-1234-123456789012').toString('base64');
+      const response = await server.inject({
+        method: 'GET',
+        url: `/v1/personas/persona-001/validators/language-guard/logs?cursor=${badDateCursor}`,
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token' },
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = response.json();
+      expect(body.error).toBe('INVALID_CURSOR');
+    });
+
+    it('succeeds with 200 when cursor is valid', async () => {
+      resolveQueue = [
+        [{ id: 'test-tenant', status: 'active' }],
+        [{ id: 'persona-001' }],
+        [],
+      ];
+
+      const validCursor = Buffer.from('2025-01-01T00:00:00.000Z_12345678-1234-1234-1234-123456789012').toString('base64');
+      const response = await server.inject({
+        method: 'GET',
+        url: `/v1/personas/persona-001/validators/language-guard/logs?cursor=${validCursor}`,
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token' },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.items).toEqual([]);
     });
   });
 });

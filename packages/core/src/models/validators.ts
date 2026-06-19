@@ -23,7 +23,6 @@ export const validatorConfigs = pgTable(
   (table) => ({
     tenantPersonaNameIdx: uniqueIndex('validator_configs_tenant_persona_name_idx').on(table.tenantId, table.personaId, table.validatorName),
     tenantIdx: index('validator_configs_tenant_idx').on(table.tenantId),
-    versionIdx: index('validator_configs_version_idx').on(table.tenantId, table.personaId, table.validatorName, table.version),
   })
 );
 
