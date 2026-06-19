@@ -1026,7 +1026,8 @@ export class ChatService {
 
       if (langConfig) {
         const cfg = langConfig.config as any;
-        if (cfg?.allowedLanguages && Array.isArray(cfg.allowedLanguages) && cfg.allowedLanguages.length > 0) {
+        // T002: enabled gate — disabled guard skips directive injection too
+        if (cfg?.enabled !== false && cfg?.allowedLanguages && Array.isArray(cfg.allowedLanguages) && cfg.allowedLanguages.length > 0) {
           parts.push('\n' + buildLanguageDirective(cfg.allowedLanguages));
         }
       }

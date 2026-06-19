@@ -22,6 +22,7 @@ import { behaviorRoutes } from './routes/behavior.js';
 import { retryJobsRoutes } from './routes/retry-jobs.js';
 import { correctionRulesReloadRoutes } from './routes/correction-rules-reload.js';
 import { retrievedFeedbackRoutes } from './routes/retrieved-feedback.js';
+import { validatorRoutes } from './routes/validators.js';
 import { authPublicPlugin } from './middleware/auth-public.js';
 import { publicModelsRoute } from './routes/v1/openai/models.js';
 import { publicChatRoute } from './routes/v1/openai/chat.js';
@@ -170,6 +171,7 @@ export async function buildServer() {
   await fastify.register(retryJobsRoutes);
   await fastify.register(correctionRulesReloadRoutes);
   await fastify.register(retrievedFeedbackRoutes);
+  await fastify.register(validatorRoutes);
 
   await fastify.register(async (publicApi) => {
     await publicApi.register(authPublicPlugin);

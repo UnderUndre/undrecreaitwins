@@ -99,7 +99,10 @@ curl -X PUT \
 # {
 #   "error": "VALIDATION_FAILED",
 #   "fields": {
-#     "stripThreshold": "stripThreshold must be <= blockThreshold"
+#     "stripThreshold": {
+#       "code": "THRESHOLD_ORDER",
+#       "message": "stripThreshold must be <= blockThreshold"
+#     }
 #   }
 # }
 ```

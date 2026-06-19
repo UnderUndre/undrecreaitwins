@@ -64,13 +64,19 @@ Body:
 {
   "error": "VALIDATION_FAILED",
   "fields": {
-    "stripThreshold": "stripThreshold must be <= blockThreshold",
-    "allowedLanguages": "Invalid BCP-47 language code: xx-yy"
+    "stripThreshold": {
+      "code": "THRESHOLD_ORDER",
+      "message": "stripThreshold must be <= blockThreshold"
+    },
+    "allowedLanguages": {
+      "code": "INVALID_BCP47",
+      "message": "Invalid BCP-47 language code: xx-yy"
+    }
   }
 }
 ```
 
-Field-level errors allow Product UI to highlight specific form fields. Error codes: `THRESHOLD_ORDER`, `THRESHOLD_RANGE`, `INVALID_BCP47`, `EMPTY_ACTIVE_LANGUAGES`. All validation errors return `{ error: "VALIDATION_FAILED", fields: { [fieldName]: string } }` format.
+Field-level errors allow Product UI to highlight specific form fields. Each field entry contains a machine-readable `code` (`THRESHOLD_ORDER`, `THRESHOLD_RANGE`, `INVALID_BCP47`, `EMPTY_ACTIVE_LANGUAGES`) and a human-readable `message`. Schema validation (Zod) errors use codes prefixed with `ZOD_`. All validation errors return `{ error: "VALIDATION_FAILED", fields: { [fieldName]: { code: string, message: string } } }` format.
 
 ### 409 Conflict — Version mismatch
 
@@ -90,6 +96,8 @@ Field-level errors allow Product UI to highlight specific form fields. Error cod
 ```
 
 Client can diff `currentConfig` against attempted config to resolve conflict.
+
+> **Note**: In rare concurrent-insert race conditions (multiple clients sending PUT with `expectedVersion: 0` simultaneously), `currentConfig` may be `null`. Client should retry the PUT with `expectedVersion: 0`.
 
 ### 404 Not Found
 

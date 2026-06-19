@@ -27,7 +27,7 @@
 - **Q: Optimistic locking bypass behavior in PUT requests** → A: `expectedVersion` является строго обязательным полем во всех `PUT` запросах (даже при первой настройке, где `expectedVersion` равен 0). Отсутствие `expectedVersion` возвращает ошибку `400 Bad Request`.
 - **Q: Audit log cursor structure for pagination** → A: Используется составной курсор (**compound cursor**), состоящий из временной метки `createdAt` и идентификатора записи `id` (например, в формате base64-encoded `createdAt_id`). Это гарантирует абсолютную уникальность и детерминированность порядка вывода логов, исключая пропуски или дубли при совпадающих метках времени.
 - **Q: Audit log JSON mapping in GET /logs** → A: **Nested metadata** — API возвращает `metadata: { nonCompliantFraction, detectedScripts }` вместо плоских полей. Это соответствует структуре таблицы `validator_runs` в БД, сохраняет расширяемость контракта и упрощает сериализацию.
-- **Q: Validation error response format on PUT** → A: **Field-level validation** — при ошибках валидации (400 Bad Request) API возвращает структурированный JSON с деталями по каждому невалидному полю: `{ error: "VALIDATION_FAILED", fields: { [fieldName]: string } }`. Это позволяет Product UI точечно подсвечивать ошибки в интерфейсе.
+- **Q: Validation error response format on PUT** → A: **Field-level validation** — при ошибках валидации (400 Bad Request) API возвращает структурированный JSON с деталями по каждому невалидному полю: `{ error: "VALIDATION_FAILED", fields: { [fieldName]: { code: string, message: string } } }`. Это позволяет Product UI точечно подсвечивать ошибки в интерфейсе.
 
 ## 2. Границы
 
@@ -47,7 +47,7 @@
 
 `PUT /v1/personas/:id/validators/language-guard` с body `{ config: LanguageGuardConfig, expectedVersion: number }`. `expectedVersion` является строго обязательным (400 при отсутствии). Engine валидирует, сохраняет, инкрементирует `configVersion`.
 
-- **AC**: 200 с обновлённым config + новый `configVersion`. 409 если `expectedVersion` не совпадает. 400 с `{ error: "VALIDATION_FAILED", fields: { [fieldName]: string } }` если `stripThreshold > blockThreshold` или `mode: 'active'` + `allowedLanguages` пустой.
+- **AC**: 200 с обновлённым config + новый `configVersion`. 409 если `expectedVersion` не совпадает. 400 с `{ error: "VALIDATION_FAILED", fields: { [fieldName]: { code: string, message: string } } }` если `stripThreshold > blockThreshold` или `mode: 'active'` + `allowedLanguages` пустой.
 
 ### US-3 — Включать/выключать guard (P1)
 
@@ -73,7 +73,7 @@
 - **FR-002**: `PUT /v1/personas/:personaId/validators/language-guard` — body `{ config: LanguageGuardConfig, expectedVersion: number }`. Сохраняет, инкрементирует `configVersion` (через atomic UPSERT). Tenant scoped тем же hook, что FR-001.
 - **FR-003**: `enabled: boolean` добавляется в `LanguageGuardConfig` (`packages/core/src/types/validator.ts`). Default `true`. Pipeline: `if (config.enabled === false) return;` перед вызовом validator. Directive injection в `packages/core/src/services/chat-service.ts` (`buildLanguageDirective`) также gated: `if (cfg.enabled === false) return;` перед инъекцией директивы в system prompt.
 - **FR-004**: `configVersion: number` — integer counter, хранится как выделенный столбец `version INTEGER` в таблице `validator_configs` (не внутри JSONB). GET возвращает. PUT строго требует `expectedVersion` (400 при отсутствии) и проверяет её через атомарный `UPDATE ... WHERE version = $expectedVersion` (affected-rows = 0 → 409). Первая запись использует `INSERT ... ON CONFLICT DO UPDATE` (UPSERT). 409 на mismatch.
-- **FR-005**: Server-side validation on PUT: `stripThreshold <= blockThreshold` (400 if violated). `stripThreshold` и `blockThreshold` должны быть в диапазоне `[0, 1]` включительно (400 if violated — `THRESHOLD_RANGE`). `mode: 'active'` + empty `allowedLanguages` (400). `allowedLanguages` items must be valid BCP-47 codes (regex check, 400 on invalid). Дубликаты в `allowedLanguages` silently deduped перед сохранением. All validation errors on PUT return structured field-level errors: `{ error: "VALIDATION_FAILED", fields: { [fieldName]: string } }`.
+- **FR-005**: Server-side validation on PUT: `stripThreshold <= blockThreshold` (400 if violated). `stripThreshold` и `blockThreshold` должны быть в диапазоне `[0, 1]` включительно (400 if violated — `THRESHOLD_RANGE`). `mode: 'active'` + empty `allowedLanguages` (400). `allowedLanguages` items must be valid BCP-47 codes (regex check, 400 on invalid). Дубликаты в `allowedLanguages` silently deduped перед сохранением. All validation errors on PUT return structured field-level errors: `{ error: "VALIDATION_FAILED", fields: { [fieldName]: { code: string, message: string } } }`.
 - **FR-006**: `GET /v1/personas/:personaId/validators/language-guard/logs` — пагинация по составному курсору (`cursor`). Читает из `validator_runs` table (column projection: `id, verdict, confidence, matched_patterns, created_at` — excludes `original_content`, `remediated_content` for privacy), filtered by `validatorName: 'language-guard'`, ordered by `createdAt DESC, id DESC`. Query params: `limit` (default 20, max 100, `limit < 1` → 400), `cursor` (base64-строка `createdAt_id`, malformed → 400). Возвращает `metadata: { nonCompliantFraction, detectedScripts }` в структуре каждого лога.
 - **FR-007**: Route registration — добавить validators route в `packages/api/src/routes/validators.ts` (NEW), зарегистрировать в `server.ts`.
 - **FR-008**: RBAC — только tenant-scoped access. Engine резолвит tenant из `x-tenant-claim` (credential-bound, выставляется BFF) или `x-tenant-id` (fallback). Engine не знает roles; Product BFF enforces RBAC (owner/admin). Endpoints НЕ вводят собственный auth middleware — используют существующий global `onRequest` hook в `server.ts`.
@@ -92,7 +92,7 @@
 - `enabled: false` + `mode: 'active'` → valid (enabled=false overrides mode; pipeline skips entirely).
 - Audit log для never-active guard → empty list, no error.
 - Concurrent PUT (two requests, same expectedVersion) → first 200, second 409.
-- Invalid BCP-47 code (`allowedLanguages: ["xx-yy"]`) → 400 with specific error message `{ error: "VALIDATION_FAILED", fields: { allowedLanguages: "Invalid BCP-47 language code: xx-yy" } }`.
+- Invalid BCP-47 code (`allowedLanguages: ["xx-yy"]`) → 400 with specific error message `{ error: "VALIDATION_FAILED", fields: { allowedLanguages: { code: "INVALID_BCP47", message: "Invalid BCP-47 language code: xx-yy" } } }`.
 - `configVersion` overflow (extremely unlikely) → wraps via `BigInt` or hard cap at `Number.MAX_SAFE_INTEGER`.
 - **Overlapping log timestamps**: два лога имеют одинаковый `createdAt` → детерминировано сортируются по `id DESC`. Курсор `createdAt_id` предотвращает дублирование при пагинации.
 

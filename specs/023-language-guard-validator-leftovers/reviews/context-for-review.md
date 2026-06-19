@@ -78,7 +78,7 @@
 
 ### PUT Errors
 - 400 `MISSING_EXPECTED_VERSION` — no expectedVersion in body
-- 400 `VALIDATION_FAILED` — field-level errors: `{ error, fields: { [field]: string } }`
+- 400 `VALIDATION_FAILED` — field-level errors: `{ error, fields: { [field]: { code: string, message: string } } }`
 - 409 `CONFLICT` — version mismatch: `{ error, currentConfig, currentVersion }`
 
 ### GET /logs Response

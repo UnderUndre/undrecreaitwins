@@ -11,6 +11,7 @@ function makeConfig(overrides: Partial<LanguageGuardConfig> = {}): LanguageGuard
     stripThreshold: 0.05,
     blockThreshold: 0.30,
     regenerateOnViolation: false,
+    enabled: true,
     ...overrides,
   };
 }

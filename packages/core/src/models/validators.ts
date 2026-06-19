@@ -16,12 +16,14 @@ export const validatorConfigs = pgTable(
     validatorName: text('validator_name').notNull(),
     mode: validatorModeEnum('mode').notNull().default('active'),
     config: jsonb('config').notNull().default({}),
+    version: integer('version').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
     tenantPersonaNameIdx: uniqueIndex('validator_configs_tenant_persona_name_idx').on(table.tenantId, table.personaId, table.validatorName),
     tenantIdx: index('validator_configs_tenant_idx').on(table.tenantId),
+    versionIdx: index('validator_configs_version_idx').on(table.tenantId, table.personaId, table.validatorName, table.version),
   })
 );
 

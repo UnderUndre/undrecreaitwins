@@ -100,7 +100,7 @@ CREATE TABLE validator_runs (
 | DB column | API field (in `metadata`) | Notes |
 |-----------|---------------------------|-------|
 | `confidence` | `nonCompliantFraction` | Double in `[0.0, 1.0]`. Source: `pipeline.ts:217` persists `fraction` into `confidence`. |
-| `matched_patterns` | `detectedScripts` | JSONB array of `{ language, confidence }` objects. Source: `pipeline.ts:218`. |
+| `matched_patterns` | `detectedScripts` | JSONB array of script name strings (e.g. `['Han', 'Cyrillic']`). Source: `pipeline.ts:218`. |
 | `verdict` | `verdict` (top-level) | `'pass' \| 'strip' \| 'block' \| 'no_op'` |
 | `created_at` | `createdAt` (top-level) | ISO 8601 timestamp |
 | `id` | `id` (top-level) | UUID |

@@ -43,6 +43,12 @@ export interface LanguageGuardConfig extends BaseValidatorConfig {
   blockThreshold: number;
   fallbackMessage?: string;
   regenerateOnViolation: boolean;
+  enabled: boolean;
+}
+
+export interface LanguageGuardConfigResponse {
+  config: LanguageGuardConfig;
+  configVersion: number;
 }
 
 export type AnyValidatorConfig =

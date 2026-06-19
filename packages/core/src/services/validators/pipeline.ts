@@ -64,6 +64,11 @@ export class ValidatorPipeline {
         const config = await this.resolveConfig(context.tenantId, context.personaId, validator.name);
         
         try {
+    // T002: enabled toggle — skip disabled validators entirely
+    if ((config as Partial<{ enabled: boolean }>).enabled === false) {
+            continue;
+          }
+
           // FR-022: per-validator wall-clock budget could be enforced here
           const runResult = await validator.validateAndMutate(currentText, {
             ...context,
@@ -72,11 +77,12 @@ export class ValidatorPipeline {
 
           // Pipeline-level convention (claude F6): language-guard with empty allowedLanguages
           // is a complete no-op — skip audit persistence for this validator (DD-005, FR-012)
-          if (validator.name === 'language-guard' &&
-              (config as any).allowedLanguages !== undefined &&
-              (config as any).allowedLanguages.length === 0) {
-            continue;
-          }
+    if (validator.name === 'language-guard') {
+      const langCfg = config as Partial<{ allowedLanguages: string[] }>;
+      if (langCfg.allowedLanguages !== undefined && langCfg.allowedLanguages.length === 0) {
+        continue;
+      }
+    }
 
           results.push({
             validatorName: validator.name,
