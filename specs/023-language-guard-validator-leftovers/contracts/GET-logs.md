@@ -7,7 +7,8 @@
 ```
 GET /v1/personas/:personaId/validators/language-guard/logs?limit=20&cursor=...
 Headers:
-  X-Tenant-ID: string (required)
+  X-Tenant-Claim: string (preferred, base64url JSON {tenant: <id>} set by BFF)
+  X-Tenant-ID: string (fallback if X-Tenant-Claim absent)
 Query Params:
   limit: number (default 20, max 100)
   cursor: string (optional, base64-encoded compound cursor)

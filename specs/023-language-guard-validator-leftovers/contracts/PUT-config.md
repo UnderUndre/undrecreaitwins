@@ -70,7 +70,7 @@ Body:
 }
 ```
 
-Field-level errors allow Product UI to highlight specific form fields. Error codes: `THRESHOLD_ORDER`, `THRESHOLD_RANGE`, `INVALID_BCP47`. All validation errors return `{ error: "VALIDATION_FAILED", fields: { [fieldName]: string } }` format.
+Field-level errors allow Product UI to highlight specific form fields. Error codes: `THRESHOLD_ORDER`, `THRESHOLD_RANGE`, `INVALID_BCP47`, `EMPTY_ACTIVE_LANGUAGES`. All validation errors return `{ error: "VALIDATION_FAILED", fields: { [fieldName]: string } }` format.
 
 ### 409 Conflict — Version mismatch
 

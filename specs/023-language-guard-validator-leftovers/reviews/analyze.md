@@ -29,10 +29,10 @@
 | Requirement Key | Has Task? | Task IDs | Notes |
 |-----------------|-----------|----------|-------|
 | FR-001 (GET config) | ✅ | T005 | |
-| FR-002 (PUT config) | ✅ | T006, T007, T009 | |
+| FR-002 (PUT config) | ✅ | T006, T009 | |
 | FR-003 (enabled field) | ✅ | T001, T002, T008 | |
 | FR-004 (configVersion) | ✅ | T001, T009 | |
-| FR-005 (server validation) | ✅ | T007 | |
+| FR-005 (server validation) | ✅ | T006 | |
 | FR-006 (audit log) | ✅ | T010 | |
 | FR-007 (route registration) | ✅ | T003, T004 | |
 | FR-008 (RBAC) | ✅ | — | Out of scope (Product BFF) |
