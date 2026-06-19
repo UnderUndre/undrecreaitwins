@@ -16,6 +16,7 @@ export const validatorConfigs = pgTable(
     validatorName: text('validator_name').notNull(),
     mode: validatorModeEnum('mode').notNull().default('active'),
     config: jsonb('config').notNull().default({}),
+    version: integer('version').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

@@ -62,7 +62,20 @@ Query Params:
 ## Notes
 
 - Query is scoped to `tenant_id` (from existing global auth hook in `server.ts`, priority: `X-Tenant-Claim`, fallback `X-Tenant-ID`). Missing/inactive tenant → 401.
-- `limit < 1` → 400. Malformed/invalid cursor → 400.
+- `limit < 1` → 400. Malformed/invalid cursor → 400 `{ error: 'INVALID_CURSOR', message: 'Malformed cursor' }`.
+
+### 400 Bad Request
+
+```json
+{
+  "error": "INVALID_CURSOR",
+  "message": "Malformed cursor"
+}
+```
+
+Returned when `cursor` query parameter is provided but cannot be decoded (invalid base64 or missing separator).
+
+---
 
 ### 401 Unauthorized
 
