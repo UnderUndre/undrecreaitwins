@@ -53,10 +53,10 @@ packages/core/src/
 ├── services/validators/
 │   └── language-guard.ts        # Remediation pipeline: detect → translate → regenerate → fallback
 └── types/
-    └── validator.js             # LanguageGuardConfig type (JSONB, no standalone config file)
+    └── validator.ts             # LanguageGuardConfig type (JSONB, no standalone config file)
 ```
 
-**Structure Decision**: Integrated into existing `packages/core/src/services/chat-service.ts` and `packages/core/src/services/validators/language-guard.ts`. Config is a JSONB type in `validator.js`, not a standalone file.
+**Structure Decision**: Integrated into existing `packages/core/src/services/chat-service.ts` and `packages/core/src/services/validators/language-guard.ts`. Config is a JSONB type in `validator.ts`, not a standalone file.
 
 ## Phase 0: Research (review F2 — platform model plumbing)
 
@@ -120,16 +120,17 @@ interface RemediationResult {
 ### Supported Language Set (FR-010)
 
 ```typescript
-const BCP47_TO_SCRIPTS: Record<string, string> = {
+const BCP47_TO_SCRIPTS: Record<string, string[]> = {
   // Original 9
-  ru: 'Cyrillic', en: 'Latin', zh: 'Han', ar: 'Arabic',
-  hi: 'Devanagari', he: 'Hebrew', th: 'Thai', ko: 'Hangul', ja: 'Kana',
+  ru: ['Cyrillic'], en: ['Latin'], zh: ['Han'], ar: ['Arabic'],
+  hi: ['Devanagari'], he: ['Hebrew'], th: ['Thai'],
+  ko: ['Hangul', 'Han', 'Latin'], ja: ['Hiragana', 'Katakana', 'Han', 'Latin'],
   // СНГ additions (10)
-  kk: 'Cyrillic', uk: 'Cyrillic', uz: 'Latin', ky: 'Cyrillic',
-  hy: 'Armenian', ka: 'Georgian', az: 'Latin', be: 'Cyrillic',
-  tg: 'Cyrillic', mo: 'Cyrillic',
+  kk: ['Cyrillic'], uk: ['Cyrillic'], uz: ['Latin'], ky: ['Cyrillic'],
+  hy: ['Armenian'], ka: ['Georgian'], az: ['Latin'], be: ['Cyrillic'],
+  tg: ['Cyrillic'], mo: ['Cyrillic'],
 };
-// Total: 19 languages
+// Total: 19 languages. Multi-script languages (ko, ja) preserve array form.
 ```
 
 ## Contracts (review F1 — at least langid/translate prompts)
@@ -162,7 +163,10 @@ Fallback: regenerate (FR-006) → strip/block (FR-007)
 
 ```text
 Compare (pre-translate vs post-translate):
-  - Numbers: parseFloat equality (locale-invariant, review F11)
+  - Numbers: normalize then parseFloat equality (locale-invariant, review F11).
+    Normalize: strip thousands separators (commas/spaces/dots in groups of 3),
+    convert decimal commas to dots (de "1.000,50" → "1000.50"), then parseFloat.
+    Compare: Math.abs(a - b) < Number.EPSILON.
   - Code blocks: exact string match
   - URLs: exact string match
   - Currency symbols: presence check ($, €, ₽, etc.)
