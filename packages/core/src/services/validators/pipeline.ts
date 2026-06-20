@@ -37,6 +37,10 @@ export class ValidatorPipeline {
       conversationId: string;
       messageId?: string;
       rawUserMessage?: string;
+      resolvedTargetLanguage?: string;
+      systemPrompt?: string;
+      regenerateFn?: (reinforcedSystemPrompt: string) => Promise<string>;
+      degradeToAsIs?: boolean;
     }
   ): Promise<string> {
     let currentText = reply;

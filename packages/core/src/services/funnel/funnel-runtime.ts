@@ -24,7 +24,7 @@ import { contextualRetell } from '../llm/contextual-reteller.js';
 import type { LLMClient } from '../llm-client.js';
 import { db } from '../../db.js';
 import { conversations, messages } from '../../models/index.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 
 export interface FunnelProcessResult {
   scriptedReply?: string;
@@ -40,7 +40,7 @@ export class FunnelRuntime {
     private repository: FunnelRepository,
     private scorerFactory: (config: FunnelConfig) => FragmentScorer,
     private redis?: Redis,
-    private adaptiveIntroService?: AdaptiveIntroService,
+    _adaptiveIntroService?: AdaptiveIntroService,
     private intentClassifier?: IntentClassifier,
     private slotExtractor?: SlotExtractorService,
     private outputGuardConfig?: BannedWordsConfig,
@@ -95,6 +95,7 @@ export class FunnelRuntime {
           unresolvedObjections: [],
           messagesOnCurrentStage: 0,
           pendingStageOffer: null,
+          pendingConfirmation: null,
           version: 0,
           returnStack: []
         };
@@ -263,7 +264,7 @@ export class FunnelRuntime {
         Object.entries(state.capturedSlots).map(([k, v]) => [k, v.value])
       );
       // Also include global conversation slots (FR-012)
-      const globalSlots: Record<string, unknown> = (state as Record<string, unknown>).slots ?? {};
+      const globalSlots: Record<string, unknown> = ((state as any).slots as Record<string, unknown>) ?? ({} as Record<string, unknown>);
       const allSlots = { ...globalSlots, ...slotsMap };
 
       const allFragments = funnel.stages.flatMap((s: any) => s.fragments);
@@ -601,6 +602,7 @@ export class FunnelRuntime {
     const negationWords = ['не', 'нет', 'никогда', 'отказываюсь'];
     const negationPhrases = ['не хочу', 'не надо', 'не нужно', 'не буду', 'не думаю', 'не планирую', 'не собираюсь'];
     if (negationPhrases.some(p => normalized.includes(p))) return false;
+    if (words.some(w => negationWords.includes(w))) return false;
 
     // Word-level match (avoids false positives like "когда" containing "да")
     const affirmativeWords = new Set([
@@ -669,7 +671,7 @@ export class FunnelRuntime {
 
     // (5) Required slots not filled → BLOCK (T023)
     if (stageSlotNames.length > 0) {
-      const globalSlots: Record<string, unknown> = (state as Record<string, unknown>).slots ?? {};
+      const globalSlots: Record<string, unknown> = ((state as any).slots as Record<string, unknown>) ?? ({} as Record<string, unknown>);
       const capturedSlots = state.capturedSlots ?? {};
       const missingSlots = stageSlotNames.filter(slotName => {
         const fromGlobal = globalSlots[slotName];
@@ -803,12 +805,11 @@ export class FunnelRuntime {
       const rows = await db.select({ role: messages.role, content: messages.content })
         .from(messages)
         .innerJoin(conversations, eq(messages.conversationId, conversations.id))
-        .where(eq(conversations.id, conversationId))
-        .where(eq(conversations.tenantId, tenantId))
+        .where(and(eq(conversations.id, conversationId), eq(conversations.tenantId, tenantId)))
         .orderBy(desc(messages.createdAt))
         .limit(10);
 
-      return rows.reverse().map(r => r.content);
+      return rows.reverse().map((r: any) => r.content);
     } catch {
       return [];
     }

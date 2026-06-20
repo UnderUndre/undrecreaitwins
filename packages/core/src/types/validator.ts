@@ -44,6 +44,15 @@ export interface LanguageGuardConfig extends BaseValidatorConfig {
   fallbackMessage?: string;
   regenerateOnViolation: boolean;
   enabled: boolean;
+  version?: string;
+
+  // Phase 2 (024)
+  targetPolicy?: 'mirror' | 'fixed';
+  fixedLanguage?: string;
+  fallbackLanguage?: string;
+  remediation?: 'translate' | 'strip-block';
+  langidMinConfidence?: number;
+  allowPlatformModelRouting?: boolean;
 }
 
 export interface LanguageGuardConfigResponse {
@@ -72,6 +81,10 @@ export interface ValidatorContext<T extends BaseValidatorConfig = BaseValidatorC
   messageId?: string;
   rawUserMessage?: string;
   config: T;
+  resolvedTargetLanguage?: string;
+  systemPrompt?: string;
+  regenerateFn?: (reinforcedSystemPrompt: string) => Promise<string>;
+  degradeToAsIs?: boolean;
 }
 
 export interface ValidatorRunResult {

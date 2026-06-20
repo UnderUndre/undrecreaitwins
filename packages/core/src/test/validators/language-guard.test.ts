@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { LanguageGuardValidator } from '../../services/validators/language-guard.js';
 import { buildLanguageDirective } from '../../services/validators/language-guard.js';
 import type { LanguageGuardConfig } from '../../types/validator.js';
 import type { ValidatorContext } from '../../types/validator.js';
+import { LLMClient } from '../../services/llm-client.js';
 
 function makeConfig(overrides: Partial<LanguageGuardConfig> = {}): LanguageGuardConfig {
   return {
@@ -177,6 +178,111 @@ describe('LanguageGuardValidator', () => {
     it('buildLanguageDirective handles unknown language code gracefully', () => {
       const directive = buildLanguageDirective(['xx']);
       expect(directive).toContain('xx');
+    });
+  });
+
+  describe('Phase 2 LLM Remediation & Fidelity (024)', () => {
+    it('translates off-language response and preserves placeholders', async () => {
+      const completeSpy = vi.spyOn(LLMClient.prototype, 'complete')
+        .mockResolvedValueOnce({
+          content: 'Hello, this is __PRICE_1__ and __URL_0__',
+          model: 'test-translate',
+          finishReason: 'stop',
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+        });
+
+      const config = makeConfig({
+        allowedLanguages: ['en'],
+        remediation: 'translate',
+        allowPlatformModelRouting: true,
+      });
+
+      const result = await validator.validateAndMutate(
+        'Привет, это 1,000 USD и https://google.com',
+        makeContext(config)
+      );
+
+      expect(result.verdict.decision).toBe('rewrite');
+      expect(result.mutatedText).toBe('Hello, this is 1,000 USD and https://google.com');
+
+      completeSpy.mockRestore();
+    });
+
+    it('falls back to strip-block when allowPlatformModelRouting is false', async () => {
+      const config = makeConfig({
+        allowedLanguages: ['en'],
+        remediation: 'translate',
+        allowPlatformModelRouting: false,
+      });
+
+      const result = await validator.validateAndMutate(
+        'Привет',
+        makeContext(config)
+      );
+
+      expect(result.verdict.decision).toBe('block');
+    });
+
+    it('regenerates when translate fails fidelity checks', async () => {
+      const completeSpy = vi.spyOn(LLMClient.prototype, 'complete')
+        .mockResolvedValueOnce({
+          content: 'Hello, this is 2,000 USD',
+          model: 'test-translate',
+          finishReason: 'stop',
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+        });
+
+      const regenerateFn = vi.fn().mockResolvedValue('Hello, this is 1,000 USD');
+
+      const config = makeConfig({
+        allowedLanguages: ['en'],
+        remediation: 'translate',
+        allowPlatformModelRouting: true,
+        regenerateOnViolation: true,
+      });
+
+      const context = {
+        ...makeContext(config),
+        systemPrompt: 'System prompt',
+        regenerateFn,
+      };
+
+      const result = await validator.validateAndMutate(
+        'Привет, это 1,000 USD',
+        context
+      );
+
+      expect(result.verdict.decision).toBe('rewrite');
+      expect(result.mutatedText).toBe('Hello, this is 1,000 USD');
+      expect(regenerateFn).toHaveBeenCalled();
+
+      completeSpy.mockRestore();
+    });
+
+    it('degrades to as-is on translate failure when degradeToAsIs is true', async () => {
+      const completeSpy = vi.spyOn(LLMClient.prototype, 'complete')
+        .mockRejectedValueOnce(new Error('Translate service down'));
+
+      const config = makeConfig({
+        allowedLanguages: ['en'],
+        remediation: 'translate',
+        allowPlatformModelRouting: true,
+      });
+
+      const context = {
+        ...makeContext(config),
+        degradeToAsIs: true,
+      };
+
+      const result = await validator.validateAndMutate(
+        'Привет',
+        context
+      );
+
+      expect(result.verdict.decision).toBe('pass');
+      expect(result.mutatedText).toBe('Привет');
+
+      completeSpy.mockRestore();
     });
   });
 });

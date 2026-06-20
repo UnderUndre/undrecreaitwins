@@ -16,6 +16,7 @@ export interface LLMRequest {
   temperature?: number;
   maxTokens?: number;
   model?: string;
+  forcePlatformProvider?: boolean;
 }
 
 export interface LLMResponse {
@@ -35,8 +36,8 @@ export class LLMClient {
   private defaultModel: string;
 
   constructor() {
-    this.providerUrl = process.env.LLM_PROVIDER_URL || 'http://localhost:4000';
-    this.apiKey = process.env.LLM_API_KEY;
+    this.providerUrl = process.env.LANG_GUARD_LLM_PROVIDER_URL || process.env.LLM_PROVIDER_URL || 'http://localhost:4000';
+    this.apiKey = process.env.LANG_GUARD_LLM_API_KEY || process.env.LLM_API_KEY;
     this.defaultModel = process.env.LLM_DEFAULT_MODEL || 'gpt-4o';
   }
 
@@ -46,7 +47,7 @@ export class LLMClient {
     let model = params.model || this.defaultModel;
 
     // Resolve per-assistant/tenant config if context provided
-    if (params.tenantId && params.personaId) {
+    if (params.tenantId && params.personaId && !params.forcePlatformProvider) {
       const effective = await resolveEffectiveConfig(db, params.tenantId, params.personaId);
       if (effective.source !== 'platform' && effective.config) {
         baseUrl = effective.config.baseUrl;
@@ -91,13 +92,14 @@ export class LLMClient {
     signal?: AbortSignal;
     tenantId?: string;
     personaId?: string;
+    forcePlatformProvider?: boolean;
   }): AsyncGenerator<StreamChunk> {
     let baseUrl = this.providerUrl;
     let apiKey = this.apiKey;
     let model = params.model || this.defaultModel;
 
     // Resolve per-assistant/tenant config if context provided
-    if (params.tenantId && params.personaId) {
+    if (params.tenantId && params.personaId && !params.forcePlatformProvider) {
       const effective = await resolveEffectiveConfig(db, params.tenantId, params.personaId);
       if (effective.source !== 'platform' && effective.config) {
         baseUrl = effective.config.baseUrl;

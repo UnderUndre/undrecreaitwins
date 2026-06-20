@@ -4,8 +4,11 @@ import {
   ValidatorRunResult,
   LanguageGuardConfig
 } from '../../types/validator.js';
+import { LLMClient } from '../llm-client.js';
 
-type ScriptName = 'Common' | 'Latin' | 'Cyrillic' | 'Han' | 'Arabic' | 'Devanagari' | 'Hebrew' | 'Thai' | 'Hangul' | 'Katakana' | 'Hiragana' | 'Unknown';
+const llm = new LLMClient();
+
+type ScriptName = 'Common' | 'Latin' | 'Cyrillic' | 'Han' | 'Arabic' | 'Devanagari' | 'Hebrew' | 'Thai' | 'Hangul' | 'Katakana' | 'Hiragana' | 'Armenian' | 'Georgian' | 'Unknown';
 
 interface ScriptRange {
   name: Exclude<ScriptName, 'Common' | 'Unknown'>;
@@ -27,9 +30,11 @@ const SCRIPT_RANGES: ScriptRange[] = [
   { name: 'Hangul', start: 0x1100, end: 0x11FF },
   { name: 'Katakana', start: 0x30A0, end: 0x30FF },
   { name: 'Hiragana', start: 0x3040, end: 0x309F },
+  { name: 'Armenian', start: 0x0530, end: 0x058F },
+  { name: 'Georgian', start: 0x10A0, end: 0x10FF },
 ];
 
-const BCP47_TO_SCRIPTS: Record<string, string[]> = {
+export const BCP47_TO_SCRIPTS: Record<string, string[]> = {
   ru: ['Cyrillic'],
   en: ['Latin'],
   zh: ['Han'],
@@ -39,11 +44,24 @@ const BCP47_TO_SCRIPTS: Record<string, string[]> = {
   th: ['Thai'],
   ko: ['Hangul', 'Han', 'Latin'],
   ja: ['Hiragana', 'Katakana', 'Han', 'Latin'],
+  kk: ['Cyrillic'],
+  uk: ['Cyrillic'],
+  uz: ['Latin'],
+  ky: ['Cyrillic'],
+  hy: ['Armenian'],
+  ka: ['Georgian'],
+  az: ['Latin'],
+  be: ['Cyrillic'],
+  tg: ['Cyrillic'],
+  mo: ['Cyrillic'],
 };
 
-const BCP47_TO_NAME: Record<string, string> = {
+export const BCP47_TO_NAME: Record<string, string> = {
   ru: 'Russian', en: 'English', zh: 'Chinese', ar: 'Arabic',
   hi: 'Hindi', he: 'Hebrew', th: 'Thai', ko: 'Korean', ja: 'Japanese',
+  kk: 'Kazakh', uk: 'Ukrainian', uz: 'Uzbek', ky: 'Kyrgyz',
+  hy: 'Armenian', ka: 'Georgian', az: 'Azerbaijani', be: 'Belarusian',
+  tg: 'Tajik', mo: 'Moldavian',
 };
 
 const FENCED_CODE_RE = /```[\s\S]*?```/g;
@@ -139,9 +157,13 @@ function getLanguageNames(allowedLanguages: string[]): string {
 const SYSTEM_DEFAULT_FALLBACK = (allowedLanguages: string[]) =>
   `I can only respond in ${getLanguageNames(allowedLanguages)}.`;
 
-export function buildLanguageDirective(allowedLanguages: string[]): string {
-  const names = getLanguageNames(allowedLanguages);
-  return `IMPORTANT: You must respond ONLY in ${names}. Do not use any other language or script.`;
+export function buildLanguageDirective(target: string | string[]): string {
+  if (Array.isArray(target)) {
+    const names = getLanguageNames(target);
+    return `IMPORTANT: You must respond ONLY in ${names}. Do not use any other language or script.`;
+  }
+  const name = BCP47_TO_NAME[target] || target;
+  return `IMPORTANT: You must respond ONLY in ${name}. Do not use any other language or script.`;
 }
 
 export class LanguageGuardValidator implements ResponseValidator<LanguageGuardConfig> {
@@ -162,12 +184,51 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
       };
     }
 
-    const { masked, maskedCount } = maskCode(reply);
+    // 1. JSON Funnel envelope check (F14)
+    let isFunnel = false;
+    let funnelEnvelope: any = null;
+    let replyToProcess = reply;
+
+    if (reply.trim().startsWith('{') && reply.trim().endsWith('}')) {
+      try {
+        funnelEnvelope = JSON.parse(reply);
+        if ('answer' in funnelEnvelope) {
+          isFunnel = true;
+          replyToProcess = String(funnelEnvelope.answer);
+        }
+      } catch (err) {
+        return {
+          verdict: {
+            decision: 'pass',
+            confidence: 1.0,
+            matchedPatterns: [
+              'remediation:skipped',
+              'reason:funnel_malformed'
+            ]
+          },
+          mutatedText: reply,
+          latencyMs: Date.now() - startTime,
+        };
+      }
+    }
+
+    // 2. Resolve target language
+    let targetResolution: TargetResolution;
+    if (context.resolvedTargetLanguage) {
+      targetResolution = { target: context.resolvedTargetLanguage, source: 'fixed' };
+    } else {
+      targetResolution = await resolveTargetLanguage(config, context.rawUserMessage, llm);
+    }
+    const targetLang = targetResolution.target;
+    const targetScripts = new Set(BCP47_TO_SCRIPTS[targetLang] || ['Latin']);
+
+    // 3. Outbound detection (script-based)
+    const { masked } = maskCode(replyToProcess);
     const scriptCounts = ScriptClassifier.analyze(masked);
 
-    const totalChars = [...reply].length;
+    const totalChars = [...replyToProcess].length;
     const commonChars = scriptCounts.get('Common') || 0;
-    const scriptChars = totalChars - commonChars - maskedCount;
+    const scriptChars = totalChars - commonChars;
 
     if (scriptChars === 0) {
       return {
@@ -176,8 +237,6 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
         latencyMs: Date.now() - startTime,
       };
     }
-
-    const allowedScripts = getAllowedScripts(config.allowedLanguages);
 
     let nonCompliantChars = 0;
     const detectedScripts: string[] = [];
@@ -190,70 +249,548 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
         }
         continue;
       }
-      if (!allowedScripts.has(script)) {
+      if (!targetScripts.has(script)) {
         nonCompliantChars += count;
         detectedScripts.push(script);
       }
     }
 
-    const nonCompliantFraction = nonCompliantChars / scriptChars;
+    const nonCompliantFraction = scriptChars > 0 ? nonCompliantChars / scriptChars : 0;
     const stripThreshold = config.stripThreshold ?? 0.05;
-    const blockThreshold = config.blockThreshold ?? 0.30;
 
-    if (nonCompliantFraction < stripThreshold) {
+    let isViolation = nonCompliantFraction >= stripThreshold;
+    let sourceLang = '';
+
+    // Same-script outbound check (FR-002b)
+    if (!isViolation && (targetLang === 'en' || targetLang === 'ru')) {
+      if (isSameScriptViolationSuspected(replyToProcess, targetLang)) {
+        try {
+          const langidModel = process.env.LANG_GUARD_LANGID_MODEL || 'gpt-4o-mini';
+          const timeoutMs = Number(process.env.LANG_GUARD_LANGID_TIMEOUT_MS) || 3000;
+
+          const systemPrompt = `You are a language identification service. Identify the language of the provided text.
+You must respond with a JSON object containing:
+- "lang": BCP-47 language code of the text
+- "confidence": confidence score between 0.0 and 1.0
+
+JSON format:
+{
+  "lang": "code",
+  "confidence": 0.95
+}`;
+          const llmPromise = llm.complete({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: replyToProcess }
+            ],
+            model: langidModel,
+            temperature: 0,
+            forcePlatformProvider: true,
+          });
+
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('outbound langid timeout')), timeoutMs)
+          );
+
+          const res = await Promise.race([llmPromise, timeoutPromise]);
+          const content = res.content.trim();
+          const jsonStr = content.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+          const parsed = JSON.parse(jsonStr);
+
+          const detectedOutboundLang = String(parsed.lang).trim().toLowerCase();
+          if (detectedOutboundLang !== targetLang && (config.allowedLanguages || []).includes(detectedOutboundLang)) {
+            isViolation = true;
+            sourceLang = detectedOutboundLang;
+          }
+        } catch (err) {
+          console.warn(`[language-guard] outbound langid failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
+    // Happy path
+    if (!isViolation) {
       return {
         verdict: {
           decision: 'pass',
           confidence: 1.0 - nonCompliantFraction,
-          matchedPatterns: detectedScripts.length > 0 ? detectedScripts : undefined,
+          matchedPatterns: [
+            ...detectedScripts,
+            'remediation:pass',
+            `targetLang:${targetLang}`
+          ]
         },
         mutatedText: reply,
         latencyMs: Date.now() - startTime,
       };
     }
 
-    if (nonCompliantFraction >= blockThreshold) {
-      const fallback = config.fallbackMessage?.trim() || SYSTEM_DEFAULT_FALLBACK(config.allowedLanguages);
-      return {
-        verdict: {
-          decision: 'block',
-          confidence: nonCompliantFraction,
-          reason: `non-compliant fraction ${nonCompliantFraction.toFixed(3)} ≥ blockThreshold ${blockThreshold}`,
-          matchedPatterns: detectedScripts,
-        },
-        mutatedText: fallback,
-        latencyMs: Date.now() - startTime,
-      };
-    }
+    const runStripBlockFallback = (reason: string): ValidatorRunResult => {
+      const blockThreshold = config.blockThreshold ?? 0.30;
+      if (nonCompliantFraction >= blockThreshold) {
+        const fallback = config.fallbackMessage?.trim() || SYSTEM_DEFAULT_FALLBACK(config.allowedLanguages);
+        const finalReply = isFunnel
+          ? JSON.stringify({ ...funnelEnvelope, answer: fallback })
+          : fallback;
+        return {
+          verdict: {
+            decision: 'block',
+            confidence: nonCompliantFraction,
+            reason: `non-compliant fraction ${nonCompliantFraction.toFixed(3)} >= blockThreshold ${blockThreshold}`,
+            matchedPatterns: [
+              ...detectedScripts,
+              'remediation:blocked',
+              `sourceLang:${sourceLang}`,
+              `targetLang:${targetLang}`,
+              `reason:${reason}`
+            ],
+          },
+          mutatedText: finalReply,
+          latencyMs: Date.now() - startTime,
+        };
+      } else {
+        const allowedScripts = getAllowedScripts(config.allowedLanguages);
+        const strippedChars: string[] = [];
+        for (const char of replyToProcess) {
+          const code = char.codePointAt(0)!;
+          const script = ScriptClassifier.classify(code);
 
-    const strippedChars: string[] = [];
-    for (const char of reply) {
-      const code = char.codePointAt(0)!;
-      const script = ScriptClassifier.classify(code);
+          if (script === 'Common') {
+            strippedChars.push(char);
+            continue;
+          }
+          if (script === 'Unknown') {
+            continue;
+          }
+          if (allowedScripts.has(script)) {
+            strippedChars.push(char);
+          }
+        }
 
-      if (script === 'Common') {
-        strippedChars.push(char);
-        continue;
+        const strippedText = strippedChars.join('');
+        const finalReply = isFunnel
+          ? JSON.stringify({ ...funnelEnvelope, answer: strippedText })
+          : strippedText;
+
+        return {
+          verdict: {
+            decision: 'strip',
+            confidence: nonCompliantFraction,
+            reason: `non-compliant fraction ${nonCompliantFraction.toFixed(3)} >= stripThreshold ${stripThreshold}`,
+            matchedPatterns: [
+              ...detectedScripts,
+              'remediation:stripped',
+              `sourceLang:${sourceLang}`,
+              `targetLang:${targetLang}`,
+              `reason:${reason}`
+            ],
+          },
+          mutatedText: finalReply,
+          latencyMs: Date.now() - startTime,
+        };
       }
-      if (script === 'Unknown') {
-        continue;
-      }
-      if (allowedScripts.has(script)) {
-        strippedChars.push(char);
-      }
-    }
-
-    const strippedText = strippedChars.join('');
-
-    return {
-      verdict: {
-        decision: 'strip',
-        confidence: nonCompliantFraction,
-        reason: `non-compliant fraction ${nonCompliantFraction.toFixed(3)} ≥ stripThreshold ${stripThreshold}`,
-        matchedPatterns: detectedScripts,
-      },
-      mutatedText: strippedText,
-      latencyMs: Date.now() - startTime,
     };
+
+    const remediation = config.remediation || 'strip-block';
+
+    if (remediation === 'translate' && !config.allowPlatformModelRouting) {
+      console.warn('[language-guard] allowPlatformModelRouting is false. Falling back to strip-block.');
+      return runStripBlockFallback('platform_routing_disallowed');
+    }
+
+    const timeElapsed = Date.now() - startTime;
+    const projectedTime = timeElapsed + 3000;
+    const executionLimit = Math.min(
+      Number(process.env.AGENT_MAX_EXECUTION_MS) || 20000,
+      Number(process.env.TWIN_CHANNEL_ACK_TIMEOUT_MS) || 15000
+    );
+
+    if (remediation === 'translate' && projectedTime > executionLimit) {
+      console.warn('[language-guard] Latency budget exceeded. Falling back to strip-block.');
+      return runStripBlockFallback('latency_budget_exceeded');
+    }
+
+    if (remediation === 'strip-block') {
+      return runStripBlockFallback('config_strip_block');
+    }
+
+    try {
+      const translateModel = process.env.LANG_GUARD_TRANSLATE_MODEL || 'gpt-4o-mini';
+      const translateTimeoutMs = Number(process.env.LANG_GUARD_TRANSLATE_TIMEOUT_MS) || 3000;
+
+      const { maskedText, tokens } = maskTokens(replyToProcess);
+
+      const systemPrompt = `You are a translation service. Translate the provided text into ${BCP47_TO_NAME[targetLang] || targetLang}.
+Rules:
+- Preserve all formatting, markdown structure, and code blocks.
+- Preserve all tokens of the form __TOKEN_NAME_N__ exactly as-is. Do not translate, change, or remove them.
+- Preserve all numbers and formatting exactly as-is, including decimal separators.
+- Do not add or remove any content. Translate the text verbatim.`;
+
+      const llmPromise = llm.complete({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `[Text to translate]\n${maskedText}` }
+        ],
+        model: translateModel,
+        temperature: 0,
+        forcePlatformProvider: true,
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('translate timeout')), translateTimeoutMs)
+      );
+
+      const res = await Promise.race([llmPromise, timeoutPromise]);
+      const translatedMasked = res.content.trim();
+
+      let fidelityOk = checkFidelity(translatedMasked, tokens);
+      let translatedText = restoreTokens(translatedMasked, tokens);
+
+      if (fidelityOk) {
+        const originalNumbers = extractNumbers(replyToProcess);
+        const translatedNumbers = extractNumbers(translatedText);
+        const numbersMatch = compareArrays(originalNumbers, translatedNumbers, (x, y) => Math.abs(x - y) < 0.000001);
+
+        const originalCurrencies = extractCurrencySymbols(replyToProcess);
+        const translatedCurrencies = extractCurrencySymbols(translatedText);
+        const currenciesMatch = compareArrays(originalCurrencies, translatedCurrencies);
+
+        if (!numbersMatch || !currenciesMatch) {
+          fidelityOk = false;
+        }
+      }
+
+      if (fidelityOk) {
+        const finalReply = isFunnel
+          ? JSON.stringify({ ...funnelEnvelope, answer: translatedText })
+          : translatedText;
+
+        return {
+          verdict: {
+            decision: 'rewrite',
+            confidence: 1.0,
+            matchedPatterns: [
+              ...detectedScripts,
+              'remediation:translated',
+              `sourceLang:${sourceLang}`,
+              `targetLang:${targetLang}`,
+              'fidelityOk:true'
+            ]
+          },
+          mutatedText: finalReply,
+          latencyMs: Date.now() - startTime,
+        };
+      }
+
+      if (config.regenerateOnViolation !== false && context.regenerateFn && context.systemPrompt) {
+        const reinforcedPrompt = `${context.systemPrompt}\nIMPORTANT: You must respond ONLY in ${BCP47_TO_NAME[targetLang] || targetLang}. The previous response was in the wrong language. Correct this and respond ONLY in ${BCP47_TO_NAME[targetLang] || targetLang}.`;
+        const regeneratedText = await context.regenerateFn(reinforcedPrompt);
+
+        let regenReplyToProcess = regeneratedText;
+        let regenFunnelEnvelope: any = null;
+        if (regeneratedText.trim().startsWith('{') && regeneratedText.trim().endsWith('}')) {
+          try {
+            regenFunnelEnvelope = JSON.parse(regeneratedText);
+            if ('answer' in regenFunnelEnvelope) {
+              regenReplyToProcess = String(regenFunnelEnvelope.answer);
+            }
+          } catch {}
+        }
+
+        const { masked: rMasked } = maskCode(regenReplyToProcess);
+        const rScriptCounts = ScriptClassifier.analyze(rMasked);
+        const rTotalChars = [...regenReplyToProcess].length;
+        const rCommonChars = rScriptCounts.get('Common') || 0;
+        const rScriptChars = rTotalChars - rCommonChars;
+
+        let rNonCompliantChars = 0;
+        for (const [script, count] of rScriptCounts) {
+          if (script !== 'Common' && script !== 'Unknown' && !targetScripts.has(script)) {
+            rNonCompliantChars += count;
+          }
+        }
+        const rNonCompliantFraction = rScriptChars > 0 ? rNonCompliantChars / rScriptChars : 0;
+
+        if (rNonCompliantFraction < stripThreshold) {
+          return {
+            verdict: {
+              decision: 'rewrite',
+              confidence: 1.0,
+              matchedPatterns: [
+                ...detectedScripts,
+                'remediation:regenerated',
+                `sourceLang:${sourceLang}`,
+                `targetLang:${targetLang}`,
+                'fidelityOk:false'
+              ]
+            },
+            mutatedText: regeneratedText,
+            latencyMs: Date.now() - startTime,
+          };
+        }
+      }
+
+      if (context.degradeToAsIs) {
+        return {
+          verdict: {
+            decision: 'pass',
+            confidence: 0,
+            matchedPatterns: [
+              ...detectedScripts,
+              'remediation:degraded',
+              `sourceLang:${sourceLang}`,
+              `targetLang:${targetLang}`,
+              'fidelityOk:false',
+              'reason:translate_fidelity_fail'
+            ]
+          },
+          mutatedText: reply,
+          latencyMs: Date.now() - startTime,
+        };
+      }
+      return runStripBlockFallback('translate_fidelity_fail');
+
+    } catch (err) {
+      console.warn(`[language-guard] translate failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (context.degradeToAsIs) {
+        return {
+          verdict: {
+            decision: 'pass',
+            confidence: 0,
+            matchedPatterns: [
+              ...detectedScripts,
+              'remediation:degraded',
+              `sourceLang:${sourceLang}`,
+              `targetLang:${targetLang}`,
+              'fidelityOk:false',
+              'reason:translate_failed'
+            ]
+          },
+          mutatedText: reply,
+          latencyMs: Date.now() - startTime,
+        };
+      }
+      return runStripBlockFallback('translate_failed');
+    }
   }
+}
+
+export interface TargetResolution {
+  target: string;
+  source: 'mirror' | 'fixed' | 'fallback' | 'degraded';
+  langidConfidence?: number;
+}
+
+export async function resolveTargetLanguage(
+  config: LanguageGuardConfig,
+  userQuery: string | undefined,
+  llmClient?: any
+): Promise<TargetResolution> {
+  const allowed = config.allowedLanguages || [];
+  if (allowed.length === 0) {
+    return { target: 'en', source: 'fallback' };
+  }
+
+  if (allowed.length === 1) {
+    return { target: allowed[0] || 'en', source: 'fixed' };
+  }
+
+  const policy = config.targetPolicy || 'mirror';
+
+  if (policy === 'fixed') {
+    const fixed = config.fixedLanguage;
+    if (fixed && allowed.includes(fixed)) {
+      return { target: fixed, source: 'fixed' };
+    }
+    const fallback = config.fallbackLanguage || allowed[0] || 'en';
+    return { target: fallback, source: 'fallback' };
+  }
+
+  if (!userQuery || !llmClient) {
+    const fallback = config.fallbackLanguage || allowed[0] || 'en';
+    return { target: fallback, source: 'fallback' };
+  }
+
+  try {
+    const langidModel = process.env.LANG_GUARD_LANGID_MODEL || 'gpt-4o-mini';
+    const timeoutMs = Number(process.env.LANG_GUARD_LANGID_TIMEOUT_MS) || 3000;
+
+    const systemPrompt = `You are a language identification service. Identify the language of the user input.
+You must respond with a JSON object containing:
+- "lang": BCP-47 language code (must be one of: ${allowed.join(', ')})
+- "confidence": confidence score between 0.0 and 1.0
+
+Candidate languages: ${allowed.join(', ')}
+
+JSON format:
+{
+  "lang": "code",
+  "confidence": 0.95
+}`;
+
+    const llmPromise = llmClient.complete({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userQuery }
+      ],
+      model: langidModel,
+      temperature: 0,
+      forcePlatformProvider: true,
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('langid timeout')), timeoutMs)
+    );
+
+    const res = await Promise.race([llmPromise, timeoutPromise]);
+    
+    const content = res.content.trim();
+    const jsonStr = content.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+    const parsed = JSON.parse(jsonStr);
+
+    const detectedLang = String(parsed.lang).trim().toLowerCase();
+    const confidence = Number(parsed.confidence);
+
+    if (allowed.includes(detectedLang)) {
+      const minConfidence = config.langidMinConfidence ?? 0.7;
+      if (confidence >= minConfidence) {
+        return {
+          target: detectedLang,
+          source: 'mirror',
+          langidConfidence: confidence,
+        };
+      }
+    }
+
+    const fallback = config.fallbackLanguage || allowed[0] || 'en';
+    return { target: fallback, source: 'fallback' };
+  } catch (err) {
+    console.warn(`[language-guard] langid failed or timed out: ${err instanceof Error ? err.message : String(err)}`);
+    const fallback = config.fallbackLanguage || allowed[0] || 'en';
+    return { target: fallback, source: 'degraded' };
+  }
+}
+
+const CYRILLIC_UNIQUE_CHARS: Record<string, RegExp> = {
+  uk: /[єіїґЄІЇҐ]/u,
+  be: /[ўіЎІ]/u,
+  kk: /[әғқңөұүһіӘҒҚҢӨҰҮҺІ]/u,
+  tg: /[ғӣҳқҷӯҒӢҲҚҶӮ]/u,
+  ky: /[өүңӨҮҢ]/u,
+  mo: /[ӂӄӆӈӌҟыэюя]/u,
+};
+
+const LATIN_STOP_WORDS: Record<string, string[]> = {
+  de: ['der', 'die', 'das', 'ist', 'und', 'nicht', 'ich', 'wir', 'sie', 'es'],
+  fr: ['le', 'la', 'les', 'est', 'et', 'dans', 'pour', 'avec', 'mais', 'nous'],
+  es: ['el', 'la', 'los', 'las', 'es', 'y', 'en', 'para', 'con', 'pero'],
+  uz: ['bir', 'bu', 'va', 'ning', 'bilan', 'uchun', 'ham', 'men', 'sen', 'u'],
+  az: ['bir', 'bu', 'və', 'nin', 'ilə', 'üçün', 'həm', 'mən', 'sən', 'o'],
+};
+
+function isSameScriptViolationSuspected(text: string, targetLang: string): boolean {
+  const normalized = text.toLowerCase();
+
+  if (targetLang === 'ru') {
+    for (const [lang, regex] of Object.entries(CYRILLIC_UNIQUE_CHARS)) {
+      if (lang !== 'ru' && regex.test(text)) return true;
+    }
+  }
+
+  if (targetLang === 'en') {
+    const words = normalized.split(/[\s,.!?;:]+/).filter(Boolean);
+    for (const [lang, stopWords] of Object.entries(LATIN_STOP_WORDS)) {
+      if (lang !== 'en' && stopWords.some(sw => words.includes(sw))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+const DATE_RE = /\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b/g;
+const PRICE_RE = /(?:\b\d+[\d\s.,]*?\d+|\b\d+)\s*(?:USD|EUR|RUB|руб|рублей|[\$€₽])/gi;
+const NUMBER_RE = /\b\d+(?:[.,]\d+)?\b/g;
+
+function maskTokens(text: string): { maskedText: string; tokens: Map<string, string> } {
+  const tokens = new Map<string, string>();
+  let counter = 0;
+  let currentText = text;
+
+  const replaceWithToken = (re: RegExp, prefix: string) => {
+    currentText = currentText.replace(re, (match) => {
+      const tokenId = `__${prefix}_${counter++}__`;
+      tokens.set(tokenId, match);
+      return tokenId;
+    });
+  };
+
+  replaceWithToken(FENCED_CODE_RE, 'CODE');
+  replaceWithToken(INLINE_CODE_RE, 'INLINE');
+  replaceWithToken(URL_RE, 'URL');
+  replaceWithToken(EMAIL_RE, 'EMAIL');
+  replaceWithToken(PRICE_RE, 'PRICE');
+  replaceWithToken(DATE_RE, 'DATE');
+  replaceWithToken(NUMBER_RE, 'NUM');
+
+  return { maskedText: currentText, tokens };
+}
+
+function restoreTokens(maskedText: string, tokens: Map<string, string>): string {
+  let restored = maskedText;
+  for (const [tokenId, originalValue] of tokens.entries()) {
+    restored = restored.replace(tokenId, originalValue);
+  }
+  return restored;
+}
+
+function checkFidelity(translatedMasked: string, tokens: Map<string, string>): boolean {
+  for (const tokenId of tokens.keys()) {
+    if (!translatedMasked.includes(tokenId)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function extractNumbers(text: string): number[] {
+  const matches = text.match(/\b\d+(?:[.,]\d+)?\b/g) || [];
+  return matches.map(m => {
+    let clean = m.replace(/[\s']/g, '');
+    if (clean.includes(',') && clean.includes('.')) {
+      if (clean.indexOf(',') < clean.indexOf('.')) {
+        clean = clean.replace(/,/g, '');
+      } else {
+        clean = clean.replace(/\./g, '').replace(/,/g, '.');
+      }
+    } else if (clean.includes(',')) {
+      const parts = clean.split(',');
+      if (parts.length === 2 && parts[1]?.length !== 3) {
+        clean = clean.replace(/,/g, '.');
+      } else {
+        clean = clean.replace(/,/g, '');
+      }
+    }
+    const val = parseFloat(clean);
+    return isNaN(val) ? 0 : val;
+  });
+}
+
+function compareArrays<T>(a: T[], b: T[], eqFn: (x: T, y: T) => boolean = (x, y) => x === y): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((val, i) => eqFn(val, b[i] as T));
+}
+
+function extractCurrencySymbols(text: string): string[] {
+  const symbols = ['$', '€', '₽', 'руб', 'rub', 'usd', 'eur'];
+  const extracted: string[] = [];
+  const normalized = text.toLowerCase();
+  for (const s of symbols) {
+    if (normalized.includes(s)) {
+      extracted.push(s);
+    }
+  }
+  return extracted;
 }
