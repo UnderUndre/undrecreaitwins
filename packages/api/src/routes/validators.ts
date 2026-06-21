@@ -4,10 +4,9 @@ import { withTenantContext } from '@undrecreaitwins/core/db.js';
 import { validatorConfigs, validatorRuns, personas } from '@undrecreaitwins/core/models/index.js';
 import { eq, and, sql } from 'drizzle-orm';
 import { NotFoundError, AppError } from '@undrecreaitwins/shared';
+import { BCP47_TO_SCRIPTS } from '@undrecreaitwins/core/services/validators/language-guard.js';
 
 type ValidatorMode = 'active' | 'dry-run';
-
-const BCP47_RE = /^[a-z]{2,3}(-[A-Za-z]{4,})?(-[A-Z]{2}|-[0-9]{3})?$/;
 
 const languageGuardConfigSchema = z.object({
   enabled: z.boolean().default(true),
@@ -17,6 +16,12 @@ const languageGuardConfigSchema = z.object({
   blockThreshold: z.number().min(0).max(1).default(0.30),
   fallbackMessage: z.string().optional(),
   regenerateOnViolation: z.boolean().default(false),
+  targetPolicy: z.enum(['mirror', 'fixed']).default('mirror'),
+  fixedLanguage: z.string().optional(),
+  fallbackLanguage: z.string().optional(),
+  remediation: z.enum(['translate', 'strip-block']).default('strip-block'),
+  langidMinConfidence: z.number().min(0).max(1).default(0.7),
+  allowPlatformModelRouting: z.boolean().default(false),
 });
 
 const putBodySchema = z.object({
@@ -99,6 +104,12 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
             blockThreshold: (cfg.blockThreshold as number) ?? 0.30,
             fallbackMessage: cfg.fallbackMessage as string | undefined,
             regenerateOnViolation: (cfg.regenerateOnViolation as boolean) ?? false,
+            targetPolicy: (cfg.targetPolicy as 'mirror' | 'fixed') ?? 'mirror',
+            fixedLanguage: cfg.fixedLanguage as string | undefined,
+            fallbackLanguage: cfg.fallbackLanguage as string | undefined,
+            remediation: (cfg.remediation as 'translate' | 'strip-block') ?? 'strip-block',
+            langidMinConfidence: (cfg.langidMinConfidence as number) ?? 0.7,
+            allowPlatformModelRouting: (cfg.allowPlatformModelRouting as boolean) ?? false,
           },
           configVersion: row.version,
         };
@@ -113,6 +124,10 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
           stripThreshold: 0.05,
           blockThreshold: 0.30,
           regenerateOnViolation: false,
+          targetPolicy: 'mirror' as const,
+          remediation: 'strip-block' as const,
+          langidMinConfidence: 0.7,
+          allowPlatformModelRouting: false,
         },
         configVersion: 0,
       };
@@ -158,11 +173,32 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
       validationErrors.allowedLanguages = { code: 'EMPTY_ACTIVE_LANGUAGES', message: 'allowedLanguages must not be empty when mode is active' };
     }
 
+    // Default fallbackLanguage = allowedLanguages[0] if not specified
+    if (!config.fallbackLanguage && config.allowedLanguages.length > 0) {
+      config.fallbackLanguage = config.allowedLanguages[0];
+    }
+
+    if (config.fallbackLanguage && !config.allowedLanguages.includes(config.fallbackLanguage)) {
+      validationErrors.fallbackLanguage = { code: 'INVALID_FALLBACK_LANGUAGE', message: 'fallbackLanguage must be one of the allowedLanguages' };
+    }
+
+    if (config.targetPolicy === 'fixed' && !config.fixedLanguage) {
+      validationErrors.fixedLanguage = { code: 'MISSING_FIXED_LANGUAGE', message: 'fixedLanguage is required when targetPolicy is fixed' };
+    }
+
     for (const lang of config.allowedLanguages) {
-      if (!BCP47_RE.test(lang)) {
+      if (!(lang in BCP47_TO_SCRIPTS)) {
         validationErrors.allowedLanguages = { code: 'INVALID_BCP47', message: `Invalid BCP-47 language code: ${lang}` };
         break;
       }
+    }
+
+    if (config.fixedLanguage && !(config.fixedLanguage in BCP47_TO_SCRIPTS)) {
+      validationErrors.fixedLanguage = { code: 'INVALID_BCP47', message: `Invalid BCP-47 language code: ${config.fixedLanguage}` };
+    }
+
+    if (config.fallbackLanguage && !(config.fallbackLanguage in BCP47_TO_SCRIPTS)) {
+      validationErrors.fallbackLanguage = { code: 'INVALID_BCP47', message: `Invalid BCP-47 language code: ${config.fallbackLanguage}` };
     }
 
     if (Object.keys(validationErrors).length > 0) {
@@ -201,6 +237,12 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
         blockThreshold: config.blockThreshold,
         fallbackMessage: config.fallbackMessage,
         regenerateOnViolation: config.regenerateOnViolation,
+        targetPolicy: config.targetPolicy,
+        fixedLanguage: config.fixedLanguage,
+        fallbackLanguage: config.fallbackLanguage,
+        remediation: config.remediation,
+        langidMinConfidence: config.langidMinConfidence,
+        allowPlatformModelRouting: config.allowPlatformModelRouting,
       };
 
       if (!existing) {
@@ -245,6 +287,12 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
             blockThreshold: (cfg.blockThreshold as number) ?? 0.30,
             fallbackMessage: cfg.fallbackMessage as string | undefined,
             regenerateOnViolation: (cfg.regenerateOnViolation as boolean) ?? false,
+            targetPolicy: (cfg.targetPolicy as 'mirror' | 'fixed') ?? 'mirror',
+            fixedLanguage: cfg.fixedLanguage as string | undefined,
+            fallbackLanguage: cfg.fallbackLanguage as string | undefined,
+            remediation: (cfg.remediation as 'translate' | 'strip-block') ?? 'strip-block',
+            langidMinConfidence: (cfg.langidMinConfidence as number) ?? 0.7,
+            allowPlatformModelRouting: (cfg.allowPlatformModelRouting as boolean) ?? false,
           },
           currentVersion: existing.version,
         };
@@ -263,6 +311,12 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
             blockThreshold: (cfg.blockThreshold as number) ?? 0.30,
             fallbackMessage: cfg.fallbackMessage as string | undefined,
             regenerateOnViolation: (cfg.regenerateOnViolation as boolean) ?? false,
+            targetPolicy: (cfg.targetPolicy as 'mirror' | 'fixed') ?? 'mirror',
+            fixedLanguage: cfg.fixedLanguage as string | undefined,
+            fallbackLanguage: cfg.fallbackLanguage as string | undefined,
+            remediation: (cfg.remediation as 'translate' | 'strip-block') ?? 'strip-block',
+            langidMinConfidence: (cfg.langidMinConfidence as number) ?? 0.7,
+            allowPlatformModelRouting: (cfg.allowPlatformModelRouting as boolean) ?? false,
           },
           currentVersion: existing.version,
           error: {
@@ -384,15 +438,45 @@ export const validatorRoutes: FastifyPluginAsync = async (fastify) => {
       const lastItem = items[items.length - 1];
 
       return {
-        items: items.map((r) => ({
-          id: r.id,
-          verdict: r.verdict,
-          metadata: {
-            nonCompliantFraction: r.confidence ?? 0,
-            detectedScripts: (r.matchedPatterns as string[]) ?? [],
-          },
-          createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
-        })),
+        items: items.map((r) => {
+          const matched = (r.matchedPatterns as string[]) ?? [];
+          const detectedScripts = matched.filter(s => !s.includes(':'));
+          
+          let remediation = 'pass';
+          let sourceLang: string | undefined;
+          let targetLang: string | undefined;
+          let fidelityOk: boolean | undefined;
+          let reason: string | undefined;
+
+          for (const s of matched) {
+            if (s.startsWith('remediation:')) {
+              remediation = s.slice('remediation:'.length);
+            } else if (s.startsWith('sourceLang:')) {
+              sourceLang = s.slice('sourceLang:'.length) || undefined;
+            } else if (s.startsWith('targetLang:')) {
+              targetLang = s.slice('targetLang:'.length) || undefined;
+            } else if (s.startsWith('fidelityOk:')) {
+              fidelityOk = s.slice('fidelityOk:'.length) === 'true';
+            } else if (s.startsWith('reason:')) {
+              reason = s.slice('reason:'.length) || undefined;
+            }
+          }
+
+          return {
+            id: r.id,
+            verdict: r.verdict,
+            metadata: {
+              nonCompliantFraction: r.confidence ?? 0,
+              detectedScripts,
+              remediation,
+              sourceLang,
+              targetLang,
+              fidelityOk,
+              reason,
+            },
+            createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+          };
+        }),
         nextCursor: hasMore && lastItem
           ? encodeCursor(
               lastItem.createdAt instanceof Date ? lastItem.createdAt.toISOString() : String(lastItem.createdAt),

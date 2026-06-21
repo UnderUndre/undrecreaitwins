@@ -32,7 +32,7 @@ describe('Directive injection enabled gate (T012)', () => {
   });
 
   it('buildLanguageDirective produces expected output with IMPORTANT marker', () => {
-    const directive = buildLanguageDirective(['ru', 'en']);
+    const directive = buildLanguageDirective(['ru', 'en'], 'en');
     expect(directive).toContain('Russian');
     expect(directive).toContain('English');
     expect(directive).toContain('IMPORTANT');
@@ -43,7 +43,7 @@ describe('Directive injection enabled gate (T012)', () => {
     const cfg = { enabled: false, allowedLanguages: ['ru'] };
     const inject = shouldInjectDirective(cfg);
     if (inject) {
-      const directive = buildLanguageDirective(cfg.allowedLanguages as string[]);
+      const directive = buildLanguageDirective(cfg.allowedLanguages as string[], 'en');
       expect(directive).toContain('IMPORTANT');
     } else {
       expect(inject).toBe(false);
@@ -54,7 +54,7 @@ describe('Directive injection enabled gate (T012)', () => {
     const cfg = { enabled: true, allowedLanguages: [] };
     const inject = shouldInjectDirective(cfg);
     if (inject) {
-      const directive = buildLanguageDirective(cfg.allowedLanguages as string[]);
+      const directive = buildLanguageDirective(cfg.allowedLanguages as string[], 'en');
       expect(directive).toContain('IMPORTANT');
     } else {
       expect(inject).toBe(false);
@@ -66,7 +66,7 @@ describe('Directive injection enabled gate (T012)', () => {
     const inject = shouldInjectDirective(cfg);
     expect(inject).toBe(true);
     if (inject) {
-      const directive = buildLanguageDirective(cfg.allowedLanguages as string[]);
+      const directive = buildLanguageDirective(cfg.allowedLanguages as string[], 'en');
       expect(directive).toContain('IMPORTANT');
       expect(directive).toContain('respond ONLY in');
     }
@@ -77,7 +77,7 @@ describe('Directive injection enabled gate (T012)', () => {
     const inject = shouldInjectDirective(cfg);
     expect(inject).toBe(true);
     if (inject) {
-      const directive = buildLanguageDirective(cfg.allowedLanguages as string[]);
+      const directive = buildLanguageDirective(cfg.allowedLanguages as string[], 'en');
       expect(directive).toContain('IMPORTANT');
       expect(directive).toContain('respond ONLY in');
     }

@@ -10,14 +10,14 @@ Implement LLM-based rewrite/translation remediation, language mirroring, and buf
 
 | Task ID | Agent | Skills | Input Context | Blocked By |
 |---|---|---|---|---|
-| T0 | `backend-specialist` | api-patterns, typescript-expert | `LLMClient` source | — |
-| T1 | `backend-specialist` | typescript-expert, database-design | `spec.md` FR-011, `plan.md` data-model | — |
-| T2 | `backend-specialist` | typescript-expert | `spec.md` FR-010, `plan.md` supported-set | — |
-| T3 | `backend-specialist` | typescript-expert | `spec.md` FR-001/002/002b/003 | T0, T1 |
-| T4 | `backend-specialist` | typescript-expert | `spec.md` FR-005/006/007, `plan.md` contracts | T0, T1 |
-| T5 | `backend-specialist` | typescript-expert, systematic-debugging | `spec.md` FR-008/013, `chat-service.ts` | T3, T4 |
-| T6 | `backend-specialist` | typescript-expert | `spec.md` FR-012, `validator_runs` schema | T3, T4 |
-| T7 | `test-engineer` | tdd-workflow, testing-patterns | US1-US5, all FRs | T1-T6 |
+| T0 | `backend-specialist` | api-patterns, typescript-expert | `LLMClient` source | — | [X] |
+| T1 | `backend-specialist` | typescript-expert, database-design | `spec.md` FR-011, `plan.md` data-model | — | [X] |
+| T2 | `backend-specialist` | typescript-expert | `spec.md` FR-010, `plan.md` supported-set | — | [X] |
+| T3 | `backend-specialist` | typescript-expert | `spec.md` FR-001/002/002b/003 | T0, T1 | [X] |
+| T4 | `backend-specialist` | typescript-expert | `spec.md` FR-005/006/007, `plan.md` contracts | T0, T1 | [X] |
+| T5 | `backend-specialist` | typescript-expert, systematic-debugging | `spec.md` FR-008/013, `chat-service.ts` | T3, T4 | [X] |
+| T6 | `backend-specialist` | typescript-expert | `spec.md` FR-012, `validator_runs` schema | T3, T4 | [X] |
+| T7 | `test-engineer` | tdd-workflow, testing-patterns | US1-US5, all FRs | T1-T6 | [X] |
 
 ## Parallel Lanes
 

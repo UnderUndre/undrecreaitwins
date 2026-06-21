@@ -34,7 +34,7 @@ const mockLLM = {
 
 describe('ValidatorPipeline enabled toggle (T012)', () => {
   let pipeline: ValidatorPipeline;
-  let langGuardSpy: ReturnType<typeof vi.spyOn>;
+  let langGuardSpy: any;
 
   beforeEach(() => {
     vi.clearAllMocks();

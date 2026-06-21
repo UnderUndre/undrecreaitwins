@@ -7,10 +7,9 @@ import { FunnelRuntime } from './funnel/funnel-runtime.js';
 import { FunnelRepository } from './funnel/funnel-repository.js';
 import { FragmentScorer } from './funnel/scorer.js';
 import { TurnMetrics } from './funnel/turn-metrics.js';
-import { AdaptiveIntroService } from './llm/adaptive-intro.js';
 import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
-import { buildLanguageDirective } from './validators/language-guard.js';
+import { buildLanguageDirective, resolveTargetLanguage } from './validators/language-guard.js';
 import { execute as darExecute } from './correction-rules/dar-pipeline.js';
 import { retrieveRelevant as retrieveFeedback } from './feedback/feedback-retrieval.js';
 import { compose as composePrompt } from './feedback/prompt-composer.js';
@@ -325,11 +324,22 @@ export class ChatService {
           },
         });
 
+        const finalAgentAnswer = await this.runAgenticLanguageGuard(
+          request.tenantId,
+          persona,
+          conversationId,
+          agentResult,
+          request,
+          sanitizedUserMessage,
+          lastUserMessage,
+          executor
+        );
+
         await this.persistMessages(
           request.tenantId,
           conversationId,
           request.messages,
-          agentResult.answer,
+          finalAgentAnswer,
         );
 
         return {
@@ -339,7 +349,7 @@ export class ChatService {
           model: persona.modelPreferences?.model || 'agent',
           choices: [{
             index: 0,
-            message: { role: 'assistant', content: agentResult.answer },
+            message: { role: 'assistant', content: finalAgentAnswer },
             finish_reason: 'stop',
           }],
           usage: {
@@ -360,7 +370,7 @@ export class ChatService {
         ? await this.buildFunnelContext(funnelResult, conversationId)
         : undefined;
 
-      const { prompt: systemPrompt, strictRagRefused } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx);
+      const { prompt: systemPrompt, strictRagRefused, resolvedTargetLanguage } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx);
 
       // Strict RAG refusal — skip LLM call, return refusal directly (task 5.1)
       if (strictRagRefused) {
@@ -435,7 +445,23 @@ export class ChatService {
         tenantId: request.tenantId,
         personaId: persona.id,
         conversationId,
-        rawUserMessage: lastUserMessage
+        rawUserMessage: lastUserMessage,
+        resolvedTargetLanguage,
+        systemPrompt: systemPrompt,
+        regenerateFn: async (reinforcedSystemPrompt: string) => {
+          const res = await llm.complete({
+            messages: [
+              { role: 'system', content: reinforcedSystemPrompt },
+              ...request.messages,
+            ],
+            temperature: request.temperature ?? persona.modelPreferences?.temperature,
+            maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+            model: persona.modelPreferences?.model,
+            tenantId: request.tenantId,
+            personaId: persona.id,
+          });
+          return res.content;
+        }
       });
 
       // 018 DAR pipeline (post-validation, pre-persistence)
@@ -728,11 +754,22 @@ export class ChatService {
         },
       });
 
+      const finalAgentAnswer = await this.runAgenticLanguageGuard(
+        request.tenantId,
+        persona,
+        conversationId,
+        agentResult,
+        request,
+        sanitizedUserMessage,
+        lastUserMessage,
+        executor
+      );
+
       await this.persistMessages(
         request.tenantId,
         conversationId,
         request.messages,
-        agentResult.answer,
+        finalAgentAnswer,
       );
 
       const agentChunk: StreamChunk = {
@@ -742,7 +779,7 @@ export class ChatService {
         model: persona.modelPreferences?.model || 'agent',
         choices: [{
           index: 0,
-          delta: { content: agentResult.answer },
+          delta: { content: finalAgentAnswer },
           finish_reason: 'stop',
         }],
       };
@@ -750,7 +787,7 @@ export class ChatService {
 
       return {
         completed: true,
-        content: agentResult.answer,
+        content: finalAgentAnswer,
         conversationId,
         personaId: persona.id,
         systemPrompt: '',
@@ -764,7 +801,7 @@ export class ChatService {
       ? await this.buildFunnelContext(funnelResult, conversationId)
       : undefined;
 
-    const { prompt: systemPrompt, strictRagRefused } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx2);
+    const { prompt: systemPrompt, strictRagRefused, resolvedTargetLanguage, guardActive } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx2);
 
     // Strict RAG refusal — skip LLM call, stream refusal directly (task 5.1)
     if (strictRagRefused) {
@@ -833,42 +870,108 @@ export class ChatService {
     let modelName = persona.modelPreferences?.model || 'gpt-4o';
     const includeUsage = request.streamOptions?.include_usage === true;
 
-    try {
-      const generator = llm.completeStream({
-        messages: allMessages,
-        temperature: request.temperature ?? persona.modelPreferences?.temperature,
-        maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
-        model: modelName,
-        signal,
-      });
+    if (guardActive) {
+      // Buffered Delivery (FR-008) — generate fully, validate/remediate, then deliver
+      try {
+        const llmResponse = await llm.complete({
+          messages: allMessages,
+          temperature: request.temperature ?? persona.modelPreferences?.temperature,
+          maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+          model: modelName,
+          tenantId: request.tenantId,
+          personaId: persona.id,
+        });
 
-      for await (const chunk of generator) {
+        // Run validation/remediation (which internally translates/regenerates if needed)
+        const validatedContent = await validatorPipeline.validateResponse(llmResponse.content, {
+          tenantId: request.tenantId,
+          personaId: persona.id,
+          conversationId,
+          rawUserMessage: lastUserMessage,
+          resolvedTargetLanguage,
+          systemPrompt: systemPrompt,
+          regenerateFn: async (reinforcedSystemPrompt: string) => {
+            const res = await llm.complete({
+              messages: [
+                { role: 'system', content: reinforcedSystemPrompt },
+                ...request.messages,
+              ],
+              temperature: request.temperature ?? persona.modelPreferences?.temperature,
+              maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+              model: persona.modelPreferences?.model,
+              tenantId: request.tenantId,
+              personaId: persona.id,
+            });
+            return res.content;
+          }
+        });
+
+        if (signal?.aborted) {
+          return { completed: false, content: '' };
+        }
+
+        // Yield a single chunk containing the full validated content
+        const chunkId = randomUUID();
+        const chunk: StreamChunk = {
+          id: chunkId,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: modelName,
+          choices: [{
+            index: 0,
+            delta: { content: validatedContent },
+            finish_reason: 'stop',
+          }],
+          usage: llmResponse.usage,
+        };
+        yield chunk;
+
+        accumulatedContent = validatedContent;
+        finalUsage = llmResponse.usage;
+      } catch (err) {
+        if (signal?.aborted) {
+          return { completed: false, content: '' };
+        }
+        throw err;
+      }
+    } else {
+      try {
+        const generator = llm.completeStream({
+          messages: allMessages,
+          temperature: request.temperature ?? persona.modelPreferences?.temperature,
+          maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+          model: modelName,
+          signal,
+        });
+
+        for await (const chunk of generator) {
+          if (signal?.aborted) {
+            return { completed: false, content: accumulatedContent };
+          }
+
+          if (chunk.choices?.[0]?.delta?.content) {
+            accumulatedContent += chunk.choices[0].delta.content;
+          }
+          if (chunk.usage) {
+            finalUsage = chunk.usage;
+          }
+          if (chunk.model) {
+            modelName = chunk.model;
+          }
+
+          if (chunk.usage && !includeUsage) {
+            const { usage: _u, ...chunkWithoutUsage } = chunk;
+            yield chunkWithoutUsage as StreamChunk;
+          } else {
+            yield chunk;
+          }
+        }
+      } catch (err) {
         if (signal?.aborted) {
           return { completed: false, content: accumulatedContent };
         }
-
-        if (chunk.choices?.[0]?.delta?.content) {
-          accumulatedContent += chunk.choices[0].delta.content;
-        }
-        if (chunk.usage) {
-          finalUsage = chunk.usage;
-        }
-        if (chunk.model) {
-          modelName = chunk.model;
-        }
-
-        if (chunk.usage && !includeUsage) {
-          const { usage: _u, ...chunkWithoutUsage } = chunk;
-          yield chunkWithoutUsage as StreamChunk;
-        } else {
-          yield chunk;
-        }
+        throw err;
       }
-    } catch (err) {
-      if (signal?.aborted) {
-        return { completed: false, content: accumulatedContent };
-      }
-      throw err;
     }
 
     if (signal?.aborted) {
@@ -936,12 +1039,78 @@ export class ChatService {
     }
   }
 
+  async runAgenticLanguageGuard(
+    tenantId: string,
+    persona: PersonaRow,
+    conversationId: string,
+    agentResult: any,
+    request: any,
+    sanitizedUserMessage: string,
+    lastUserMessage: string,
+    executor: any
+  ): Promise<string> {
+    let finalAgentAnswer = agentResult.answer;
+    try {
+      const langConfig = await withTenantContext(tenantId, async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(validatorConfigs)
+          .where(
+            and(
+              eq(validatorConfigs.tenantId, tenantId),
+              eq(validatorConfigs.personaId, persona.id),
+              eq(validatorConfigs.validatorName, 'language-guard')
+            )
+          );
+        return row;
+      });
+
+      if (langConfig) {
+        const cfg = langConfig.config as any;
+        if (cfg?.enabled !== false && cfg?.allowedLanguages && cfg.allowedLanguages.length > 0) {
+          const resolution = await resolveTargetLanguage(cfg, sanitizedUserMessage, llm);
+          finalAgentAnswer = await validatorPipeline.validateResponse(agentResult.answer, {
+            tenantId: tenantId,
+            personaId: persona.id,
+            conversationId,
+            rawUserMessage: lastUserMessage,
+            resolvedTargetLanguage: resolution.target,
+            systemPrompt: persona.systemPrompt,
+            degradeToAsIs: true,
+            regenerateFn: async (reinforcedSystemPrompt: string) => {
+              const rPersona = { ...persona, systemPrompt: reinforcedSystemPrompt };
+              const rResult = await executor.runAgentTurn({
+                tenantId: tenantId,
+                persona: rPersona as any,
+                sessionId: conversationId,
+                userMessage: sanitizedUserMessage,
+                context: {
+                  conversationHistory: request.messages
+                    .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+                    .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+                },
+                budget: {
+                  maxLoopIterations: 20,
+                  maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
+                  maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
+                },
+              });
+              return rResult.answer;
+            }
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[language-guard] Agentic validation/remediation failed, falling back to as-is (degraded):', err);
+    }
+    return finalAgentAnswer;
+  }
   private async buildSystemPrompt(
     tenantId: string,
     persona: PersonaRow,
     userQuery: string,
     funnelContext?: { stageName?: string; slots?: Record<string, string>; promptHint?: string }
-  ): Promise<{ prompt: string; strictRagRefused?: boolean }> {
+  ): Promise<{ prompt: string; strictRagRefused?: boolean; resolvedTargetLanguage?: string; guardActive?: boolean }> {
     const parts = [persona.systemPrompt];
     const traits = persona.traits;
     if (traits && Object.keys(traits).length > 0) {
@@ -1009,6 +1178,8 @@ export class ChatService {
 
     // Language directive injection (017 language-guard, US3, DD-003)
     // Fail-open: if config query fails, skip directive — pipeline still catches violations post-generation
+    let resolvedTargetLanguage: string | undefined;
+    let guardActive = false;
     try {
       const langConfig = await withTenantContext(tenantId, async (tx) => {
         const [row] = await tx
@@ -1028,11 +1199,15 @@ export class ChatService {
         const cfg = langConfig.config as any;
         // T002: enabled gate — disabled guard skips directive injection too
         if (cfg?.enabled !== false && cfg?.allowedLanguages && Array.isArray(cfg.allowedLanguages) && cfg.allowedLanguages.length > 0) {
-          parts.push('\n' + buildLanguageDirective(cfg.allowedLanguages));
+          guardActive = true;
+          const resolution = await resolveTargetLanguage(cfg, userQuery, llm);
+          resolvedTargetLanguage = resolution.target;
+          parts.push('\n' + buildLanguageDirective(resolution.target));
         }
       }
-    } catch {
+    } catch (err) {
       // DD-003: fail-open — missing directive doesn't break chat path
+      console.warn({ err }, 'Language guard directive resolution failed, proceeding without directive');
     }
 
     // Feedback memory retrieval + prompt composition (019 feedback-loop-closure)
@@ -1097,7 +1272,7 @@ export class ChatService {
       parts.push(funnelParts.join('\n'));
     }
 
-    return { prompt: parts.join('\n') };
+    return { prompt: parts.join('\n'), resolvedTargetLanguage, guardActive };
   }
 
   private async findOrCreateConversation(

@@ -43,7 +43,7 @@ function splitIntoChunks(text: string): string[] {
     ? new (Intl as any).Segmenter('und', { granularity: 'grapheme' })
     : null;
 
-  const graphemes: string[] = [];
+  let graphemes: string[] = [];
   if (segmenter) {
     for (const segment of segmenter.segment(text)) {
       graphemes.push(segment.segment);

@@ -1,0 +1,3 @@
+{
+  "system": "You are a response editor. Rewrite the following response to satisfy these instructions.\nReturn ONLY the rewritten text, no commentary.\nInstructions are listed in priority order. If two instructions conflict, follow the higher-priority one."
+}

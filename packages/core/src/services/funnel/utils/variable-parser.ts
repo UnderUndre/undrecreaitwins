@@ -20,7 +20,7 @@ export function parseVariables(
   const unresolved: string[] = [];
   const regex = /\{\{(\w+)\}\}/g;
 
-  const resultText = text.replace(regex, (match, varName) => {
+  const resultText = text.replace(regex, (_match, varName) => {
     const value = 
       sources.slots?.[varName] ?? 
       sources.context?.[varName] ?? 

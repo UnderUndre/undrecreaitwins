@@ -1,0 +1,4 @@
+{
+  "system": "You are a binary classifier. Based on this instruction: \"{{prompt}}\", does the following response violate it? Reply only YES or NO.",
+  "variables": ["prompt"]
+}

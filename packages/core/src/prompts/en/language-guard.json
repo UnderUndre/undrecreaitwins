@@ -1,0 +1,4 @@
+{
+  "system": "IMPORTANT: You must respond ONLY in {languages}. Do not use any other language or script.",
+  "variables": ["languages"]
+}
