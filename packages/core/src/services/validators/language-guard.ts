@@ -64,6 +64,21 @@ export const BCP47_TO_NAME: Record<string, string> = {
   tg: 'Tajik', mo: 'Moldavian',
 };
 
+export const SCRIPT_TO_LANG: Record<string, string> = {
+  Han: 'zh',
+  Arabic: 'ar',
+  Devanagari: 'hi',
+  Hebrew: 'he',
+  Thai: 'th',
+  Armenian: 'hy',
+  Georgian: 'ka',
+  Hangul: 'ko',
+  Katakana: 'ja',
+  Hiragana: 'ja',
+  Cyrillic: 'Cyrillic',
+  Latin: 'Latin',
+};
+
 const FENCED_CODE_RE = /```[\s\S]*?```/g;
 const INLINE_CODE_RE = /`[^`\n]+`/g;
 const URL_RE = /https?:\/\/[^\s]+/g;
@@ -252,6 +267,9 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
 
     let isViolation = nonCompliantFraction >= stripThreshold;
     let sourceLang = '';
+    if (isViolation && detectedScripts[0]) {
+      sourceLang = SCRIPT_TO_LANG[detectedScripts[0]] || detectedScripts[0];
+    }
 
     // Same-script outbound check (FR-002b)
     if (!isViolation && (targetLang === 'en' || targetLang === 'ru') && config.allowPlatformModelRouting !== false) {

@@ -254,6 +254,58 @@ describe('Validators routes', () => {
       expect(body.fields.allowedLanguages.code).toBe('INVALID_BCP47');
     });
 
+    it('returns 400 when fallbackLanguage is not in allowedLanguages', async () => {
+      resolveQueue = [[{ id: 'test-tenant', status: 'active' }], [{ id: 'persona-001' }]];
+
+      const response = await server.inject({
+        method: 'PUT',
+        url: '/v1/personas/persona-001/validators/language-guard',
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          config: {
+            enabled: true,
+            allowedLanguages: ['ru'],
+            fallbackLanguage: 'en',
+            mode: 'active',
+            stripThreshold: 0.05,
+            blockThreshold: 0.30,
+          },
+          expectedVersion: 0,
+        }),
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = response.json();
+      expect(body.error).toBe('VALIDATION_FAILED');
+      expect(body.fields.fallbackLanguage.code).toBe('INVALID_FALLBACK_LANGUAGE');
+    });
+
+    it('returns 400 when targetPolicy is fixed and fixedLanguage is missing', async () => {
+      resolveQueue = [[{ id: 'test-tenant', status: 'active' }], [{ id: 'persona-001' }]];
+
+      const response = await server.inject({
+        method: 'PUT',
+        url: '/v1/personas/persona-001/validators/language-guard',
+        headers: { 'x-tenant-id': 'test-tenant', 'authorization': 'Bearer test-token', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          config: {
+            enabled: true,
+            allowedLanguages: ['ru'],
+            targetPolicy: 'fixed',
+            mode: 'active',
+            stripThreshold: 0.05,
+            blockThreshold: 0.30,
+          },
+          expectedVersion: 0,
+        }),
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = response.json();
+      expect(body.error).toBe('VALIDATION_FAILED');
+      expect(body.fields.fixedLanguage.code).toBe('MISSING_FIXED_LANGUAGE');
+    });
+
     it('succeeds with INSERT when no existing config', async () => {
       resolveQueue = [
         [{ id: 'test-tenant', status: 'active' }],
@@ -348,8 +400,10 @@ describe('Validators routes', () => {
             mode: 'active',
             stripThreshold: 0.05,
             blockThreshold: 0.30,
+            targetPolicy: 'mirror',
+            remediation: 'strip-block',
           },
-          expectedVersion: 0,
+          expectedVersion: 1,
         }),
       });
 

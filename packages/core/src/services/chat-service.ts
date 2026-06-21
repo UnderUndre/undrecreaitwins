@@ -324,60 +324,16 @@ export class ChatService {
           },
         });
 
-        let finalAgentAnswer = agentResult.answer;
-        try {
-          const langConfig = await withTenantContext(request.tenantId, async (tx) => {
-            const [row] = await tx
-              .select()
-              .from(validatorConfigs)
-              .where(
-                and(
-                  eq(validatorConfigs.tenantId, request.tenantId),
-                  eq(validatorConfigs.personaId, persona.id),
-                  eq(validatorConfigs.validatorName, 'language-guard')
-                )
-              );
-            return row;
-          });
-
-          if (langConfig) {
-            const cfg = langConfig.config as any;
-            if (cfg?.enabled !== false && cfg?.allowedLanguages && cfg.allowedLanguages.length > 0) {
-              const resolution = await resolveTargetLanguage(cfg, sanitizedUserMessage, llm);
-              finalAgentAnswer = await validatorPipeline.validateResponse(agentResult.answer, {
-                tenantId: request.tenantId,
-                personaId: persona.id,
-                conversationId,
-                rawUserMessage: lastUserMessage,
-                resolvedTargetLanguage: resolution.target,
-                systemPrompt: persona.systemPrompt,
-                degradeToAsIs: true,
-                regenerateFn: async (reinforcedSystemPrompt: string) => {
-                  const rPersona = { ...persona, systemPrompt: reinforcedSystemPrompt };
-                  const rResult = await executor.runAgentTurn({
-                    tenantId: request.tenantId,
-                    persona: rPersona as any,
-                    sessionId: conversationId,
-                    userMessage: sanitizedUserMessage,
-                    context: {
-                      conversationHistory: request.messages
-                        .filter(m => m.role === 'user' || m.role === 'assistant')
-                        .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-                    },
-                    budget: {
-                      maxLoopIterations: 20,
-                      maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
-                      maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
-                    },
-                  });
-                  return rResult.answer;
-                }
-              });
-            }
-          }
-        } catch (err) {
-          console.warn('[language-guard] Agentic validation/remediation failed, falling back to as-is (degraded):', err);
-        }
+        const finalAgentAnswer = await this.runAgenticLanguageGuard(
+          request.tenantId,
+          persona,
+          conversationId,
+          agentResult,
+          request,
+          sanitizedUserMessage,
+          lastUserMessage,
+          executor
+        );
 
         await this.persistMessages(
           request.tenantId,
@@ -798,60 +754,16 @@ export class ChatService {
         },
       });
 
-      let finalAgentAnswer = agentResult.answer;
-      try {
-        const langConfig = await withTenantContext(request.tenantId, async (tx) => {
-          const [row] = await tx
-            .select()
-            .from(validatorConfigs)
-            .where(
-              and(
-                eq(validatorConfigs.tenantId, request.tenantId),
-                eq(validatorConfigs.personaId, persona.id),
-                eq(validatorConfigs.validatorName, 'language-guard')
-              )
-            );
-          return row;
-        });
-
-        if (langConfig) {
-          const cfg = langConfig.config as any;
-          if (cfg?.enabled !== false && cfg?.allowedLanguages && cfg.allowedLanguages.length > 0) {
-            const resolution = await resolveTargetLanguage(cfg, sanitizedUserMessage, llm);
-            finalAgentAnswer = await validatorPipeline.validateResponse(agentResult.answer, {
-              tenantId: request.tenantId,
-              personaId: persona.id,
-              conversationId,
-              rawUserMessage: lastUserMessage,
-              resolvedTargetLanguage: resolution.target,
-              systemPrompt: persona.systemPrompt,
-              degradeToAsIs: true,
-              regenerateFn: async (reinforcedSystemPrompt: string) => {
-                const rPersona = { ...persona, systemPrompt: reinforcedSystemPrompt };
-                const rResult = await executor.runAgentTurn({
-                  tenantId: request.tenantId,
-                  persona: rPersona as any,
-                  sessionId: conversationId,
-                  userMessage: sanitizedUserMessage,
-                  context: {
-                    conversationHistory: request.messages
-                      .filter(m => m.role === 'user' || m.role === 'assistant')
-                      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-                  },
-                  budget: {
-                    maxLoopIterations: 20,
-                    maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
-                    maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
-                  },
-                });
-                return rResult.answer;
-              }
-            });
-          }
-        }
-      } catch (err) {
-        console.warn('[language-guard] Agentic validation/remediation failed, falling back to as-is (degraded):', err);
-      }
+      const finalAgentAnswer = await this.runAgenticLanguageGuard(
+        request.tenantId,
+        persona,
+        conversationId,
+        agentResult,
+        request,
+        sanitizedUserMessage,
+        lastUserMessage,
+        executor
+      );
 
       await this.persistMessages(
         request.tenantId,
@@ -1127,6 +1039,72 @@ export class ChatService {
     }
   }
 
+  async runAgenticLanguageGuard(
+    tenantId: string,
+    persona: PersonaRow,
+    conversationId: string,
+    agentResult: any,
+    request: any,
+    sanitizedUserMessage: string,
+    lastUserMessage: string,
+    executor: any
+  ): Promise<string> {
+    let finalAgentAnswer = agentResult.answer;
+    try {
+      const langConfig = await withTenantContext(tenantId, async (tx) => {
+        const [row] = await tx
+          .select()
+          .from(validatorConfigs)
+          .where(
+            and(
+              eq(validatorConfigs.tenantId, tenantId),
+              eq(validatorConfigs.personaId, persona.id),
+              eq(validatorConfigs.validatorName, 'language-guard')
+            )
+          );
+        return row;
+      });
+
+      if (langConfig) {
+        const cfg = langConfig.config as any;
+        if (cfg?.enabled !== false && cfg?.allowedLanguages && cfg.allowedLanguages.length > 0) {
+          const resolution = await resolveTargetLanguage(cfg, sanitizedUserMessage, llm);
+          finalAgentAnswer = await validatorPipeline.validateResponse(agentResult.answer, {
+            tenantId: tenantId,
+            personaId: persona.id,
+            conversationId,
+            rawUserMessage: lastUserMessage,
+            resolvedTargetLanguage: resolution.target,
+            systemPrompt: persona.systemPrompt,
+            degradeToAsIs: true,
+            regenerateFn: async (reinforcedSystemPrompt: string) => {
+              const rPersona = { ...persona, systemPrompt: reinforcedSystemPrompt };
+              const rResult = await executor.runAgentTurn({
+                tenantId: tenantId,
+                persona: rPersona as any,
+                sessionId: conversationId,
+                userMessage: sanitizedUserMessage,
+                context: {
+                  conversationHistory: request.messages
+                    .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+                    .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+                },
+                budget: {
+                  maxLoopIterations: 20,
+                  maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
+                  maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
+                },
+              });
+              return rResult.answer;
+            }
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[language-guard] Agentic validation/remediation failed, falling back to as-is (degraded):', err);
+    }
+    return finalAgentAnswer;
+  }
   private async buildSystemPrompt(
     tenantId: string,
     persona: PersonaRow,
