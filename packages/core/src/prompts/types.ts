@@ -10,6 +10,10 @@ export type PromptKey =
   | 'intent-classifier'
   | 'contextual-retell'
   | 'banned-words'
-  | 'repair-prompts';
+  | 'repair-prompts'
+  | 'rewriter'
+  | 'false-promise'
+  | 'pattern-detector'
+  | 'language-guard';
 
 export type Locale = 'ru' | 'en';

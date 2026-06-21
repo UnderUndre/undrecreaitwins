@@ -1,5 +1,6 @@
 import type { LLMClient } from '../../llm-client.js';
 import type { CorrectionRule, Detector, DetectorResult } from '../types.js';
+import { getPrompt, interpolate } from '../../../prompts/index.js';
 
 const TIMEOUT_MS = parseInt(process.env.TWIN_DAR_SEMANTIC_TIMEOUT_MS || '5000', 10);
 
@@ -42,7 +43,7 @@ export class PatternDetector implements Detector {
     }
 
     const { description } = rule.detector.config;
-    const systemPrompt = `You are a binary classifier. Does the following response match this description: "${description}"? Reply only YES or NO.`;
+    const systemPrompt = interpolate(getPrompt('pattern-detector').system, { prompt: description });
 
     try {
       const triggered = await llmClassify(this.llm, systemPrompt, text, rule.tenantId, rule.assistantId || '');
@@ -64,7 +65,7 @@ export class SemanticDetector implements Detector {
     }
 
     const { prompt } = rule.detector.config;
-    const systemPrompt = `You are a binary classifier. Based on this instruction: "${prompt}", does the following response violate it? Reply only YES or NO.`;
+    const systemPrompt = interpolate(getPrompt('pattern-detector').system, { prompt });
 
     try {
       const triggered = await llmClassify(this.llm, systemPrompt, text, rule.tenantId, rule.assistantId || '');

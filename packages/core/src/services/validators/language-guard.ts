@@ -137,16 +137,9 @@ function maskCode(text: string): { masked: string; maskedCount: number } {
   return { masked, maskedCount };
 }
 
-function getAllowedScripts(allowedLanguages: string[]): Set<string> {
-  const scripts = new Set<string>();
-  for (const lang of allowedLanguages) {
-    const mapped = BCP47_TO_SCRIPTS[lang];
-    if (mapped) {
-      for (const s of mapped) scripts.add(s);
-    }
-  }
-  return scripts;
-}
+
+
+import { getLanguageGuardPrompt } from '../../locales/index.js';
 
 function getLanguageNames(allowedLanguages: string[]): string {
   return allowedLanguages
@@ -154,16 +147,15 @@ function getLanguageNames(allowedLanguages: string[]): string {
     .join(', ');
 }
 
-const SYSTEM_DEFAULT_FALLBACK = (allowedLanguages: string[]) =>
-  `I can only respond in ${getLanguageNames(allowedLanguages)}.`;
+export function buildLanguageDirective(target: string | string[], locale: 'en' | 'ru' = 'ru'): string {
+  const template = getLanguageGuardPrompt('directiveTemplate', locale);
+  const names = Array.isArray(target) ? getLanguageNames(target) : (BCP47_TO_NAME[target] || target);
+  return template.replace('{languages}', names);
+}
 
-export function buildLanguageDirective(target: string | string[]): string {
-  if (Array.isArray(target)) {
-    const names = getLanguageNames(target);
-    return `IMPORTANT: You must respond ONLY in ${names}. Do not use any other language or script.`;
-  }
-  const name = BCP47_TO_NAME[target] || target;
-  return `IMPORTANT: You must respond ONLY in ${name}. Do not use any other language or script.`;
+export function getFallbackMessage(allowedLanguages: string[], locale: 'en' | 'ru' = 'ru'): string {
+  const template = getLanguageGuardPrompt('fallbackMessage', locale);
+  return template.replace('{languages}', getLanguageNames(allowedLanguages));
 }
 
 export class LanguageGuardValidator implements ResponseValidator<LanguageGuardConfig> {
@@ -262,22 +254,14 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
     let sourceLang = '';
 
     // Same-script outbound check (FR-002b)
-    if (!isViolation && (targetLang === 'en' || targetLang === 'ru')) {
+    if (!isViolation && (targetLang === 'en' || targetLang === 'ru') && config.allowPlatformModelRouting !== false) {
       if (isSameScriptViolationSuspected(replyToProcess, targetLang)) {
         try {
           const langidModel = process.env.LANG_GUARD_LANGID_MODEL || 'gpt-4o-mini';
           const timeoutMs = Number(process.env.LANG_GUARD_LANGID_TIMEOUT_MS) || 3000;
 
-          const systemPrompt = `You are a language identification service. Identify the language of the provided text.
-You must respond with a JSON object containing:
-- "lang": BCP-47 language code of the text
-- "confidence": confidence score between 0.0 and 1.0
-
-JSON format:
-{
-  "lang": "code",
-  "confidence": 0.95
-}`;
+          const systemPrompt = getLanguageGuardPrompt('langidSystemPrompt', 'ru')
+            .replace(/{candidates}/g, config.allowedLanguages.join(', '));
           const llmPromise = llm.complete({
             messages: [
               { role: 'system', content: systemPrompt },
@@ -327,8 +311,8 @@ JSON format:
 
     const runStripBlockFallback = (reason: string): ValidatorRunResult => {
       const blockThreshold = config.blockThreshold ?? 0.30;
-      if (nonCompliantFraction >= blockThreshold) {
-        const fallback = config.fallbackMessage?.trim() || SYSTEM_DEFAULT_FALLBACK(config.allowedLanguages);
+    if (nonCompliantFraction >= blockThreshold) {
+      const fallback = config.fallbackMessage?.trim() || getFallbackMessage(config.allowedLanguages);
         const finalReply = isFunnel
           ? JSON.stringify({ ...funnelEnvelope, answer: fallback })
           : fallback;
@@ -349,7 +333,6 @@ JSON format:
           latencyMs: Date.now() - startTime,
         };
       } else {
-        const allowedScripts = getAllowedScripts(config.allowedLanguages);
         const strippedChars: string[] = [];
         for (const char of replyToProcess) {
           const code = char.codePointAt(0)!;
@@ -362,7 +345,7 @@ JSON format:
           if (script === 'Unknown') {
             continue;
           }
-          if (allowedScripts.has(script)) {
+          if (targetScripts.has(script)) {
             strippedChars.push(char);
           }
         }
@@ -420,17 +403,13 @@ JSON format:
 
       const { maskedText, tokens } = maskTokens(replyToProcess);
 
-      const systemPrompt = `You are a translation service. Translate the provided text into ${BCP47_TO_NAME[targetLang] || targetLang}.
-Rules:
-- Preserve all formatting, markdown structure, and code blocks.
-- Preserve all tokens of the form __TOKEN_NAME_N__ exactly as-is. Do not translate, change, or remove them.
-- Preserve all numbers and formatting exactly as-is, including decimal separators.
-- Do not add or remove any content. Translate the text verbatim.`;
+      const translateSystemPrompt = getLanguageGuardPrompt('translateSystemPrompt', 'ru')
+        .replace('{target}', BCP47_TO_NAME[targetLang] || targetLang);
 
       const llmPromise = llm.complete({
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: `[Text to translate]\n${maskedText}` }
+          { role: 'system', content: translateSystemPrompt },
+          { role: 'user', content: `<text_to_translate>\n${maskedText}\n</text_to_translate>` }
         ],
         model: translateModel,
         temperature: 0,
@@ -442,7 +421,8 @@ Rules:
       );
 
       const res = await Promise.race([llmPromise, timeoutPromise]);
-      const translatedMasked = res.content.trim();
+      const content = res.content.trim();
+      const translatedMasked = content.replace(/<\/?text_to_translate>/g, '').trim();
 
       let fidelityOk = checkFidelity(translatedMasked, tokens);
       let translatedText = restoreTokens(translatedMasked, tokens);
@@ -607,7 +587,7 @@ export async function resolveTargetLanguage(
     return { target: fallback, source: 'fallback' };
   }
 
-  if (!userQuery || !llmClient) {
+  if (!userQuery || !llmClient || config.allowPlatformModelRouting === false) {
     const fallback = config.fallbackLanguage || allowed[0] || 'en';
     return { target: fallback, source: 'fallback' };
   }

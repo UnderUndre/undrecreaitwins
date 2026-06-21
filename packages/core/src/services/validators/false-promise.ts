@@ -6,6 +6,7 @@ import {
   VerdictDecision
 } from '../../types/validator.js';
 import { LLMClient } from '../llm-client.js';
+import { getPrompt } from '../../prompts/index.js';
 
 export type FalsePromiseClass =
   | 'pass_message_third_party'
@@ -69,8 +70,6 @@ const CLASS_TO_ACTION: Record<FalsePromiseClass, string> = {
   action_on_behalf: 'выполнять действия от вашего имени',
 };
 
-const DEFAULT_SYSTEM_PROMPT = 'You are a false-promise validator. Analyze the assistant response and user message to detect commitments the assistant cannot fulfill. Respond in JSON.';
-
 export class FalsePromiseValidator implements ResponseValidator<FalsePromiseConfig> {
   name = 'false-promise';
 
@@ -99,7 +98,7 @@ export class FalsePromiseValidator implements ResponseValidator<FalsePromiseConf
     
     try {
       const userPrompt = this.buildJudgePrompt(reply, context.rawUserMessage || '', matchedPatternClass);
-      const systemPrompt = (config as any).systemPrompt || DEFAULT_SYSTEM_PROMPT;
+      const systemPrompt = (config as any).systemPrompt || getPrompt('false-promise').system;
       const model = config.judgeModel;
       
       const [response] = await this.llm.completeBatch([{

@@ -163,20 +163,20 @@ describe('LanguageGuardValidator', () => {
 
   describe('language directive (US3)', () => {
     it('buildLanguageDirective produces correct text for ru+en', () => {
-      const directive = buildLanguageDirective(['ru', 'en']);
+      const directive = buildLanguageDirective(['ru', 'en'], 'en');
       expect(directive).toContain('Russian');
       expect(directive).toContain('English');
       expect(directive).toContain('IMPORTANT');
     });
 
     it('buildLanguageDirective produces correct text for zh only', () => {
-      const directive = buildLanguageDirective(['zh']);
+      const directive = buildLanguageDirective(['zh'], 'en');
       expect(directive).toContain('Chinese');
       expect(directive).not.toContain('Russian');
     });
 
     it('buildLanguageDirective handles unknown language code gracefully', () => {
-      const directive = buildLanguageDirective(['xx']);
+      const directive = buildLanguageDirective(['xx'], 'en');
       expect(directive).toContain('xx');
     });
   });

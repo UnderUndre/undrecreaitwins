@@ -1,6 +1,7 @@
 import type { LLMClient } from '../llm-client.js';
 import type { CorrectionRule } from './types.js';
 import { wrapOperatorText } from '../prompt-safety.js';
+import { getPrompt } from '../../prompts/index.js';
 
 export interface RewriteResult {
   text: string;
@@ -32,11 +33,7 @@ export async function rewrite(
     })
     .join('\n');
 
-  const systemPrompt = [
-    'You are a response editor. Rewrite the following response to satisfy these instructions.',
-    'Return ONLY the rewritten text, no commentary.',
-    'Instructions are listed in priority order. If two instructions conflict, follow the higher-priority one.',
-  ].join('\n');
+  const systemPrompt = getPrompt('rewriter').system;
 
   const userPrompt = [
     wrapOperatorText(instructions),
