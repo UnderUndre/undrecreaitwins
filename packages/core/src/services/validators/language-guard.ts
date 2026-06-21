@@ -156,6 +156,25 @@ function maskCode(text: string): { masked: string; maskedCount: number } {
 
 import { getLanguageGuardPrompt } from '../../locales/index.js';
 
+function getEnvString(key: string, defaultValue: string): string {
+  const val = process.env[key];
+  if (!val) return defaultValue;
+  return val;
+}
+
+function getEnvNumber(key: string, defaultValue: number): number {
+  const raw = process.env[key];
+  if (!raw) return defaultValue;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return defaultValue;
+  return parsed;
+}
+
+const LANGID_MODEL = getEnvString('LANG_GUARD_LANGID_MODEL', 'gpt-4o-mini');
+const LANGID_TIMEOUT_MS = getEnvNumber('LANG_GUARD_LANGID_TIMEOUT_MS', 3000);
+const TRANSLATE_MODEL = getEnvString('LANG_GUARD_TRANSLATE_MODEL', 'gpt-4o-mini');
+const TRANSLATE_TIMEOUT_MS = getEnvNumber('LANG_GUARD_TRANSLATE_TIMEOUT_MS', 3000);
+
 function getLanguageNames(allowedLanguages: string[]): string {
   return allowedLanguages
     .map(l => BCP47_TO_NAME[l] || l)
@@ -193,15 +212,22 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
 
     // 1. JSON Funnel envelope check (F14)
     let isFunnel = false;
-    let funnelEnvelope: any = null;
+    let funnelEnvelope: Record<string, unknown> | null = null;
     let replyToProcess = reply;
 
     if (reply.trim().startsWith('{') && reply.trim().endsWith('}')) {
       try {
-        funnelEnvelope = JSON.parse(reply);
-        if ('answer' in funnelEnvelope) {
+        const parsed = JSON.parse(reply) as Record<string, unknown>;
+        if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
+          funnelEnvelope = parsed;
           isFunnel = true;
-          replyToProcess = String(funnelEnvelope.answer);
+          replyToProcess = String(parsed.answer);
+        } else {
+          return {
+            verdict: { decision: 'pass', confidence: 1.0 },
+            mutatedText: reply,
+            latencyMs: Date.now() - startTime,
+          };
         }
       } catch (err) {
         return {
@@ -274,9 +300,10 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
     // Same-script outbound check (FR-002b)
     if (!isViolation && (targetLang === 'en' || targetLang === 'ru') && config.allowPlatformModelRouting !== false) {
       if (isSameScriptViolationSuspected(replyToProcess, targetLang)) {
+        let timer: NodeJS.Timeout | undefined;
         try {
-          const langidModel = process.env.LANG_GUARD_LANGID_MODEL || 'gpt-4o-mini';
-          const timeoutMs = Number(process.env.LANG_GUARD_LANGID_TIMEOUT_MS) || 3000;
+          const langidModel = LANGID_MODEL;
+          const timeoutMs = LANGID_TIMEOUT_MS;
 
           const systemPrompt = getLanguageGuardPrompt('langidSystemPrompt', 'ru')
             .replace(/{candidates}/g, config.allowedLanguages.join(', '));
@@ -290,14 +317,14 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
             forcePlatformProvider: true,
           });
 
-          const timeoutPromise = new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('outbound langid timeout')), timeoutMs)
-          );
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('outbound langid timeout')), timeoutMs);
+          });
 
           const res = await Promise.race([llmPromise, timeoutPromise]);
           const content = res.content.trim();
-          const jsonStr = content.replace(/^```json\s*/, '').replace(/```$/, '').trim();
-          const parsed = JSON.parse(jsonStr);
+          const jsonMatch = content.match(/\{[\s\S]*\}/);
+          const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
 
           const detectedOutboundLang = String(parsed.lang).trim().toLowerCase();
           if (detectedOutboundLang !== targetLang && (config.allowedLanguages || []).includes(detectedOutboundLang)) {
@@ -306,6 +333,8 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
           }
         } catch (err) {
           console.warn(`[language-guard] outbound langid failed: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          if (timer) clearTimeout(timer);
         }
       }
     }
@@ -401,10 +430,9 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
 
     const timeElapsed = Date.now() - startTime;
     const projectedTime = timeElapsed + 3000;
-    const executionLimit = Math.min(
-      Number(process.env.AGENT_MAX_EXECUTION_MS) || 20000,
-      Number(process.env.TWIN_CHANNEL_ACK_TIMEOUT_MS) || 15000
-    );
+    const AGENT_MAX_MS = getEnvNumber('AGENT_MAX_EXECUTION_MS', 20000);
+    const CHANNEL_ACK_MS = getEnvNumber('TWIN_CHANNEL_ACK_TIMEOUT_MS', 15000);
+    const executionLimit = Math.min(AGENT_MAX_MS, CHANNEL_ACK_MS);
 
     if (remediation === 'translate' && projectedTime > executionLimit) {
       console.warn('[language-guard] Latency budget exceeded. Falling back to strip-block.');
@@ -415,9 +443,10 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
       return runStripBlockFallback('config_strip_block');
     }
 
+    let translateTimer: NodeJS.Timeout | undefined;
     try {
-      const translateModel = process.env.LANG_GUARD_TRANSLATE_MODEL || 'gpt-4o-mini';
-      const translateTimeoutMs = Number(process.env.LANG_GUARD_TRANSLATE_TIMEOUT_MS) || 3000;
+      const translateModel = TRANSLATE_MODEL;
+      const translateTimeoutMs = TRANSLATE_TIMEOUT_MS;
 
       const { maskedText, tokens } = maskTokens(replyToProcess);
 
@@ -434,13 +463,14 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
         forcePlatformProvider: true,
       });
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('translate timeout')), translateTimeoutMs)
-      );
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        translateTimer = setTimeout(() => reject(new Error('translate timeout')), translateTimeoutMs);
+      });
 
       const res = await Promise.race([llmPromise, timeoutPromise]);
       const content = res.content.trim();
-      const translatedMasked = content.replace(/<\/?text_to_translate>/g, '').trim();
+      const tagMatch = content.match(/<text_to_translate>([\s\S]*?)<\/text_to_translate>/i);
+      const translatedMasked = tagMatch ? tagMatch[1].trim() : content.replace(/<\/?text_to_translate>/gi, '').trim();
 
       let fidelityOk = checkFidelity(translatedMasked, tokens);
       let translatedText = restoreTokens(translatedMasked, tokens);
@@ -486,14 +516,16 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
         const regeneratedText = await context.regenerateFn(reinforcedPrompt);
 
         let regenReplyToProcess = regeneratedText;
-        let regenFunnelEnvelope: any = null;
+        let regenFunnelEnvelope: Record<string, unknown> | null = null;
         if (regeneratedText.trim().startsWith('{') && regeneratedText.trim().endsWith('}')) {
           try {
-            regenFunnelEnvelope = JSON.parse(regeneratedText);
-            if ('answer' in regenFunnelEnvelope) {
+            regenFunnelEnvelope = JSON.parse(regeneratedText) as Record<string, unknown>;
+            if (regenFunnelEnvelope && 'answer' in regenFunnelEnvelope) {
               regenReplyToProcess = String(regenFunnelEnvelope.answer);
             }
-          } catch {}
+          } catch (e) {
+            console.warn(`[language-guard] Failed to parse regenerated text as funnel envelope: ${e instanceof Error ? e.message : String(e)}`);
+          }
         }
 
         const { masked: rMasked } = maskCode(regenReplyToProcess);
@@ -570,6 +602,8 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
         };
       }
       return runStripBlockFallback('translate_failed');
+    } finally {
+      if (translateTimer) clearTimeout(translateTimer);
     }
   }
 }
@@ -611,8 +645,8 @@ export async function resolveTargetLanguage(
   }
 
   try {
-    const langidModel = process.env.LANG_GUARD_LANGID_MODEL || 'gpt-4o-mini';
-    const timeoutMs = Number(process.env.LANG_GUARD_LANGID_TIMEOUT_MS) || 3000;
+    const langidModel = LANGID_MODEL;
+    const timeoutMs = LANGID_TIMEOUT_MS;
 
     const systemPrompt = `You are a language identification service. Identify the language of the user input.
 You must respond with a JSON object containing:
@@ -637,15 +671,16 @@ JSON format:
       forcePlatformProvider: true,
     });
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('langid timeout')), timeoutMs)
-    );
+    let langidTimer: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      langidTimer = setTimeout(() => reject(new Error('langid timeout')), timeoutMs);
+    });
 
     const res = await Promise.race([llmPromise, timeoutPromise]);
     
     const content = res.content.trim();
-    const jsonStr = content.replace(/^```json\s*/, '').replace(/```$/, '').trim();
-    const parsed = JSON.parse(jsonStr);
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
 
     const detectedLang = String(parsed.lang).trim().toLowerCase();
     const confidence = Number(parsed.confidence);
@@ -667,6 +702,8 @@ JSON format:
     console.warn(`[language-guard] langid failed or timed out: ${err instanceof Error ? err.message : String(err)}`);
     const fallback = config.fallbackLanguage || allowed[0] || 'en';
     return { target: fallback, source: 'degraded' };
+  } finally {
+    if (langidTimer) clearTimeout(langidTimer);
   }
 }
 
@@ -676,7 +713,7 @@ const CYRILLIC_UNIQUE_CHARS: Record<string, RegExp> = {
   kk: /[әғқңөұүһіӘҒҚҢӨҰҮҺІ]/u,
   tg: /[ғӣҳқҷӯҒӢҲҚҶӮ]/u,
   ky: /[өүңӨҮҢ]/u,
-  mo: /[ӂӄӆӈӌҟыэюя]/u,
+  mo: /[ӂӄӆӈӌҟ]/u,
 };
 
 const LATIN_STOP_WORDS: Record<string, string[]> = {
@@ -782,13 +819,7 @@ function compareArrays<T>(a: T[], b: T[], eqFn: (x: T, y: T) => boolean = (x, y)
 }
 
 function extractCurrencySymbols(text: string): string[] {
-  const symbols = ['$', '€', '₽', 'руб', 'rub', 'usd', 'eur'];
-  const extracted: string[] = [];
-  const normalized = text.toLowerCase();
-  for (const s of symbols) {
-    if (normalized.includes(s)) {
-      extracted.push(s);
-    }
-  }
-  return extracted;
+  const currencyRegex = /\b(?:usd|eur|rub|рублей?)\b|[€$₽]/gi;
+  const matches = text.match(currencyRegex) || [];
+  return [...new Set(matches.map(m => m.toLowerCase()))];
 }
