@@ -1,0 +1,217 @@
+openapi: 3.0.3
+info:
+  title: Embedding Adapter API (TEI-Compatible)
+  description: |
+    Drop-in replacement for HuggingFace TEI that proxies embedding and
+    reranking requests to cloud providers (OpenAI, Jina, Cohere).
+    Matches the TEI HTTP contract expected by @undrecreaitwins/core EmbeddingService.
+  version: 1.0.0
+  contact:
+    name: UnderUndre AI Helpers
+
+servers:
+  - url: http://localhost:8095
+    description: Local development
+
+paths:
+  /embed:
+    post:
+      summary: Generate embeddings
+      description: |
+        Accepts a single string or array of strings, returns raw float vectors.
+        Response shape depends on input:
+        - `string` → `number[]` (single vector)
+        - `string[]` → `number[][]` (array of vectors)
+        No metadata wrapping — matches TEI's strict contract.
+      operationId: embed
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmbedRequest'
+      responses:
+        '200':
+          description: Successful embedding
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: array
+                    items:
+                      type: number
+                    description: Single input response
+                  - type: array
+                    items:
+                      type: array
+                      items:
+                        type: number
+                    description: Batch input response
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /rerank:
+    post:
+      summary: Rerank documents
+      description: |
+        Accepts a query and document list, returns relevance scores sorted by
+        score descending. Matches TEI's rerank contract. Passes `top_n: documents.length`
+        to upstream providers to prevent silent truncation (review-fix).
+      operationId: rerank
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RerankRequest'
+      responses:
+        '200':
+          description: Successful reranking
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RerankResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '504':
+          $ref: '#/components/responses/GatewayTimeout'
+
+  /health:
+    get:
+      summary: Liveness check
+      description: |
+        Lightweight health endpoint. Returns configured provider for debugging.
+        Does NOT check upstream connectivity — keeps healthcheck fast.
+      operationId: health
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+components:
+  schemas:
+    EmbedRequest:
+      type: object
+      required: [inputs]
+      properties:
+        inputs:
+          oneOf:
+            - type: string
+              description: Single text input
+              example: "What is the capital of France?"
+            - type: array
+              items:
+                type: string
+              description: Batch text inputs
+              example: ["What is AI?", "Explain quantum computing"]
+      example:
+        inputs: "Hello world"
+
+    RerankRequest:
+      type: object
+      required: [query, documents]
+      properties:
+        query:
+          type: string
+          description: Search query
+          maxLength: 8192
+          example: "machine learning basics"
+        documents:
+          type: array
+          items:
+            type: string
+            maxLength: 8192
+          description: Documents to rerank
+          maxItems: 1000
+          example: ["ML is a subset of AI", "Python is a language", "Cats are animals"]
+
+    RerankResult:
+      type: object
+      properties:
+        index:
+          type: integer
+          description: Original position in the documents array
+          example: 2
+        score:
+          type: number
+          format: float
+          description: Relevance score (higher = more relevant)
+          example: 0.95
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+        provider:
+          type: string
+          description: Configured embedding provider
+          example: jina
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: BAD_REQUEST
+        message:
+          type: string
+          example: "inputs must be a non-empty string or array"
+
+  responses:
+    BadRequest:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: No API key resolved (header nor env)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UpstreamError:
+      description: Upstream provider returned an error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    GatewayTimeout:
+      description: Upstream provider did not respond in time
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    ServiceUnavailable:
+      description: Circuit breaker open or concurrency limit reached
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
