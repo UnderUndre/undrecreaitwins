@@ -32,11 +32,11 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Purpose**: Package scaffolding, config, types, shared utilities
 
-- [ ] T001 [SETUP] Scaffold `packages/embedding-adapter` with `package.json` (initial version `0.1.0`), `tsconfig.json`, Vitest config, `.gitignore`
-- [ ] T002 [SETUP] Implement config loader (`src/config.ts`) with Zod schema per data-model.md
-- [ ] T003 [SETUP] Implement shared TEI contract types in `src/types.ts` (EmbedRequest, RerankRequest, RerankResult, HealthResponse)
-- [ ] T004 [SETUP] Implement error handling module (`src/lib/errors.ts`) — AppError classes + error-to-HTTP mapping (400/401/502/504)
-- [ ] T005 [BE] Implement API key resolver (`src/lib/auth.ts`) — header-first, env fallback per provider, return 401 if none found
+- [X] T001 [SETUP] Scaffold `packages/embedding-adapter` with `package.json` (initial version `0.1.0`), `tsconfig.json`, Vitest config, `.gitignore`
+- [X] T002 [SETUP] Implement config loader (`src/config.ts`) with Zod schema per data-model.md
+- [X] T003 [SETUP] Implement shared TEI contract types in `src/types.ts` (EmbedRequest, RerankRequest, RerankResult, HealthResponse)
+- [X] T004 [SETUP] Implement error handling module (`src/lib/errors.ts`) — AppError classes + error-to-HTTP mapping (400/401/502/504)
+- [X] T005 [BE] Implement API key resolver (`src/lib/auth.ts`) — header-first, env fallback per provider, return 401 if none found
 
 **Checkpoint**: Foundation ready — shared types, config, auth, error handling complete
 
@@ -48,12 +48,12 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Independent Test**: `curl -X POST http://localhost:8095/embed -H "Content-Type: application/json" -d '{"inputs":"test"}'` returns flat float array
 
-- [ ] T006 [BE] [US1] Implement `EmbedProvider` interface in `src/providers/types.ts`
-- [ ] T007 [BE] [US1] Implement Jina embed provider (`src/providers/jina-embed.ts`) — pass `dimensions: 1024`, unwrap response. **Configure undici `Agent` with `keepAliveTimeout` for TLS reuse (review-fix FR-010).**
-- [ ] T008 [BE] [US1] Implement OpenAI embed provider (`src/providers/openai-embed.ts`) — log startup warning for 1536-dim. **Configure undici `Agent` with `keepAliveTimeout` (review-fix FR-010). Response-side dim-check: log warning if returned dimension ≠ 1024.**
-- [ ] T009 [BE] [US1] Implement response sanitizer (`src/lib/sanitize.ts`) — strip `object`, `model`, `usage`, `data[].object`. **Validate upstream response via Zod schema (review-fix FR-005); return 502 if shape doesn't match.**
-- [ ] T010 [BE] [US1] Implement `POST /embed` route (`src/routes/embed.ts`) — input validation, provider routing, sanitize response, error mapping
-- [ ] T011 [BE] [US1] Implement `GET /health` route (`src/routes/health.ts`) — return status + provider name
+- [X] T006 [BE] [US1] Implement `EmbedProvider` interface in `src/providers/types.ts`
+- [X] T007 [BE] [US1] Implement Jina embed provider (`src/providers/jina-embed.ts`) — pass `dimensions: 1024`, unwrap response. **Configure undici `Agent` with `keepAliveTimeout` for TLS reuse (review-fix FR-010).**
+- [X] T008 [BE] [US1] Implement OpenAI embed provider (`src/providers/openai-embed.ts`) — log startup warning for 1536-dim. **Configure undici `Agent` with `keepAliveTimeout` (review-fix FR-010). Response-side dim-check: log warning if returned dimension ≠ 1024.**
+- [X] T009 [BE] [US1] Implement response sanitizer (`src/lib/sanitize.ts`) — strip `object`, `model`, `usage`, `data[].object`. **Validate upstream response via Zod schema (review-fix FR-005); return 502 if shape doesn't match.**
+- [X] T010 [BE] [US1] Implement `POST /embed` route (`src/routes/embed.ts`) — input validation, provider routing, sanitize response, error mapping
+- [X] T011 [BE] [US1] Implement `GET /health` route (`src/routes/health.ts`) — return status + provider name
 
 **Checkpoint**: `/embed` works with Jina and OpenAI, `/health` responds — MVP!
 
@@ -65,11 +65,11 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Independent Test**: `curl -X POST http://localhost:8095/rerank -H "Content-Type: application/json" -d '{"query":"test","documents":["a","b"]}'` returns sorted `index` + `score`
 
-- [ ] T012 [BE] [US2] Implement `RerankProvider` interface in `src/providers/types.ts` (add to existing file)
-- [ ] T013 [BE] [US2] Implement Cohere rerank provider (`src/providers/cohere-rerank.ts`) — map `relevance_score` → `score`, strip `meta`. **Pass `top_n: documents.length` explicitly (review-fix FR-002).**
-- [ ] T014 [BE] [US2] Implement Jina rerank provider (`src/providers/jina-rerank.ts`) — map `relevance_score` → `score`, strip `document.text`, `model`, `usage`. **Pass `top_n: documents.length` explicitly (review-fix FR-002).**
-- [ ] T015 [BE] [US2] Implement rerank input validation — reject >1000 docs (Cohere) or >2048 (Jina) with 400 + limit message
-- [ ] T016 [BE] [US2] Implement `POST /rerank` route (`src/routes/rerank.ts`) — input validation, provider routing, field normalization, sanitize, error mapping
+- [X] T012 [BE] [US2] Implement `RerankProvider` interface in `src/providers/types.ts` (add to existing file)
+- [X] T013 [BE] [US2] Implement Cohere rerank provider (`src/providers/cohere-rerank.ts`) — map `relevance_score` → `score`, strip `meta`. **Pass `top_n: documents.length` explicitly (review-fix FR-002).**
+- [X] T014 [BE] [US2] Implement Jina rerank provider (`src/providers/jina-rerank.ts`) — map `relevance_score` → `score`, strip `document.text`, `model`, `usage`. **Pass `top_n: documents.length` explicitly (review-fix FR-002).**
+- [X] T015 [BE] [US2] Implement rerank input validation — reject >1000 docs (Cohere) or >2048 (Jina) with 400 + limit message
+- [X] T016 [BE] [US2] Implement `POST /rerank` route (`src/routes/rerank.ts`) — input validation, provider routing, field normalization, sanitize, error mapping
 
 **Checkpoint**: `/rerank` works with Cohere and Jina, batch limits enforced
 
@@ -81,8 +81,8 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Independent Test**: Request with `Authorization: Bearer sk-test` uses that key instead of env
 
-- [ ] T017 [BE] [US3] Implement per-request Authorization header extraction + provider routing in `src/lib/auth.ts` (update existing)
-- [ ] T018 [BE] [US3] Wire auth into embed/rerank route middleware — pass resolved key to provider call
+- [X] T017 [BE] [US3] Implement per-request Authorization header extraction + provider routing in `src/lib/auth.ts` (update existing)
+- [X] T018 [BE] [US3] Wire auth into embed/rerank route middleware — pass resolved key to provider call
 
 **Checkpoint**: Header-first key resolution works end-to-end
 
@@ -94,10 +94,10 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Independent Test**: `docker compose up -d` shows `<100MB RSS` for adapter, no tei-embed/tei-rerank running
 
-- [ ] T019 [OPS] [US4] Create `packages/embedding-adapter/Dockerfile` — Node 20 Alpine, pnpm deploy, `fastify start`. **Healthcheck uses `wget` (Alpine ships it; `curl` absent by default — review-fix).**
-- [ ] T020 [OPS] [US4] Update `docker-compose.standalone.yml` — add `embedding-adapter` service, remove `tei-embed` and `tei-rerank`. **Use `expose: ["8095"]` not `ports:` to avoid publishing API-key-accessible endpoint on host (review-fix S2).**
-- [ ] T021 [OPS] [US4] Update engine env `EMBEDDINGS_URL` to point at `embedding-adapter:8095`
-- [ ] T022 [BE] [US4] Implement Fastify server bootstrap (`src/index.ts`) — register routes, **explicit `bodyLimit` (default 1MB, configurable via `BODY_LIMIT` — review-fix), no CORS by default** (engine-to-adapter is server-to-server per plan.md), healthcheck, graceful shutdown
+- [X] T019 [OPS] [US4] Create `packages/embedding-adapter/Dockerfile` — Node 20 Alpine, pnpm deploy, `fastify start`. **Healthcheck uses `wget` (Alpine ships it; `curl` absent by default — review-fix).**
+- [X] T020 [OPS] [US4] Update `docker-compose.standalone.yml` — add `embedding-adapter` service, remove `tei-embed` and `tei-rerank`. **Use `expose: ["8095"]` not `ports:` to avoid publishing API-key-accessible endpoint on host (review-fix S2).**
+- [X] T021 [OPS] [US4] Update engine env `EMBEDDINGS_URL` to point at `embedding-adapter:8095`
+- [X] T022 [BE] [US4] Implement Fastify server bootstrap (`src/index.ts`) — register routes, **explicit `bodyLimit` (default 1MB, configurable via `BODY_LIMIT` — review-fix), no CORS by default** (engine-to-adapter is server-to-server per plan.md), healthcheck, graceful shutdown
 
 **Checkpoint**: Standalone compose runs without TEI containers, engine works via adapter
 
@@ -107,11 +107,11 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Purpose**: Missing inputs, upstream failures, upstream timeouts, JSON strictness, logging PII guard
 
-- [ ] T023 [BE] Implement empty/null input validation for `/embed` — reject empty string and empty array with 400. **Enforce `MAX_INPUT_CHARS` per string (review-fix FR-009) — reject with 400 if exceeded.**
-- [ ] T024 [BE] Implement upstream timeout handling per `UPSTREAM_TIMEOUT_MS` (default 10000ms) — AbortController, return 504
-- [ ] T025 [BE] Implement upstream error mapping — 401/429/500 → 502, log without PII text. **Catch `SyntaxError`/network errors (`ENOTFOUND`, `ECONNREFUSED`) → 502 (review-fix). Don't expose upstream 401 as-is — avoid credential-oracle timing side-channel.**
-- [ ] T026 [BE] Add no-PII guard to logger — **redact `inputs`/`documents`/`query` from error payloads AND `authorization`/`x-api-key`/`*_api_key` headers from ALL log levels via pino `redact` config (review-fix S1 — auth header leakage is HIGH severity).**
-- [ ] T027 [BE] Add startup dimension warning — if configured provider is known to return ≠1024, log prominent startup warning. **Also add response-side dim-check log for runtime diagnostics (review-fix).**
+- [X] T023 [BE] Implement empty/null input validation for `/embed` — reject empty string and empty array with 400. **Enforce `MAX_INPUT_CHARS` per string (review-fix FR-009) — reject with 400 if exceeded.**
+- [X] T024 [BE] Implement upstream timeout handling per `UPSTREAM_TIMEOUT_MS` (default 10000ms) — AbortController, return 504
+- [X] T025 [BE] Implement upstream error mapping — 401/429/500 → 502, log without PII text. **Catch `SyntaxError`/network errors (`ENOTFOUND`, `ECONNREFUSED`) → 502 (review-fix). Don't expose upstream 401 as-is — avoid credential-oracle timing side-channel.**
+- [X] T026 [BE] Add no-PII guard to logger — **redact `inputs`/`documents`/`query` from error payloads AND `authorization`/`x-api-key`/`*_api_key` headers from ALL log levels via pino `redact` config (review-fix S1 — auth header leakage is HIGH severity).**
+- [X] T027 [BE] Add startup dimension warning — if configured provider is known to return ≠1024, log prominent startup warning. **Also add response-side dim-check log for runtime diagnostics (review-fix).**
 
 **Checkpoint**: All edge cases handled
 
@@ -121,23 +121,23 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Purpose**: Ensure reliability and contract compliance
 
-- [ ] T028 [E2E] Integration test for `/embed` single input — verify `number[]` response shape
-- [ ] T029 [E2E] Integration test for `/embed` batch input — verify `number[][]` response shape
-- [ ] T030 [E2E] Integration test for `/rerank` — verify sorted `RerankResult[]`
-- [ ] T031 [E2E] Integration test for auth header resolution — verify key forwarding
-- [ ] T032 [E2E] Integration test for empty input rejection — verify 400
-- [ ] T033 [E2E] Integration test for upstream timeout — verify 504
-- [ ] T034 [E2E] Integration test for missing credentials — verify 401
-- [ ] T035 [E2E] Integration test for `/health` — verify status + provider fields
+- [X] T028 [E2E] Integration test for `/embed` single input — verify `number[]` response shape
+- [X] T029 [E2E] Integration test for `/embed` batch input — verify `number[][]` response shape
+- [X] T030 [E2E] Integration test for `/rerank` — verify sorted `RerankResult[]`
+- [X] T031 [E2E] Integration test for auth header resolution — verify key forwarding
+- [X] T032 [E2E] Integration test for empty input rejection — verify 400
+- [X] T033 [E2E] Integration test for upstream timeout — verify 504
+- [X] T034 [E2E] Integration test for missing credentials — verify 401
+- [X] T035 [E2E] Integration test for `/health` — verify status + provider fields
 
 ---
 
 ## Phase 8: Polish
 
-- [ ] T036 [OPS] Run `quickstart.md` validation — verify local dev flow
-- [ ] T037 [SEC] Security audit — verify no API key leakage in logs, errors, or responses
-- [ ] T038 [OPS] Create `packages/embedding-adapter/README.md` + register package in root `pnpm-workspace.yaml`
-- [ ] T039 [BE] Add performance benchmark test for `/embed` and `/rerank` — assert <50ms overhead (excluding upstream)
+- [X] T036 [OPS] Run `quickstart.md` validation — verify local dev flow
+- [X] T037 [SEC] Security audit — verify no API key leakage in logs, errors, or responses
+- [X] T038 [OPS] Create `packages/embedding-adapter/README.md` + register package in root `pnpm-workspace.yaml`
+- [X] T039 [BE] Add performance benchmark test for `/embed` and `/rerank` — assert <50ms overhead (excluding upstream)
 
 ---
 
@@ -145,12 +145,12 @@ description: "Task list for Embedding Adapter — TEI-to-cloud proxy service"
 
 **Purpose**: Circuit breaker, concurrency limiter, engine fail-open verification, integration tests for new edge cases
 
-- [ ] T040 [BE] Implement circuit breaker (`src/lib/circuit-breaker.ts`) per FR-007 — `CIRCUIT_FAILURE_THRESHOLD` consecutive failures in 60s window → 503 + half-open probe after `CIRCUIT_RESET_TIMEOUT`. **Fixes claude.md F1 + cline.md F2 (HIGH).**
-- [ ] T041 [BE] Implement concurrency limiter (`src/lib/concurrency.ts`) per FR-008 — semaphore-based `MAX_CONCURRENT_REQUESTS` (default 50), return 503 + `Retry-After: 1` if exceeded. **Fixes claude.md E1 + cline.md F6 (MEDIUM).**
-- [ ] T042 [E2E] Verify engine `EmbeddingService` graceful degradation under adapter failure modes (timeout, 502, 503) — cross-package integration test asserting fail-open behavior. **Fixes claude.md A1 + cline.md F3 (MEDIUM/HIGH). If engine does NOT fail-open, this surfaces the assumption and blocks.**
-- [ ] T043 [E2E] Integration test for `/rerank` — verify `top_n: documents.length` passed (50 docs → 50 results, not 10). **Fixes claude.md E2 (MEDIUM — silent truncation contract breaker).**
-- [ ] T044 [E2E] Integration test for `MAX_INPUT_CHARS` rejection — verify 400 on oversized string. **Fixes cline.md F5 (MEDIUM).**
-- [ ] T045 [E2E] Integration test for circuit breaker open → 503, half-open recovery. **Fixes claude.md F1 (MEDIUM).**
+- [X] T040 [BE] Implement circuit breaker (`src/lib/circuit-breaker.ts`) per FR-007 — `CIRCUIT_FAILURE_THRESHOLD` consecutive failures in 60s window → 503 + half-open probe after `CIRCUIT_RESET_TIMEOUT`. **Fixes claude.md F1 + cline.md F2 (HIGH).**
+- [X] T041 [BE] Implement concurrency limiter (`src/lib/concurrency.ts`) per FR-008 — semaphore-based `MAX_CONCURRENT_REQUESTS` (default 50), return 503 + `Retry-After: 1` if exceeded. **Fixes claude.md E1 + cline.md F6 (MEDIUM).**
+- [X] T042 [E2E] Verify engine `EmbeddingService` graceful degradation under adapter failure modes (timeout, 502, 503) — cross-package integration test asserting fail-open behavior. **Fixes claude.md A1 + cline.md F3 (MEDIUM/HIGH). If engine does NOT fail-open, this surfaces the assumption and blocks.**
+- [X] T043 [E2E] Integration test for `/rerank` — verify `top_n: documents.length` passed (50 docs → 50 results, not 10). **Fixes claude.md E2 (MEDIUM — silent truncation contract breaker).**
+- [X] T044 [E2E] Integration test for `MAX_INPUT_CHARS` rejection — verify 400 on oversized string. **Fixes cline.md F5 (MEDIUM).**
+- [X] T045 [E2E] Integration test for circuit breaker open → 503, half-open recovery. **Fixes claude.md F1 (MEDIUM).**
 
 **Checkpoint**: All review findings addressed in code or verified via test
 

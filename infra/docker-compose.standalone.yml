@@ -52,39 +52,25 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  tei-embed:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
-    ports:
-      - "${TEI_EMBED_PORT:-8080}:80"
+  embedding-adapter:
+    build:
+      context: ..
+      dockerfile: packages/embedding-adapter/Dockerfile
+    expose:
+      - "8095"
+    env_file: .env
     environment:
-      MODEL_ID: BAAI/bge-m3
-      MAX_BATCH_TOKENS: 16384
-      MAX_CLIENT_BATCH_SIZE: 32
-    volumes:
-      - tei_embed_cache:/data
+      PORT: 8095
+      HOST: 0.0.0.0
+      EMBEDDING_PROVIDER: jina
+      RERANK_PROVIDER: jina
+      JINA_API_KEY: ${JINA_API_KEY}
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8095/health"]
       interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 300s
-    restart: unless-stopped
-
-  tei-rerank:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
-    ports:
-      - "${TEI_RERANK_PORT:-8081}:80"
-    environment:
-      MODEL_ID: BAAI/bge-reranker-v2-m3
-      MAX_BATCH_TOKENS: 16384
-    volumes:
-      - tei_rerank_cache:/data
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 300s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
 
   honcho:
@@ -138,8 +124,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
       REDIS_URL: redis://redis:6379
       REDIS_HOST: redis
-      EMBEDDINGS_URL: http://tei-embed:80
-      RERANK_URL: http://tei-rerank:80
+      EMBEDDINGS_URL: http://embedding-adapter:8095
+      RERANK_URL: http://embedding-adapter:8095
       HONCHO_URL: http://honcho:8080
       DOTENV_CONFIG_AUTOLOAD: "false"
       TWIN_AUTH_STATIC_TOKEN: "${TWIN_AUTH_STATIC_TOKEN:-twin-engine-secret-token}"
@@ -165,8 +151,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-undre}:${POSTGRES_PASSWORD:-undre}@postgres:5432/${POSTGRES_DB:-twinengine}
       REDIS_URL: redis://redis:6379
       REDIS_HOST: redis
-      EMBEDDINGS_URL: http://tei-embed:80
-      RERANK_URL: http://tei-rerank:80
+      EMBEDDINGS_URL: http://embedding-adapter:8095
+      RERANK_URL: http://embedding-adapter:8095
       DOTENV_CONFIG_AUTOLOAD: "false"
     depends_on:
       postgres:
@@ -288,6 +274,4 @@ services:
 volumes:
   pgdata:
   redisdata:
-  tei_embed_cache:
-  tei_rerank_cache:
   evolution_instances:
