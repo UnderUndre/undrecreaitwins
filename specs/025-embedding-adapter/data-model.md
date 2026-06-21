@@ -39,8 +39,8 @@ export const AdapterConfig = z.object({
   // Input size guard (review-fix)
   MAX_INPUT_CHARS: z.coerce.number().default(8192),
 
-  // Fastify body limit in bytes (review-fix — explicit default)
-  BODY_LIMIT: z.coerce.number().default(1_048_576),
+  // Fastify body limit in bytes (increased to support max rerank payload of ~8MB: 1000 docs × 8192 chars)
+  BODY_LIMIT: z.coerce.number().default(9_000_000),
 
   // Logging
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
@@ -109,7 +109,6 @@ Pino logger MUST redact the following paths from ALL log levels (not just error 
 ```typescript
 const redactPaths = [
   'req.headers.authorization',
-  'req.headers["x-api-key"]',
   'req.headers["x-api-key"]',
   // Wildcard for any provider key header
   'req.headers["openai-api-key"]',

@@ -210,14 +210,15 @@ Replace in `docker-compose.standalone.yml`:
 services:
   embedding-adapter:
     build: ./packages/embedding-adapter
-    ports: ["8095:8095"]
+    expose:
+      - "8095"
     environment:
       EMBEDDING_PROVIDER: jina
       RERANK_PROVIDER: jina
       JINA_API_KEY: ${JINA_API_KEY}
       PORT: 8095
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8095/health"]
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8095/health"]
       interval: 30s
       timeout: 5s
       retries: 3
