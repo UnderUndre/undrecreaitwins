@@ -24,9 +24,9 @@ class CircuitBreaker {
   }
 
   public recordSuccess(): void {
+    this.failureCount = 0;
     if (this.state === 'HALF_OPEN') {
       this.state = 'CLOSED';
-      this.failureCount = 0;
     }
   }
 

@@ -63,9 +63,6 @@ export const rerankRoutes: FastifyPluginAsync = async (fastify) => {
     // Check concurrency limit
     limiter.acquire();
 
-    // Resolve API key
-    const apiKey = resolveKey(request, providerName);
-
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), config.UPSTREAM_TIMEOUT_MS);
     if (request.signal) {
@@ -75,6 +72,9 @@ export const rerankRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
+      // Resolve API key
+      const apiKey = resolveKey(request, providerName);
+
       // Call provider
       const rawResult = await provider.rerank(query, documents, model, apiKey, controller.signal);
       clearTimeout(timeoutId);
@@ -87,8 +87,8 @@ export const rerankRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.send(sanitized);
     } catch (error) {
       clearTimeout(timeoutId);
-      // Record failure if it is an upstream/timeout error
-      if (error instanceof UpstreamError || error instanceof GatewayTimeoutError) {
+      // Record failure if it is an upstream/timeout error, but NOT if the client aborted
+      if (!request.signal?.aborted && (error instanceof UpstreamError || error instanceof GatewayTimeoutError)) {
         breaker.recordFailure();
       }
       throw error;

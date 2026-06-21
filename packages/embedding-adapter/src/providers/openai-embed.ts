@@ -78,7 +78,7 @@ export class OpenAIEmbedProvider implements EmbedProvider {
       if (error instanceof UpstreamError) {
         throw error;
       }
-      if (signal.aborted || error.name === 'AbortError' || error.message?.includes('timeout')) {
+      if (signal.aborted || error.name === 'AbortError' || error.name === 'TimeoutError' || error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
         throw new GatewayTimeoutError('OpenAI Embed upstream provider timed out');
       }
       throw new UpstreamError(`OpenAI Embed network/connection error: ${error.message}`);
