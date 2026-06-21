@@ -24,7 +24,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | Concern | Choice | Notes |
 |---------|--------|-------|
 | DB | PostgreSQL + **pgvector** | annotations + document_chunks vectors. **Qdrant dropped** — one store |
-| Embeddings + rerank | **BGE-M3** + **BGE-reranker-v2-m3** via a **TEI sidecar** (HTTP, `EMBEDDINGS_URL`) | multilingual incl. Russian |
+| Embeddings + rerank | **BGE-M3** + **BGE-reranker-v2-m3** via a **TEI sidecar** (HTTP, `EMBEDDINGS_URL`) OR **Embedding Adapter** (025, `packages/embedding-adapter`, cloud provider proxy) | multilingual incl. Russian; adapter option for low-RAM environments |
 | Retrieval | **vector (HNSW cosine) + reranker** | hybrid / full-text **deferred** (no tsvector/GIN yet) |
 | Queue / cron | **Redis + BullMQ** | document parse, re-engagement scan |
 | Channel transport | **Redis Streams** (`ChannelTransport`) | INBOUND/OUTBOUND between adapters ↔ engine |
@@ -69,6 +69,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | 019-feedback-loop-closure | **Prompt-time feedback retrieval.** Closes the feedback loop: before generating a reply, retrieves top-K relevant `feedback_memories` via pgvector cosine search (BGE-M3), injects as operator lessons into the system prompt alongside persona + RAG docs. Prompt composition contract resolves conflicts (RAG-facts > feedback > persona-defaults). Budget allocation per layer (persona hard floor 500, feedback cap ~500, RAG remainder). Dedup within conversation stage (reset on funnel stage transition or N-message fallback). `conversation_feedback_states` table tracks applied memory IDs. New `feedback_memories` table (vector + lesson + status + operator_role + weight). Per-persona config (`feedbackRetrievalEnabled` + `feedbackTokenBudget`). Engine read endpoint `GET /v1/internal/retrieved-feedback`. Graceful degradation — feedback failure never blocks reply. Admin UI = Product (`ai-twins/021`). |
 | 020-engine-funnel-richness | **Enhanced funnel runtime.** Implements delivery cascade (verbatim/template/llm), variable substitution `{{slot}}`, adaptive intro bridges, structured slot extraction to DB, anytime/triggered stages with LIFO stack, and human-like pacing metadata (`delay_ms`, `typing_chunks`). Includes output guards for banned words and anti-repeat logic. Sync post-turn extraction ensures guards see fresh data. |
 | 024-language-guard-rewrite-mirror | LLM-based rewrite remediation (translate) for LanguageGuard, tiered escalation (detect -> translate -> regenerate), and inbound language mirroring (dynamic directive resolution). Buffered delivery for active guards. |
+| 025-embedding-adapter | Lightweight TEI-to-cloud proxy (`packages/embedding-adapter`, Fastify). Replaces `tei-embed`/`tei-rerank` Docker containers with cloud API calls (OpenAI/Jina embeddings, Cohere/Jina rerank). Single port 8095, drop-in replacement in compose, <100MB overhead. |
 
 ## 6. Cross-repo boundary (runtime ↔ admin)
 
