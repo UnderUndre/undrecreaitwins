@@ -470,7 +470,7 @@ export class LanguageGuardValidator implements ResponseValidator<LanguageGuardCo
       const res = await Promise.race([llmPromise, timeoutPromise]);
       const content = res.content.trim();
       const tagMatch = content.match(/<text_to_translate>([\s\S]*?)<\/text_to_translate>/i);
-      const translatedMasked = tagMatch ? tagMatch[1].trim() : content.replace(/<\/?text_to_translate>/gi, '').trim();
+      const translatedMasked = tagMatch && tagMatch[1] ? tagMatch[1].trim() : content.replace(/<\/?text_to_translate>/gi, '').trim();
 
       let fidelityOk = checkFidelity(translatedMasked, tokens);
       let translatedText = restoreTokens(translatedMasked, tokens);
@@ -644,6 +644,7 @@ export async function resolveTargetLanguage(
     return { target: fallback, source: 'fallback' };
   }
 
+  let langidTimer: NodeJS.Timeout | undefined;
   try {
     const langidModel = LANGID_MODEL;
     const timeoutMs = LANGID_TIMEOUT_MS;
@@ -671,7 +672,6 @@ JSON format:
       forcePlatformProvider: true,
     });
 
-    let langidTimer: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
       langidTimer = setTimeout(() => reject(new Error('langid timeout')), timeoutMs);
     });
