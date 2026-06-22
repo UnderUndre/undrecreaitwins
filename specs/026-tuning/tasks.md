@@ -129,6 +129,7 @@ description: "Task list for Engine Tuning — Adaptive Configuration Pipeline wi
 - [ ] T030 [BE] Implement poll-time reaper in poll handler (FR-003) — flip generating >90s to failed with error='GENERATION_STALLED'. Include in `TuningDraftRepository.getById()` or as middleware in poll route.
 - [ ] T031 [BE] [US2] Implement chained activation — activate draft B → mark draft A as superseded. Rollback only on current active draft B; rollback on superseded A → 409 `DRAFT_SUPERSEDED`
 - [ ] T032 [BE] [US4] Implement proposal cache miss on accept/reject → 404 `PROPOSAL_EXPIRED`
+- [ ] T053 [BE] Implement `diffSections` computation in `ActivatePipeline` — after activate, compute structured diff between previousSnapshot and new config (systemPrompt changed Y/N, funnelConfig changed Y/N, validatorToggles changed Y/N). Store in `diffSections` JSONB column.
 
 **Checkpoint**: All edge cases handled — proper error codes (400/404/409) on expected failures
 
@@ -136,7 +137,7 @@ description: "Task list for Engine Tuning — Adaptive Configuration Pipeline wi
 
 ## Phase 8: Testing & Verification
 
-**Purpose**: Integration tests for each user story and edge case
+**Purpose**: Integration tests for each user story, edge case, and performance benchmarks for timing SLAs (SC-001, SC-003).
 
 - [ ] T033 [E2E] [US1] Integration test: upload 2-3 persona documents → call generate → poll until ready → verify systemPrompt + funnelConfig non-empty
 - [ ] T034 [E2E] [US1] Integration test: generate with 0 documents → verify 400 `NO_DOCUMENTS`
@@ -153,16 +154,21 @@ description: "Task list for Engine Tuning — Adaptive Configuration Pipeline wi
 - [ ] T045 [E2E] Integration test: cross-tenant draft access → verify 404
 - [ ] T046 [E2E] Integration test: stalled generation — create draft with status=generating, older createdAt → poll → verify flipped to failed GENERATION_STALLED
 - [ ] T047 [E2E] Integration test: rollback with null previousSnapshot → 400
+- [ ] T051 [E2E] Performance benchmark: measure doc extraction draft generation — assert <60s for ≤5 docs (≤50KB) per SC-001
+- [ ] T052 [E2E] Performance benchmark: measure sandbox preview response time — assert <10s per SC-003
 
-**Checkpoint**: All user stories, edge cases, and error paths covered by integration tests
+**Checkpoint**: All user stories, edge cases, error paths, and timing SLAs covered by integration + benchmark tests
 
 ---
 
-## Phase 9: Polish
+## Phase 9: Polish & Deferrals
 
 - [ ] T048 [OPS] Update `.env.example` with any tuning-specific config (e.g., `TUNING_EXTRACTION_TIMEOUT_MS`, `TUNING_STALL_TIMEOUT_MS`)
 - [ ] T049 [SETUP] Update `specs/main/architecture.md` §3 (Core Service Patterns) to mention tuning services
 - [ ] T050 [SETUP] Verify quickstart.md walkthrough — all curls return expected responses
+- [ ] T054 [BE] Follow-up: migrate hardcoded extraction prompt (T013) to admin-editable setting per coding standards §15.1 — add `admin_settings` row keyed `TUNING_EXTRACTION_PROMPT_CONTENT`, implement `resolveExtractionPrompt()` with per-assistant → admin-setting → hardcoded fallback chain
+
+**Method B (Template Bootstrap) deferral**: Method B implementation is explicitly deferred to a follow-up spec, as per 2026-06-22 clarification: "Content task = separate from code." The `templates` table extension (`funnel_preset` + `validator_preset` JSONB columns) and template-bootstrap pipeline will be delivered in a separate feature spec post-v1. The `template-bootstrap.ts` reference has been removed from the plan.md project structure.
 
 ---
 
@@ -193,6 +199,7 @@ T009 → T026                         # generate route before concurrent guard
 T019 → T027                         # sandbox route before empty RAG guard
 T015 → T030                         # activate before poll-time reaper (reaper in poll route)
 T023 → T032                         # proposals before expired-proposal guard
+T014 → T053                         # activate pipeline before diffSections computation (computed inside activate)
 T009 + T010 + T011 + T008 + T012 + T013 → T033, T034, T035, T036  # US1 routes + pipeline before US1 tests
 T014 + T015 + T016 + T017 → T037, T038, T039  # activate + rollback + review before US2 tests
 T018 + T019 → T040, T041            # sandbox before US5 tests
@@ -201,9 +208,12 @@ T022 + T023 → T043, T044            # proposals before US4 tests
 T029 → T045                         # cross-tenant guard before its test
 T030 → T046                         # reaper before stall test
 T028 → T047                         # no-previous-snapshot guard before its test
+T024 + T033 → T051                  # timeout handling + US1 test before benchmark
+T019 + T040 → T052                  # sandbox route + test before benchmark
 T004 → T048                         # repository before env config
 T007 → T049                         # routes before arch doc update
-T033 + T034 + T035 + T036 + T037 + T038 + T039 + T040 + T041 + T042 + T043 + T044 + T045 + T046 + T047 → T050  # all tests pass before quickstart validation
+T013 → T054                         # hardcoded prompt before admin-editable migration
+T033 + T034 + T035 + T036 + T037 + T038 + T039 + T040 + T041 + T042 + T043 + T044 + T045 + T046 + T047 + T051 + T052 → T050  # all tests pass before quickstart validation
 
 ### Self-Validation Checklist
 
@@ -225,6 +235,11 @@ T033 + T034 + T035 + T036 + T037 + T038 + T039 + T040 + T041 + T042 + T043 + T04
 - [ ] FR-011 (Concurrent lock) covered by T026
 - [ ] FR-012 (Tenant isolation) covered by T029
 - [ ] FR-013 (Quality gate) covered by T012
+- [ ] diffSections populated (A3 fix) covered by T053
+- [ ] SC-001 timing SLA (60s) covered by T051
+- [ ] SC-003 timing SLA (10s) covered by T052
+- [ ] Admin-editable prompt follow-up (A7 fix) covered by T054
+- [ ] Method B deferral documented (A1/A4 fix) — deferral note in Phase 9
 - [ ] US1 tests covered by T033–T036
 - [ ] US2 tests covered by T037–T039
 - [ ] US3 test covered by T042
@@ -258,6 +273,7 @@ graph LR
     T008 & T009 --> T012
     T014 --> T015
     T014 --> T016
+    T014 --> T053
     T016 --> T028
     T015 --> T029
     T015 --> T031
@@ -270,6 +286,9 @@ graph LR
     T019 --> T027
     T015 --> T030
     T023 --> T032
+    T024 & T033 --> T051
+    T019 & T040 --> T052
+    T013 --> T054
     T009 & T010 & T011 & T008 & T012 & T013 --> T033
     T009 & T010 & T011 & T008 & T012 & T013 --> T034
     T009 & T010 & T011 & T008 & T012 & T013 --> T035
@@ -287,7 +306,7 @@ graph LR
     T028 --> T047
     T004 --> T048
     T007 --> T049
-    T033 & T034 & T035 & T036 & T037 & T038 & T039 & T040 & T041 & T042 & T043 & T044 & T045 & T046 & T047 --> T050
+    T033 & T034 & T035 & T036 & T037 & T038 & T039 & T040 & T041 & T042 & T043 & T044 & T045 & T046 & T047 & T051 & T052 --> T050
 ```
 
 ---
@@ -303,10 +322,13 @@ graph LR
 | 5 | [BE] | T018 → T019 | T007 |
 | 6 | [BE] | T020 → T021 | T005 + T007 |
 | 7 | [BE] | T022 → T023 | T005 + T007 |
-| 8 | [BE] | T024, T025, T026, T027, T028, T029, T030, T031, T032 | T008, T009, T015, T016, T018, T019, T023 |
+| 8 | [BE] | T024–T032, T053 | T008, T009, T015, T016, T018, T019, T023 |
 | 9 | [E2E] | T033–T047 | Phase 2–6 completions |
-| 10 | [OPS] | T048 | T004 |
-| 11 | [SETUP] | T049, T050 | All tests pass |
+| 10 | [E2E] | T051 | T024 + T033 |
+| 11 | [E2E] | T052 | T019 + T040 |
+| 12 | [OPS] | T048 | T004 |
+| 13 | [SETUP] | T049, T050 | All tests pass |
+| 14 | [BE] | T054 | T013 |
 
 ---
 
@@ -316,11 +338,11 @@ graph LR
 |-------|-----------|-----------------|
 | [DB] | 2 | Immediately |
 | [SETUP] | 4 | T001 (Zod), T001 + T003 (types), all tests (quickstart) |
-| [BE] | 33 | T001 + T003 (repository), T006 (routes), T007 (scaffolding) |
-| [E2E] | 15 | Routes + services complete per US |
+| [BE] | 35 | T001 + T003 (repository), T006 (routes), T007 (scaffolding) |
+| [E2E] | 17 | Routes + services complete per US |
 | [OPS] | 1 | T004 |
 
-**Critical Path**: T001 → T003 → T004 → T007 → T009 → T008 → T024 → T033 → T050
+**Critical Path**: T001 → T003 → T004 → T007 → T009 → T008 → T024 → T033 → T051 → T050
 
 ---
 
@@ -330,8 +352,8 @@ graph LR
 |-------|----------|--------|---------------|-------|-------|
 | `[DB]` | database-architect | database-design | data-model.md §1 (tuning_drafts table), plan.md §storage | T001, T002 | `packages/core/src/db/schema/tuning.ts`, `drizzle/` |
 | `[SETUP]` | — (orchestrator) | — | data-model.md §1–3 (types), contracts/tuning-api.md (Zod schemas), plan.md §structure, quickstart.md | T003, T006, T049, T050 | `packages/core/src/types/tuning.ts`, `packages/api/src/schemas/tuning.ts`, `specs/main/architecture.md` |
-| `[BE]` | backend-specialist | api-patterns, nodejs-best-practices, clean-code | plan.md §technical-context, plan.md §source-code, data-model.md §1–5, contracts/tuning-api.md, research.md §1–7, spec.md §User Scenarios + §Edge Cases + §Functional Requirements | T004, T005, T007–T032 | `packages/core/src/services/tuning/*.ts`, `packages/core/src/services/llm-client.ts` (extend), `packages/api/src/routes/tuning/*.ts`, `packages/api/src/schemas/tuning.ts` |
-| `[E2E]` | test-engineer | testing-patterns, webapp-testing | contracts/tuning-api.md, quickstart.md, spec.md §User Scenarios + §Edge Cases, data-model.md §1 | T033–T047 | `packages/core/test/tuning/*.ts`, `packages/api/test/tuning/*.ts` |
+| `[BE]` | backend-specialist | api-patterns, nodejs-best-practices, clean-code | plan.md §technical-context, plan.md §source-code, data-model.md §1–5, contracts/tuning-api.md, research.md §1–7, spec.md §User Scenarios + §Edge Cases + §Functional Requirements | T004, T005, T007–T032, T053, T054 | `packages/core/src/services/tuning/*.ts`, `packages/core/src/services/llm-client.ts` (extend), `packages/api/src/routes/tuning/*.ts`, `packages/api/src/schemas/tuning.ts` |
+| `[E2E]` | test-engineer | testing-patterns, webapp-testing, performance-profiling | contracts/tuning-api.md, quickstart.md, spec.md §User Scenarios + §Edge Cases + §Success Criteria, data-model.md §1 | T033–T047, T051, T052 | `packages/core/test/tuning/*.ts`, `packages/api/test/tuning/*.ts` |
 | `[OPS]` | devops-engineer | docker-expert | plan.md, quickstart.md | T048 | `.env.example` |
 
 ---
@@ -343,14 +365,14 @@ graph LR
 1. Phase 1: Setup — T001–T007 → **STOP, verify foundation**
 2. Phase 2: US1 (draft generation) — T008–T013 → **STOP, test generate→poll→ready**
 3. Phase 3: US2 (activate/rollback) — T014–T017 → **STOP, test activate→rollback**
-4. Phase 7: Edge cases (timeout, concurrent, reaper) — T024–T032
-5. Phase 8: Core tests — T033–T039, T045–T047
-6. **MVP ready**: doc-extraction generation + activate/rollback + sandbox preview + all edge cases
+4. Phase 7: Edge cases (timeout, concurrent, reaper, diffSections) — T024–T032, T053
+5. Phase 8: Core tests + benchmarks — T033–T039, T045–T047, T051
+6. **MVP ready**: doc-extraction generation + activate/rollback + sandbox preview + all edge cases + timing SLAs
 
 ### Full Delivery (P2/P3 Stories Added)
 
 1. Phase 4: US5 (sandbox preview) — T018–T019 → **STOP, test sandbox**
 2. Phase 5: US3 (interview) — T020–T021 → **STOP, test interview flow**
 3. Phase 6: US4 (proposals) — T022–T023 → **STOP, test proposals**
-4. Remaining E2E tests — T040–T044
-5. Phase 9: Polish — T048–T050
+4. Remaining E2E tests + benchmarks — T040–T044, T052
+5. Phase 9: Polish + admin-editable prompt — T048–T050, T054

@@ -63,7 +63,6 @@ packages/core/src/
 │   ├── tuning/
 │   │   ├── tuning-draft-repository.ts  # CRUD for tuning_drafts (tenant-scoped)
 │   │   ├── doc-extraction-pipeline.ts  # Method A: RAG chunks → LLM → draft
-│   │   ├── template-bootstrap.ts       # Method B: template → draft
 │   │   ├── interview-state-machine.ts  # Method C: Q&A session → draft
 │   │   ├── conversation-analyzer.ts    # Method D: recent chats → proposals
 │   │   ├── sandbox-draft-mode.ts       # ChatService overlay with draft config
