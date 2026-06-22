@@ -31,15 +31,21 @@
 CREATE INDEX idx_tuning_drafts_persona_status ON tuning_drafts (persona_id, status);
 CREATE INDEX idx_tuning_drafts_tenant_status ON tuning_drafts (tenant_id, status);
 CREATE INDEX idx_tuning_drafts_created_at ON tuning_drafts (created_at DESC);
+-- Partial unique index: enforces FR-011 (only one generating draft per persona)
+CREATE UNIQUE INDEX idx_tuning_drafts_persona_generating ON tuning_drafts (persona_id) WHERE status = 'generating';
 ```
 
 ### 1.3 RLS Policy
 
+Mirror the established engine pattern exactly (FORCE + WITH CHECK + 2-arg current_setting):
+
 ```sql
 ALTER TABLE tuning_drafts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tuning_drafts FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY tenant_isolation ON tuning_drafts
-  USING (tenant_id = current_setting('app.current_tenant')::text);
+  USING (tenant_id = current_setting('app.current_tenant', true))
+  WITH CHECK (tenant_id = current_setting('app.current_tenant', true));
 ```
 
 ### 1.4 Drizzle Schema Definition
@@ -91,11 +97,15 @@ interface InterviewSession {
 
 ### 2.2 Redis Key
 
+Keyed per interviewer (not just per persona) to prevent concurrent admins clobbering each other:
+
 ```
-tuning:interview:{tenantId}:{personaId}
+tuning:interview:{tenantId}:{personaId}:{userId}
 ```
 
 TTL: 1800s (30 min)
+
+**Cursor semantics**: `answer` records the answer and advances `currentQuestion`. `next` serves the question at the current (unanswered) position without advancing. Double-`next` returns the same question.
 
 ## 3. Tuning Proposal (Redis cache, ephemeral)
 
@@ -116,12 +126,19 @@ interface TuningProposal {
 
 ### 3.2 Redis Keys
 
+Store proposals in a **single structure** (JSON array) to avoid dual-key consistency issues:
+
 ```
-tuning:proposals:{tenantId}:{personaId}    // Proposal set (TTL 1800s)
-tuning:proposal:{proposalId}               // Individual proposal (TTL 1800s)
+tuning:proposals:{tenantId}:{personaId}    // JSON array of TuningProposal (TTL 1800s)
 ```
 
-## 4. Configuration Overlay (Sandbox Preview)
+On `reject`: update the cached array to remove the rejected proposal (rewrite the key).
+On `accept`: remove the proposal from the cached array + create draft.
+No separate per-item keys — the array is the single source of truth.
+
+## 4. Configuration Overlay (Sandbox Preview) + Previous Snapshot Scope
+
+### 4.1 DraftConfigOverlay (Sandbox)
 
 ```typescript
 interface DraftConfigOverlay {
@@ -131,7 +148,25 @@ interface DraftConfigOverlay {
 }
 ```
 
-This overlay is passed to `ChatService.buildSystemPrompt()` and the funnel/validator pipelines. It shadows live persona config fields without mutation.
+This overlay is applied via **shadow persona object**: `ChatService.complete()` loads the live persona, then replaces fields with overlay values before passing to sub-pipelines (funnel runtime, validator pipeline). No private-method patching — the overlay threads through the existing public API via an optional `draftOverride` field on `ChatRequest`.
+
+### 4.2 PreviousSnapshot Scope (Rollback)
+
+`previousSnapshot` captures the **full live config before activation** — not just persona prompt:
+
+```typescript
+interface PreviousSnapshot {
+  // Persona
+  systemPrompt: string;
+  traits: Record<string, unknown>;
+  // Funnel
+  priorFunnelVersionId: string | null;
+  // Validators
+  priorValidatorToggles: Record<string, boolean>;
+}
+```
+
+Rollback (FR-007) restores ALL three: persona prompt/traits, reactivates prior funnel version, restores validator toggles.
 
 ## 5. LLM Structured Output Schema
 

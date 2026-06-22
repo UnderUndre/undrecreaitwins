@@ -14,34 +14,39 @@
 ### 1.2 Chat Pipeline (Sandbox Preview)
 
 - **Service**: `ChatService` in `packages/core/src/services/chat-service.ts`
-- **Method**: `buildSystemPrompt()` → `complete()` (or streaming variant)
-- **Override mechanism**: Need to inject draft `systemPrompt` + `funnelConfig` + `validatorToggles` into the pipeline without mutating the live persona
-- **Approach**: Create a `DraftConfigOverlay` object that wraps the live persona config and shadows specific fields. Pass to `ChatService` as an optional parameter.
+- **Method**: `complete()` is the public entrypoint (line 168). `buildSystemPrompt()` is private (line 1108).
+- **Override mechanism**: Inject draft `systemPrompt` + `funnelConfig` + `validatorToggles` into the pipeline without mutating the live persona.
+- **Approach**: **Shadow persona object** — construct a shallow copy of the persona row with draft fields overlaid, then pass it through the existing `ChatService.complete()` public API. No private-method patching. The `ChatRequest` type gains an optional `draftOverride?: DraftConfigOverlay` field; `ChatService.complete()` checks for override after loading persona from DB and replaces the corresponding fields before passing to funnel runtime + validator pipeline. This is additive (non-breaking) and threads the overlay through all sub-pipelines.
 
 ### 1.3 Persona CRUD (Activate/Rollback)
 
 - **Repository**: `PersonaRepository` in `packages/core/src/services/persona-repository.ts`
-- **Key methods**: `getPersonaById()`, `updatePersona()` — both tenant-scoped
+- **Key methods**: `getById()`, `update()` — both tenant-scoped via `withTenantContext`
+- **Atomicity**: `update()` opens its own `withTenantContext` transaction. For atomic activate (FR-006), `PersonaRepository.update()` MUST be refactored to accept an injected `tx` parameter so the caller controls the transaction boundary. Alternatively, activate uses raw drizzle queries inside a single `withTenantContext` instead of calling the repository.
 - **Fields to update on activate**: `system_prompt`, `traits` (JSONB)
-- **Snapshot**: Read current persona config before update, store as `previousSnapshot` JSONB in the draft
+- **Snapshot**: Read current persona config (systemPrompt, traits) + prior funnel active-version id + prior validator toggles before update, store as `previousSnapshot` JSONB in the draft.
 
 ### 1.4 Funnel CRUD (Activate)
 
 - **Repository**: `FunnelRepository` in `packages/core/src/services/funnel/funnel-repository.ts`
-- **Key method**: `createFunnelVersion(personaId, funnelConfig)` — creates a new version entry
-- **Reuse**: 100% — funnel config from draft is passed directly
+- **Real API**: `createVersion(definitionId, config, stages[], slots[])` (line 153) — requires a pre-existing `funnelDefinition` (via `createFunnel()`/`getActiveVersion()`). Each stage requires `fragments[]` (text content for delivery).
+- **Reuse**: **EXTEND, not 100% reuse.** The draft's flat `funnelConfig` JSONB and the LLM's `funnelStages: [{name, description, triggers, slots[]}]` (data-model §5) must be **decomposed** into `stages` + `slots[]` arrays. A `fragments[]` array must be synthesized for each stage (default: use the stage `description` as the fragment text). A definition must be resolved or created first (`createFunnel()` if persona has no funnel, `getActiveVersion()` + `createVersion()` if upgrading).
+- **New task needed**: `funnelConfig → {definition, stages[], fragments[], slots[]}` mapper service.
+- **Atomicity**: Like PersonaRepository, `createVersion` opens its own transaction. For atomic activate, it MUST accept an injected `tx`.
 
 ### 1.5 Validator Pipeline (Quality Gate)
 
 - **Service**: Validator pipeline in `packages/core/src/services/validators/pipeline.ts`
-- **Method**: `runDryRun(systemPrompt, messages)` — runs validators without affecting live state
-- **Reuse**: 90% — dry-run mode exists, may need minor extension for tuning-specific metrics
+- **Real API**: `validateResponse(reply, context)` and `validateInput(input, context)`. "dry-run" is a *per-validator mode* read from `validator_configs` (line 95,98), NOT a callable method. `validateResponse` requires a `conversationId` and persists to `validator_runs` — at generation time there is no conversation.
+- **Reuse**: **NOT available for v1 quality gate.** Validators judge a *generated reply*, not a *systemPrompt*. Computing a block-rate requires generating sample replies first.
+- **v1 approach**: Drop validator-based quality gate. Use LLM self-reported `confidence` from the extraction output (data-model §5). Validator-based gating deferred to v1.1 (requires probe-message set + synthetic conversation context).
 
 ### 1.6 LLM Client (Extraction + Interview + Self-Tuner)
 
 - **Service**: `LLMClient` in `packages/core/src/services/llm-client.ts`
-- **Key method**: `complete(messages, options?)` — supports `response_format: { type: 'json_object' }` for OpenAI-compatible providers
-- **Extension needed**: Structured output parsing with fallback for unparseable JSON
+- **Real API**: `complete(params: LLMRequest)` sends `{ model, messages, temperature, max_tokens }` (line 65-70). The `LLMRequest` interface (line 14-20) has **no `response_format` field**.
+- **Reuse**: **EXTEND, not 100% reuse.** Add `responseFormat?: { type: 'json_object' }` to `LLMRequest` interface and pass it through in the fetch body (line 65). This is a 2-line additive change but MUST be done before extraction pipeline works.
+- **New task needed**: Extend `LLMClient` to support `response_format` passthrough.
 
 ## 2. Extraction Prompt Design
 
@@ -186,17 +191,49 @@ For v1, generation runs in-process (fire-and-forget after 202 response):
 ```typescript
 // In route handler:
 const draft = await draftRepo.create({ status: 'generating', ... });
-// Don't await — fire and forget
-process.nextTick(() => runGenerationPipeline(draft.id, tenantId));
+// Don't await — fire and forget WITH crash safety
+process.nextTick(() => {
+  runGenerationPipeline(draft.id, tenantId)
+    .catch(err => {
+      // Prevent unhandled rejection → process crash
+      markDraftFailed(draft.id, tenantId, err).catch(() => {
+        console.error(`[tuning] Failed to mark draft ${draft.id} as failed:`, err);
+      });
+    });
+});
 return { draftId: draft.id, status: 'generating' };
 ```
 
 The `runGenerationPipeline` function:
 
-1. Reads document chunks
-2. Calls LLM with extraction prompt
-3. Parses response
-4. Updates draft status to `ready` or `failed`
-5. Runs validator dry-run for quality gate
+1. **MUST** wrap all DB writes in `withTenantContext(tenantId, ...)` — the request transaction is gone after 202; RLS blocks unscoped writes
+2. Reads document chunks (with chunk selection: top-K by relevance, max 8K tokens)
+3. Calls LLM with extraction prompt (`response_format: { type: 'json_object' }`)
+4. Parses response
+5. Maps `funnelConfig` → `{definition, stages[], fragments[], slots[]}` via funnel mapper
+6. Updates draft status to `ready` or `failed`
 
-If the process crashes during generation, the poll-time reaper (FR-003) catches it on next poll after 90s.
+**Startup sweep** (covers process restarts where nobody polls):
+
+```typescript
+// On Fastify onReady:
+fastify.addHook('onReady', async () => {
+  await withTenantContext('system', async (tx) => {
+    await tx.update(tuningDrafts)
+      .set({ status: 'failed', error: 'GENERATION_STALLED' })
+      .where(and(
+        eq(tuningDrafts.status, 'generating'),
+        lt(tuningDrafts.createdAt, new Date(Date.now() - 5 * 60 * 1000))
+      ));
+  });
+});
+```
+
+**Stale-draft escape in generate** (FR-011): before lock check, sweep stale drafts for this persona:
+
+```typescript
+// In generate handler, before concurrent-lock check:
+await draftRepo.sweepStaleGenerating(personaId, tenantId, 90_000); // 90s threshold
+```
+
+This prevents a permanently-bricked persona if the client stops polling after the tab is closed.
