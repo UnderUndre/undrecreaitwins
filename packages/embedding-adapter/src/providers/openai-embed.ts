@@ -1,6 +1,7 @@
 import { fetch, Agent } from 'undici';
 import { UpstreamError, GatewayTimeoutError } from '../lib/errors.js';
 import type { EmbedProvider } from './types.js';
+import { config } from '../config.js';
 
 const agent = new Agent({
   keepAliveTimeout: 10_000,
@@ -22,7 +23,7 @@ export class OpenAIEmbedProvider implements EmbedProvider {
     apiKey: string,
     signal: AbortSignal
   ): Promise<number[] | number[][]> {
-    const url = 'https://api.openai.com/v1/embeddings';
+    const url = `${config.OPENAI_BASE_URL}/embeddings`;
 
     const isBatch = Array.isArray(inputs);
     const body = {

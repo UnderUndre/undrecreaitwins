@@ -162,6 +162,40 @@ describe('Embedding Adapter Integration Tests', () => {
     );
   });
 
+  it('forwards request to custom OPENAI_BASE_URL when configured', async () => {
+    const { config: testConfig } = await import('../src/config.js');
+    const originalBaseUrl = testConfig.OPENAI_BASE_URL;
+    testConfig.OPENAI_BASE_URL = 'https://custom-openai-provider.internal/v1';
+
+    vi.mocked(fetch).mockResolvedValueOnce({
+      status: 200,
+      json: async () => ({
+        object: 'list',
+        data: [{ object: 'embedding', index: 0, embedding: [[0.99]] }],
+      }),
+    } as any);
+
+    const originalProvider = testConfig.EMBEDDING_PROVIDER;
+    testConfig.EMBEDDING_PROVIDER = 'openai';
+
+    await app.inject({
+      method: 'POST',
+      url: '/embed',
+      headers: {
+        authorization: 'Bearer mock_key',
+      },
+      body: { inputs: 'test' },
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://custom-openai-provider.internal/v1/embeddings',
+      expect.any(Object)
+    );
+
+    testConfig.OPENAI_BASE_URL = originalBaseUrl;
+    testConfig.EMBEDDING_PROVIDER = originalProvider;
+  });
+
   // T032: Empty input rejection
   it('rejects empty input in /embed with 400', async () => {
     const response = await app.inject({

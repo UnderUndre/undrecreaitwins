@@ -67,15 +67,24 @@ services:
     restart: unless-stopped
 ```
 
-### 2. Remove TEI containers
+### 2. local-tei Profile (Optional Offline Mode)
 
-```yaml
-# Remove these services:
-#   tei-embed:
-#   tei-rerank:
-```
+The original local HuggingFace TEI containers (`tei-embed` and `tei-rerank`) are kept in `docker-compose.standalone.yml` under the `local-tei` profile. This saves ~4GB RAM by default. 
 
-### 3. Update engine environment
+To run completely offline with local models:
+1. Start compose with the `local-tei` profile:
+   ```bash
+   docker compose -f infra/docker-compose.standalone.yml --profile local-tei up -d
+   ```
+2. Update engine environment to point directly to the local containers:
+   ```yaml
+   EMBEDDINGS_URL=http://tei-embed:80
+   RERANK_URL=http://tei-rerank:80
+   ```
+
+Otherwise, leave the profile disabled, and the engine will connect to `embedding-adapter:8095` to use cloud APIs.
+
+### 3. Update engine environment (Default Cloud Proxy Mode)
 
 ```yaml
 # Before:
@@ -128,6 +137,7 @@ RERANK_MODEL=rerank-multilingual-v3.0  # Default
 | `RERANK_PROVIDER` | `jina` | `cohere` or `jina` |
 | `RERANK_MODEL` | (per provider) | Model ID override |
 | `OPENAI_API_KEY` | — | OpenAI API key |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Custom OpenAI compatible base URL |
 | `COHERE_API_KEY` | — | Cohere API key |
 | `JINA_API_KEY` | — | Jina API key |
 | `UPSTREAM_TIMEOUT_MS` | `10000` | Upstream request timeout (reduced from 30000 per review — protects chat-path latency) |

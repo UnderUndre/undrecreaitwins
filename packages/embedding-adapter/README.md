@@ -20,6 +20,7 @@ Matches the HuggingFace TEI HTTP contract exactly.
 | `RERANK_PROVIDER` | `jina` | `cohere` or `jina` |
 | `RERANK_MODEL` | (per provider) | Model ID override |
 | `OPENAI_API_KEY` | — | OpenAI API key |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | Custom OpenAI compatible endpoint URL |
 | `COHERE_API_KEY` | — | Cohere API key |
 | `JINA_API_KEY` | — | Jina API key |
 | `UPSTREAM_TIMEOUT_MS` | `10000` | Upstream request timeout (ms) |
@@ -53,3 +54,22 @@ pnpm run dev
 
 - **Plain HTTP**: The adapter listens on plain HTTP. Deploy ONLY inside a trusted network (Docker internal network or VPN).
 - **PII / Key Redaction**: Fastify/Pino is configured to automatically redact `Authorization` headers, provider API keys, and document contents from all logs.
+
+## Docker Compose Integration
+
+The adapter is integrated into `infra/docker-compose.standalone.yml`.
+
+By default, running `docker compose up -d` starts the lightweight `embedding-adapter` service (consuming <100MB RAM) which proxies to cloud APIs.
+
+### Offline Mode (Local Models)
+
+If you want to run completely offline with local models:
+1. Run the local HuggingFace TEI containers by enabling the `local-tei` profile:
+   ```bash
+   docker compose -f infra/docker-compose.standalone.yml --profile local-tei up -d
+   ```
+2. Configure your environment variables to point directly to these local containers:
+   ```env
+   EMBEDDINGS_URL=http://tei-embed:80
+   RERANK_URL=http://tei-rerank:80
+   ```

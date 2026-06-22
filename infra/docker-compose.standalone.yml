@@ -8,6 +8,8 @@
 # Migrations (reviewed .sql — run deliberately, NOT on every up):
 #   docker compose -f infra/docker-compose.standalone.yml --profile migrate run --rm migrate
 #
+# Available profiles: local-tei, local-tei-gpu, local-tei-llm, migrate
+#
 # Langfuse is NOT bundled here — it has its own docker-compose.yml
 # (requires ClickHouse).  Set LANGFUSE_* env vars to point at it.
 #
@@ -71,6 +73,44 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+    restart: unless-stopped
+
+  tei-embed:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    # available profiles: local-tei, local-tei-gpu, local-tei-llm, migrate
+    profiles: ["local-tei"]
+    ports:
+      - "${TEI_EMBED_PORT:-8080}:80"
+    environment:
+      MODEL_ID: BAAI/bge-m3
+      MAX_BATCH_TOKENS: 16384
+      MAX_CLIENT_BATCH_SIZE: 32
+    volumes:
+      - tei_embed_cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+    restart: unless-stopped
+
+  tei-rerank:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    profiles: ["local-tei"]
+    ports:
+      - "${TEI_RERANK_PORT:-8081}:80"
+    environment:
+      MODEL_ID: BAAI/bge-reranker-v2-m3
+      MAX_BATCH_TOKENS: 16384
+    volumes:
+      - tei_rerank_cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
     restart: unless-stopped
 
   honcho:
@@ -274,4 +314,6 @@ services:
 volumes:
   pgdata:
   redisdata:
+  tei_embed_cache:
+  tei_rerank_cache:
   evolution_instances:

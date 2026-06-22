@@ -21,6 +21,9 @@ export const AdapterConfig = z.object({
   COHERE_API_KEY: z.string().optional(),
   JINA_API_KEY: z.string().optional(),
 
+  // Custom OpenAI compatible endpoint URL
+  OPENAI_BASE_URL: z.string().default('https://api.openai.com/v1'),
+
   // Upstream timeout
   UPSTREAM_TIMEOUT_MS: z.coerce.number().default(10_000),
 
