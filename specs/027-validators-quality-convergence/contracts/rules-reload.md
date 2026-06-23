@@ -22,17 +22,22 @@ export interface RulesReloadPush {
   pushedAt: Date;                   // Push timestamp
 }
 
-// UnifiedRule (repeated for reference)
+// UnifiedRule (repeated for reference — matches data-model.md §1.1, fix F2)
 export interface UnifiedRule {
   key: string;
   kind: 'system' | 'custom';
   enabled: boolean;
-  mode?: string;
+  mode?: 'active' | 'dry-run';       // Real validator_mode enum (fix F8)
   terminalOnFail: boolean;
   priority: number;
-  validatorType?: string;           // For system rules
-  prompt?: string;                  // For custom rules
-  threshold?: number;               // For custom rules
+  validatorType?: string;           // For system rules (NOT format-injection — fix F6)
+  detector?: DetectorConfig;        // For custom rules — REQUIRED for DAR (fix F2)
+  rewriteInstruction?: string;      // For custom rules (fix F2)
+  customRuleMode?: 'rewrite' | 'score'; // DAR mode (fix F2)
+  scope?: 'sentence' | 'paragraph' | 'full'; // fix F2
+  turnScope?: 'single' | 'conversation' | null; // fix F2
+  rubricItems?: RubricItem[];       // fix F2
+  assistantId?: string | null;      // NOTE: assistantId, NOT personaId (fix F2/F9)
   version: number;
   updatedAt: Date;
 }
@@ -315,12 +320,18 @@ const UnifiedRuleSchema = z.object({
   key: z.string().min(1).max(100),
   kind: z.enum(['system', 'custom']),
   enabled: z.boolean(),
-  mode: z.string().max(50).optional(),
+  mode: z.enum(['active', 'dry-run']).optional(),
   terminalOnFail: z.boolean(),
   priority: z.number().int().min(0).max(1000),
   validatorType: z.string().optional(),
-  prompt: z.string().max(10000).optional(),
-  threshold: z.number().min(0).max(1).optional(),
+  // Custom rule fields (fix F2 — full CorrectionRule payload)
+  detector: z.any().optional(),
+  rewriteInstruction: z.string().optional(),
+  customRuleMode: z.enum(['rewrite', 'score']).optional(),
+  scope: z.enum(['sentence', 'paragraph', 'full']).optional(),
+  turnScope: z.enum(['single', 'conversation']).nullable().optional(),
+  rubricItems: z.any().optional(),
+  assistantId: z.string().nullable().optional(),
   version: z.number().int().positive(),
   updatedAt: z.coerce.date(),
 });

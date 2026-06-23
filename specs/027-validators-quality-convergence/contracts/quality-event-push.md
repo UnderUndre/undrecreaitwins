@@ -83,8 +83,8 @@ export interface QualityEventPush {
 | `score` | `number` | LLM-assigned quality score (0-1). Present only for `custom` rules with LLM evaluation. |
 | `sourceLang` | `string` | Source language code (ISO 639-1). Present only for translation rules. |
 | `targetLang` | `string` | Target language code (ISO 639-1). Present only for translation rules. |
-| `originalResponse` | `string` | Original response text (truncated to 500 chars). |
-| `modifiedResponse` | `string` | Modified response text (truncated to 500 chars). Present only if response was corrected. |
+| `originalText` | `string` | Original response text (truncated to 500 chars max; shorter = as-is). |
+| `rewrittenText` | `string` | Rewritten response text (truncated to 500 chars max). Present only if response was corrected. |
 
 ## 4. Verdict Mapping
 
@@ -236,8 +236,8 @@ const QualityEventPushSchema = z.object({
   score: z.number().min(0).max(1).optional(),
   sourceLang: z.string().length(2).optional(),
   targetLang: z.string().length(2).optional(),
-  originalResponse: z.string().max(500).optional(),
-  modifiedResponse: z.string().max(500).optional(),
+  originalText: z.string().max(500).optional(),
+  rewrittenText: z.string().max(500).optional(),
 });
 ```
 

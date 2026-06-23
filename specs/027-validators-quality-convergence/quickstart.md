@@ -35,12 +35,18 @@ export interface UnifiedRule {
   key: string;
   kind: RuleKind;
   enabled: boolean;
-  mode?: string;
+  mode?: 'active' | 'dry-run';
   terminalOnFail: boolean;
   priority: number;
   validatorType?: string;
-  prompt?: string;
-  threshold?: number;
+  // Custom rule fields (fix F2)
+  detector?: DetectorConfig;
+  rewriteInstruction?: string;
+  customRuleMode?: 'rewrite' | 'score';
+  scope?: 'sentence' | 'paragraph' | 'full';
+  turnScope?: 'single' | 'conversation' | null;
+  rubricItems?: RubricItem[];
+  assistantId?: string | null;
   version: number;
   updatedAt: Date;
 }
@@ -58,8 +64,11 @@ export interface QualityEventPush {
   score?: number;
   sourceLang?: string;
   targetLang?: string;
-  originalResponse?: string;
-  modifiedResponse?: string;
+  // PRESERVE existing wire field names (fix F3)
+  idempotencyKey: string;
+  assistantId: string;
+  originalText?: string;
+  rewrittenText?: string;
 }
 
 export interface RulesReloadPush {
@@ -132,22 +141,22 @@ export class ResponseGuard {
         conversationId: ctx.conversationId,
         messageId: ctx.messageId,
         latencyMs: Date.now() - stageStart,
-        originalResponse: response.slice(0, 500),
-        modifiedResponse: result.modifiedResponse?.slice(0, 500),
+        originalText: response.slice(0, 500),
+        rewrittenText: result.rewrittenText?.slice(0, 500),
       });
 
       if (result.verdict === 'block' && rule.terminalOnFail) {
         shortCircuitedBy = rule.key;
         return {
-          response: result.modifiedResponse || currentResponse,
+          response: result.rewrittenText || currentResponse,
           verdict: 'block',
           shortCircuitedBy,
           events,
         };
       }
 
-      if (result.modifiedResponse) {
-        currentResponse = result.modifiedResponse;
+      if (result.rewrittenText) {
+        currentResponse = result.rewrittenText;
       }
     }
 
@@ -166,22 +175,22 @@ export class ResponseGuard {
         conversationId: ctx.conversationId,
         messageId: ctx.messageId,
         latencyMs: Date.now() - stageStart,
-        originalResponse: response.slice(0, 500),
-        modifiedResponse: result.modifiedResponse?.slice(0, 500),
+        originalText: response.slice(0, 500),
+        rewrittenText: result.rewrittenText?.slice(0, 500),
       });
 
       if (result.verdict === 'block' && rule.terminalOnFail) {
         shortCircuitedBy = rule.key;
         return {
-          response: result.modifiedResponse || currentResponse,
+          response: result.rewrittenText || currentResponse,
           verdict: 'block',
           shortCircuitedBy,
           events,
         };
       }
 
-      if (result.modifiedResponse) {
-        currentResponse = result.modifiedResponse;
+      if (result.rewrittenText) {
+        currentResponse = result.rewrittenText;
       }
     }
 
@@ -206,7 +215,7 @@ export class ResponseGuard {
     rule: UnifiedRule,
     response: string,
     ctx: ResponseGuardContext
-  ): Promise<{ verdict: 'pass' | 'block' | 'warn'; modifiedResponse?: string; detail?: string }> {
+  ): Promise<{ verdict: 'pass' | 'block' | 'warn'; rewrittenText?: string; detail?: string }> {
     // Delegate to existing validator classes
     const result = await this.validatorPipeline.validateResponse(response, {
       ...ctx,
@@ -216,7 +225,7 @@ export class ResponseGuard {
 
     return {
       verdict: result.verdict === 'pass' ? 'pass' : result.verdict === 'block' ? 'block' : 'warn',
-      modifiedResponse: result.modifiedResponse,
+      rewrittenText: result.rewrittenText,
       detail: result.verdict === 'strip' ? 'stripped' : undefined,
     };
   }
@@ -225,13 +234,13 @@ export class ResponseGuard {
     rule: UnifiedRule,
     response: string,
     ctx: ResponseGuardContext
-  ): Promise<{ verdict: 'pass' | 'block' | 'corrected'; modifiedResponse?: string; detail?: string; score?: number }> {
+  ): Promise<{ verdict: 'pass' | 'block' | 'corrected'; rewrittenText?: string; detail?: string; score?: number }> {
     // Delegate to existing DAR pipeline
     const result = await darExecute(response, [rule as any]);
     
     return {
       verdict: result.verdict === 'pass' ? 'pass' : result.rewritten ? 'corrected' : 'block',
-      modifiedResponse: result.modifiedResponse,
+      rewrittenText: result.rewrittenText,
       detail: result.rewritten ? 'rewritten' : result.rolledBack ? 'rolled_back' : undefined,
       score: result.score,
     };
@@ -253,7 +262,7 @@ import { ResponseGuard } from './correction-rules/response-guard';
 // BEFORE (3 separate calls):
 // const validatorResult = await validatorPipeline.validateResponse(response, ctx);
 // const darResult = await darExecute(response, rules);
-// const reValidatorResult = await reValidate(darResult.modifiedResponse, ctx);
+// const reValidatorResult = await reValidate(darResult.rewrittenText, ctx);
 
 // AFTER (single call):
 const responseGuard = new ResponseGuard();
@@ -321,21 +330,29 @@ export class RuleCacheService {
 // packages/bff/prisma/schema.prisma
 
 model UnifiedRule {
-  key            String    @id
+  key            String    // NOT global @id — fix F5
+  tenantId       String
   kind           String    // 'system' | 'custom'
   enabled        Boolean   @default(true)
-  mode           String?
+  mode           String?   // 'active' | 'dry-run'
   terminalOnFail Boolean   @default(false)
   priority       Int       @default(0)
   validatorType  String?
-  prompt         String?
-  threshold      Float?
+  // Custom rule fields (fix F2)
+  detector       Json?
+  rewriteInstruction String?
+  customRuleMode String?
+  scope          String?
+  turnScope      String?
+  rubricItems    Json?
+  assistantId    String?
   version        Int       @default(1)
   updatedAt      DateTime  @updatedAt
   createdAt      DateTime  @default(now())
-  tenantId       String
   tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@id([tenantId, key])  // fix F5: composite PK
+  @@unique([tenantId, priority])
   @@index([tenantId, kind, priority])
   @@map("unified_rules")
 }
@@ -501,8 +518,8 @@ export async function handleQualityEventPush(event: QualityEventPush): Promise<v
       score: event.score,
       sourceLang: event.sourceLang,
       targetLang: event.targetLang,
-      originalResponseSnippet: event.originalResponse?.slice(0, 500),
-      modifiedResponseSnippet: event.modifiedResponse?.slice(0, 500),
+      originalResponseSnippet: event.originalText?.slice(0, 500),
+      modifiedResponseSnippet: event.rewrittenText?.slice(0, 500),
     },
   });
 }
