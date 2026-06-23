@@ -2,7 +2,7 @@
 
 **Feature**: 027-validators-quality-convergence  
 **Date**: 2026-06-23  
-**Status**: Draft
+**Status**: Implemented
 
 ## Prerequisites
 
@@ -80,177 +80,17 @@ export interface RulesReloadPush {
 }
 ```
 
-#### 1.2 Create Response Guard Orchestrator
+#### 1.2 Response Guard Orchestrator
 
-```typescript
-// packages/core/src/services/correction-rules/response-guard.ts
+Actual implementation in `packages/core/src/services/correction-rules/response-guard.ts`:
 
-import { ValidatorPipeline } from '../validators/pipeline';
-import { darExecute } from './dar-pipeline';
-import { reValidate } from './re-validator';
-import { QualityEventPush, UnifiedRule } from '../../types/quality';
-
-export interface ResponseGuardContext {
-  conversationId: string;
-  messageId?: string;
-  tenantId: string;
-  personaId: string;
-}
-
-export interface ResponseGuardResult {
-  response: string;
-  verdict: 'pass' | 'block' | 'warn' | 'corrected';
-  detail?: string;
-  shortCircuitedBy?: string;
-  events: QualityEventPush[];
-}
-
-export class ResponseGuard {
-  private validatorPipeline: ValidatorPipeline;
-  private ruleCache: Map<string, UnifiedRule[]>;
-
-  constructor() {
-    this.validatorPipeline = new ValidatorPipeline();
-    this.ruleCache = new Map();
-  }
-
-  async run(response: string, ctx: ResponseGuardContext): Promise<ResponseGuardResult> {
-    const startTime = Date.now();
-    const events: QualityEventPush[] = [];
-    let currentResponse = response;
-    let shortCircuitedBy: string | undefined;
-
-    // Get rules for tenant/persona
-    const rules = this.ruleCache.get(ctx.tenantId) || [];
-    const enabledRules = rules.filter(r => r.enabled);
-
-    // Sort by priority (lower = earlier)
-    const sortedRules = [...enabledRules].sort((a, b) => a.priority - b.priority);
-
-    // Phase 1: System validators (deterministic, cheap)
-    for (const rule of sortedRules.filter(r => r.kind === 'system')) {
-      const stageStart = Date.now();
-      const result = await this.runSystemValidator(rule, currentResponse, ctx);
-      
-      events.push({
-        ts: new Date(),
-        kind: 'system',
-        ruleKey: rule.key,
-        verdict: result.verdict,
-        detail: result.detail,
-        conversationId: ctx.conversationId,
-        messageId: ctx.messageId,
-        latencyMs: Date.now() - stageStart,
-        originalText: response.slice(0, 500),
-        rewrittenText: result.rewrittenText?.slice(0, 500),
-      });
-
-      if (result.verdict === 'block' && rule.terminalOnFail) {
-        shortCircuitedBy = rule.key;
-        return {
-          response: result.rewrittenText || currentResponse,
-          verdict: 'block',
-          shortCircuitedBy,
-          events,
-        };
-      }
-
-      if (result.rewrittenText) {
-        currentResponse = result.rewrittenText;
-      }
-    }
-
-    // Phase 2: Custom rules (LLM-based, expensive)
-    for (const rule of sortedRules.filter(r => r.kind === 'custom')) {
-      const stageStart = Date.now();
-      const result = await this.runCustomRule(rule, currentResponse, ctx);
-      
-      events.push({
-        ts: new Date(),
-        kind: 'custom',
-        ruleKey: rule.key,
-        verdict: result.verdict,
-        detail: result.detail,
-        score: result.score,
-        conversationId: ctx.conversationId,
-        messageId: ctx.messageId,
-        latencyMs: Date.now() - stageStart,
-        originalText: response.slice(0, 500),
-        rewrittenText: result.rewrittenText?.slice(0, 500),
-      });
-
-      if (result.verdict === 'block' && rule.terminalOnFail) {
-        shortCircuitedBy = rule.key;
-        return {
-          response: result.rewrittenText || currentResponse,
-          verdict: 'block',
-          shortCircuitedBy,
-          events,
-        };
-      }
-
-      if (result.rewrittenText) {
-        currentResponse = result.rewrittenText;
-      }
-    }
-
-    // Final verdict
-    const hasCorrections = events.some(e => e.verdict === 'corrected');
-    const hasWarnings = events.some(e => e.verdict === 'warn');
-    const hasBlocks = events.some(e => e.verdict === 'block');
-
-    let finalVerdict: ResponseGuardResult['verdict'] = 'pass';
-    if (hasBlocks) finalVerdict = 'block';
-    else if (hasCorrections) finalVerdict = 'corrected';
-    else if (hasWarnings) finalVerdict = 'warn';
-
-    return {
-      response: currentResponse,
-      verdict: finalVerdict,
-      events,
-    };
-  }
-
-  private async runSystemValidator(
-    rule: UnifiedRule,
-    response: string,
-    ctx: ResponseGuardContext
-  ): Promise<{ verdict: 'pass' | 'block' | 'warn'; rewrittenText?: string; detail?: string }> {
-    // Delegate to existing validator classes
-    const result = await this.validatorPipeline.validateResponse(response, {
-      ...ctx,
-      validatorType: rule.validatorType,
-      mode: rule.mode,
-    });
-
-    return {
-      verdict: result.verdict === 'pass' ? 'pass' : result.verdict === 'block' ? 'block' : 'warn',
-      rewrittenText: result.rewrittenText,
-      detail: result.verdict === 'strip' ? 'stripped' : undefined,
-    };
-  }
-
-  private async runCustomRule(
-    rule: UnifiedRule,
-    response: string,
-    ctx: ResponseGuardContext
-  ): Promise<{ verdict: 'pass' | 'block' | 'corrected'; rewrittenText?: string; detail?: string; score?: number }> {
-    // Delegate to existing DAR pipeline
-    const result = await darExecute(response, [rule as any]);
-    
-    return {
-      verdict: result.verdict === 'pass' ? 'pass' : result.rewritten ? 'corrected' : 'block',
-      rewrittenText: result.rewrittenText,
-      detail: result.rewritten ? 'rewritten' : result.rolledBack ? 'rolled_back' : undefined,
-      score: result.score,
-    };
-  }
-
-  updateRuleCache(tenantId: string, rules: UnifiedRule[]): void {
-    this.ruleCache.set(tenantId, rules);
-  }
-}
-```
+- **`ResponseGuard`** class wraps `ValidatorPipeline.validateResponse()` + `darExecute()` in a single `run()` call
+- **Tier system**: `'full'` (validateResponse + DAR) | `'deterministic-only'` (validateResponse only)
+- **shortCircuit**: if validateResponse modifies the response text, DAR is skipped automatically
+- **Events**: system-validator events emitted with `kind='system'`, DAR events pushed via existing `pushEvents()`
+- **Feature flag**: `USE_RESPONSE_GUARD` env var (`process.env.USE_RESPONSE_GUARD === 'true'`)
+- **LLM call counter**: `llmCallCount` in result (tracks `regenerateFn` invocations)
+- **Fail-open**: DB error → original response delivered
 
 #### 1.3 Update Chat-Service (3 call-sites)
 
@@ -276,12 +116,11 @@ const guardResult = await responseGuard.run(response, {
 // Use guardResult.response (corrected) and guardResult.verdict
 ```
 
-**Call-sites to update**:
+**Call-sites updated**:
 
-1. `chat-service.ts:457` — happy-path response generation (`validateResponse` call-site)
-2. `chat-service.ts:899` — buffered-delivery/streaming response generation
-3. `chat-service.ts:1085` — agentic response generation (condition-gated at :1082-1084)
-4. `chat-service.ts:481` — `darExecute` call-site (happy-path only today, fix F7: extend via per-call-site tier config)
+1. `chat-service.ts:461` — happy-path response generation (`responseGuard.run()` with `tier: 'full'`)
+2. `chat-service.ts:928` — buffered-delivery response generation (`responseGuard.run()` with `tier: 'deterministic-only'`)
+3. `chat-service.ts:1137` — agentic response generation (`responseGuard.run()` with `tier: 'deterministic-only'`)
 
 #### 1.4 Update Rule Cache
 

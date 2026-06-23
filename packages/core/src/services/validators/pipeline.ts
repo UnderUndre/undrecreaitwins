@@ -216,6 +216,8 @@ tenantId: string, personaId: string, validatorName: string): Promise<AnyValidato
     originalContent: string,
     results: Array<{ validatorName: string; result: ValidatorRunResult; isDryRun: boolean }>
   ) {
+    // T029: SKIP_VALIDATOR_RUNS feature flag — stop writing to deprecated table
+    if (process.env.SKIP_VALIDATOR_RUNS === 'true') return;
     return withTenantContext(context.tenantId, async (tx) => {
       const rows = results.map(r => ({
         tenantId: context.tenantId,
