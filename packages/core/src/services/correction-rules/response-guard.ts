@@ -87,7 +87,8 @@ export class ResponseGuard {
       // T011: Emit system-validator event
       const systemChanged = currentResponse !== originalResponse;
       const sysVerdict: VerdictCoarse = systemChanged ? 'corrected' : 'pass';
-      allEvents.push({
+      const systemEvent: QualityEventPush = {
+        ts: new Date(),
         assistantId: ctx.personaId,
         ruleId: 'system-validators',
         ruleName: 'System Validators',
@@ -101,7 +102,9 @@ export class ResponseGuard {
         rolledBack: false,
         idempotencyKey: `${ctx.conversationId}-${ctx.messageId ?? '?'}-system`,
         snapshotVersion: '',
-      });
+      };
+      allEvents.push(systemEvent);
+      pushEvents(ctx.tenantId, [systemEvent]);
 
       // T010: shortCircuit — T034: system validators are terminal (block/rewrite)
       if (systemChanged) {
@@ -126,9 +129,7 @@ export class ResponseGuard {
           allEvents.push(event);
         }
 
-        if (darResult.events.length > 0) {
-          pushEvents(ctx.tenantId, darResult.events);
-        }
+        // Note: darExecute already pushes its events internally, so we do not call pushEvents here to avoid duplicates.
       }
 
       return {
@@ -138,6 +139,7 @@ export class ResponseGuard {
         llmCallCount: this._llmCallCount,
       };
     } catch (err) {
+      console.error({ err }, '[ResponseGuard] Run failed, failing open');
       return {
         response,
         events: allEvents,
