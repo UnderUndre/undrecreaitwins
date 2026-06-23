@@ -165,6 +165,46 @@
     "./services/validators/language-guard.js": {
       "types": "./dist/services/validators/language-guard.d.ts",
       "default": "./dist/services/validators/language-guard.js"
+    },
+    "./services/tuning/tuning-draft-repository.js": {
+      "types": "./dist/services/tuning/tuning-draft-repository.d.ts",
+      "default": "./dist/services/tuning/tuning-draft-repository.js"
+    },
+    "./services/tuning/doc-extraction-pipeline.js": {
+      "types": "./dist/services/tuning/doc-extraction-pipeline.d.ts",
+      "default": "./dist/services/tuning/doc-extraction-pipeline.js"
+    },
+    "./services/tuning/activate-pipeline.js": {
+      "types": "./dist/services/tuning/activate-pipeline.d.ts",
+      "default": "./dist/services/tuning/activate-pipeline.js"
+    },
+    "./services/tuning/conversation-analyzer.js": {
+      "types": "./dist/services/tuning/conversation-analyzer.d.ts",
+      "default": "./dist/services/tuning/conversation-analyzer.js"
+    },
+    "./services/tuning/interview-state-machine.js": {
+      "types": "./dist/services/tuning/interview-state-machine.d.ts",
+      "default": "./dist/services/tuning/interview-state-machine.js"
+    },
+    "./services/tuning/redis-helper.js": {
+      "types": "./dist/services/tuning/redis-helper.d.ts",
+      "default": "./dist/services/tuning/redis-helper.js"
+    },
+    "./services/tuning/funnel-config-mapper.js": {
+      "types": "./dist/services/tuning/funnel-config-mapper.d.ts",
+      "default": "./dist/services/tuning/funnel-config-mapper.js"
+    },
+    "./services/tuning/extraction-prompt.js": {
+      "types": "./dist/services/tuning/extraction-prompt.d.ts",
+      "default": "./dist/services/tuning/extraction-prompt.js"
+    },
+    "./services/tuning/sandbox-draft-mode.js": {
+      "types": "./dist/services/tuning/sandbox-draft-mode.d.ts",
+      "default": "./dist/services/tuning/sandbox-draft-mode.js"
+    },
+    "./types/tuning.js": {
+      "types": "./dist/types/tuning.d.ts",
+      "default": "./dist/types/tuning.js"
     }
   },
   "scripts": {

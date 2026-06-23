@@ -17,6 +17,7 @@ export interface LLMRequest {
   maxTokens?: number;
   model?: string;
   forcePlatformProvider?: boolean;
+  responseFormat?: { type: 'json_object' };
 }
 
 export interface LLMResponse {
@@ -67,6 +68,7 @@ export class LLMClient {
         messages: params.messages,
         temperature: params.temperature,
         max_tokens: params.maxTokens,
+        ...(params.responseFormat && { response_format: params.responseFormat }),
       }),
     });
 
@@ -93,6 +95,7 @@ export class LLMClient {
     tenantId?: string;
     personaId?: string;
     forcePlatformProvider?: boolean;
+    responseFormat?: { type: 'json_object' };
   }): AsyncGenerator<StreamChunk> {
     let baseUrl = this.providerUrl;
     let apiKey = this.apiKey;
@@ -147,6 +150,7 @@ export class LLMClient {
           messages: params.messages,
           temperature: params.temperature,
           max_tokens: params.maxTokens,
+          ...(params.responseFormat && { response_format: params.responseFormat }),
           stream: true,
           stream_options: { include_usage: true },
         }),

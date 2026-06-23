@@ -22,6 +22,7 @@ import { groundingEngine } from './index.js';
 import { conversations, messages, usageEvents, deliveryRecords, llmRetryJobs } from '../models/index.js';
 import { validatorConfigs } from '../models/validators.js';
 import { ServiceUnavailableError, NotFoundError, AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
+import type { DraftConfigOverlay } from '../types/tuning.js';
 import type { PersonaTraits, ModelPreferences, StreamChunk, FunnelSelectionMetadata } from '@undrecreaitwins/shared';
 import { routeTurn } from './hermes/turn-router.js';
 import { HermesExecutor } from './hermes/hermes-executor.js';
@@ -42,6 +43,8 @@ interface ChatRequest {
   maxTokens?: number;
   isTestThread?: boolean;
   source?: string;
+  /** Optional draft config overlay for sandbox preview (026-tuning) */
+  draftOverride?: DraftConfigOverlay;
   persist?: boolean;
   /** Channel context — present only for channel conversations (not sandbox/API). Enables delivery ledger + fallback. */
   channelContext?: {
@@ -176,6 +179,16 @@ export class ChatService {
       : await personaRepo.getBySlug(request.tenantId, request.personaSlug) as unknown as PersonaRow;
     if (!persona) {
       throw new NotFoundError('Persona', request.personaId || request.personaSlug);
+    }
+
+    // Apply draft config overlay if provided (026-tuning sandbox preview)
+    if (request.draftOverride) {
+      if (request.draftOverride.systemPrompt) {
+        (persona as any).systemPrompt = request.draftOverride.systemPrompt;
+      }
+      if (request.draftOverride.validatorToggles) {
+        (persona as any).validatorTogglesOverride = request.draftOverride.validatorToggles;
+      }
     }
 
     const lastUserMessage = [...request.messages].reverse().find(m => m.role === 'user')?.content || '';
