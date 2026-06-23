@@ -149,7 +149,7 @@ interface TuningProposal {
 ### 5.1 Interview Sessions
 
 ```
-Key: `tuning:interview:{tenantId}:{personaId}`
+Key: `tuning:interview:{tenantId}:{personaId}:{userId}`
 Value: JSON { currentQuestion, answers[], total, createdAt }
 TTL: 1800 (30 min)
 ```
@@ -164,11 +164,15 @@ TTL: 1800 (30 min)
 
 ### 5.3 Proposal Resolution (accept/reject)
 
+Proposals are stored in a **single JSON array** under one key (no per-item keys) per data-model §3.2:
+
 ```
-Key: `tuning:proposal:{proposalId}`
-Value: JSON TuningProposal
-TTL: 1800 (30 min) — same as parent cache
+Key: tuning:proposals:{tenantId}:{personaId}
+Value: JSON TuningProposal[] (single source of truth)
+TTL: 1800 (30 min)
 ```
+
+`accept`/`reject` resolve proposals from this array by `proposalId`. On `reject`, the proposal is removed from the cached array (key is rewritten). On `accept`, the proposal is removed from the array and a draft is created. Cache miss (expired) → 404 `PROPOSAL_EXPIRED`.
 
 ## 6. Poll-Time Reaper Logic
 

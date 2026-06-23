@@ -51,7 +51,8 @@ CREATE POLICY tenant_isolation ON tuning_drafts
 ### 1.4 Drizzle Schema Definition
 
 ```typescript
-import { pgTable, text, uuid, jsonb, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, uuid, jsonb, timestamp, uniqueIndex, index } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const tuningDrafts = pgTable('tuning_drafts', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -72,6 +73,15 @@ export const tuningDrafts = pgTable('tuning_drafts', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   activatedAt: timestamp('activated_at', { withTimezone: true }),
+}, (table) => {
+  return {
+    idxTuningDraftsPersonaStatus: index('idx_tuning_drafts_persona_status').on(table.personaId, table.status),
+    idxTuningDraftsTenantStatus: index('idx_tuning_drafts_tenant_status').on(table.tenantId, table.status),
+    idxTuningDraftsCreatedAt: index('idx_tuning_drafts_created_at').on(table.createdAt.desc()),
+    idxTuningDraftsPersonaGenerating: uniqueIndex('idx_tuning_drafts_persona_generating')
+      .on(table.personaId)
+      .where(sql`status = 'generating'`),
+  };
 });
 ```
 

@@ -185,8 +185,8 @@ T001 → T006                         # schema defines types for Zod
 T006 + T004 → T007                 # Zod schemas + repository before route scaffolding
 T007 → T009, T010, T011            # route scaffolding before endpoint handlers
 T004 + T005 → T008                 # repository + Redis before extraction pipeline
-T008 → T012, T013                  # pipeline before quality gate + prompt
-T008 + T009 → T012                 # pipeline + generate route before quality gate
+T008 --> T13                            # pipeline before prompt
+T008 + T009 --> T013                 # pipeline + generate route before prompt
 T007 → T014                         # route scaffolding before activate pipeline
 T014 → T015, T016                  # pipeline before activate + rollback routes
 T016 → T028                         # rollback before edge case guard
@@ -202,7 +202,7 @@ T019 → T027                         # sandbox route before empty RAG guard
 T015 → T030                         # activate before poll-time reaper (reaper in poll route)
 T023 → T032                         # proposals before expired-proposal guard
 T014 → T053                         # activate pipeline before diffSections computation (computed inside activate)
-T009 + T010 + T011 + T008 + T012 + T013 → T033, T034, T035, T036  # US1 routes + pipeline before US1 tests
+T009 + T010 + T011 + T008 + T013 --> T033, T034, T035, T036  # US1 routes + pipeline before US1 tests
 T014 + T015 + T016 + T017 → T037, T038, T039  # activate + rollback + review before US2 tests
 T018 + T019 → T040, T041            # sandbox before US5 tests
 T020 + T021 → T042                  # interview before US3 test
@@ -270,9 +270,7 @@ graph LR
     T007 --> T021
     T007 --> T023
     T004 & T005 --> T008
-    T008 --> T012
     T008 --> T013
-    T008 & T009 --> T012
     T014 --> T015
     T014 --> T016
     T014 --> T053
@@ -291,10 +289,10 @@ graph LR
     T024 & T033 --> T051
     T019 & T040 --> T052
     T013 --> T054
-    T009 & T010 & T011 & T008 & T012 & T013 --> T033
-    T009 & T010 & T011 & T008 & T012 & T013 --> T034
-    T009 & T010 & T011 & T008 & T012 & T013 --> T035
-    T009 & T010 & T011 & T008 & T012 & T013 --> T036
+    T009 & T010 & T011 & T008 & T013 --> T033
+    T009 & T010 & T011 & T008 & T013 --> T034
+    T009 & T010 & T011 & T008 & T013 --> T035
+    T009 & T010 & T011 & T008 & T013 --> T036
     T014 & T015 & T016 & T017 --> T037
     T014 & T015 & T016 & T017 --> T038
     T014 & T015 & T016 & T017 --> T039
