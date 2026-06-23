@@ -26,6 +26,7 @@ export { llmProviderConfig, tenantLlmDefault } from './llm-provider.js';
 export { workspaceApiKeys } from './api-key.js';
 export { mcpCatalogEntry, assistantMcpBinding, mcpScopeEnum, mcpTransportEnum } from './mcp-catalog-entry.js';
 export { feedbackMemories, feedbackStatusEnum } from './feedback-memories.js';
+export { tuningDrafts } from './tuning.js';
 export { conversationFeedbackStates } from './conversation-feedback-states.js';
 export { deliveryRecords, llmRetryJobs } from './delivery-record.js';
 export type { PacingConfig } from './personas.js';

@@ -85,6 +85,7 @@ Engine (`undrecreaitwins`) owns the **RUNTIME**; Product (`ai-twins`) owns the *
 | 009-reengagement-runtime | 006-reengagement-admin |
 | 018-response-quality-rules | 019-response-quality-rules |
 | 019-feedback-loop-closure | 021-dialog-analysis-tools |
+| 026-tuning | 024-adaptive-onboarding |
 
 Product → engine is **server-to-server** (Bearer + `X-Tenant-ID`, via a Product BFF); engine RLS enforces tenant isolation. Shared tables with singular migration ownership (e.g. `followup_*` for re-engagement) coordinated cross-repo before either side migrates.
 
