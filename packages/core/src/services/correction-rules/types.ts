@@ -30,6 +30,7 @@ export interface CorrectionRule {
 }
 
 export interface QualityEventPush {
+  ts?: Date;
   assistantId: string;
   ruleId: string;
   ruleName: string;

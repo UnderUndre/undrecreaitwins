@@ -11,6 +11,7 @@ import { LLMClient } from './llm-client.js';
 import { ValidatorPipeline } from './validators/pipeline.js';
 import { buildLanguageDirective, resolveTargetLanguage } from './validators/language-guard.js';
 import { execute as darExecute } from './correction-rules/dar-pipeline.js';
+import { ResponseGuard, USE_RESPONSE_GUARD } from './correction-rules/response-guard.js';
 import { retrieveRelevant as retrieveFeedback } from './feedback/feedback-retrieval.js';
 import { compose as composePrompt } from './feedback/prompt-composer.js';
 import { LettaClient } from '@undrecreaitwins/memory/letta-client.js';
@@ -113,6 +114,7 @@ const letta = new LettaClient();
 const funnelRepo = new FunnelRepository();
 const llm = new LLMClient();
 const validatorPipeline = new ValidatorPipeline(llm);
+const responseGuard = USE_RESPONSE_GUARD ? new ResponseGuard(llm) : undefined;
 const redis = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : undefined;
 const funnelRuntime = new FunnelRuntime(funnelRepo, (config) => new FragmentScorer(config), redis as any);
 const embeddingService = new EmbeddingService();
@@ -453,39 +455,65 @@ export class ChatService {
       turnMetrics.stepFired('main_gen');
       turnMetrics.recordLLMCall(llmResponse.usage);
 
-      // FR-001: Response validation (post-generation)
-      const validatedContent = await validatorPipeline.validateResponse(llmResponse.content, {
-        tenantId: request.tenantId,
-        personaId: persona.id,
-        conversationId,
-        rawUserMessage: lastUserMessage,
-        resolvedTargetLanguage,
-        systemPrompt: systemPrompt,
-        regenerateFn: async (reinforcedSystemPrompt: string) => {
-          const res = await llm.complete({
-            messages: [
-              { role: 'system', content: reinforcedSystemPrompt },
-              ...request.messages,
-            ],
-            temperature: request.temperature ?? persona.modelPreferences?.temperature,
-            maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
-            model: persona.modelPreferences?.model,
-            tenantId: request.tenantId,
-            personaId: persona.id,
-          });
-          return res.content;
-        }
-      });
+      // FR-001: Response validation (post-generation) — gated by USE_RESPONSE_GUARD (T015)
+      let finalContent: string;
+      if (responseGuard) {
+        const guardResult = await responseGuard.run(llmResponse.content, {
+          tenantId: request.tenantId,
+          personaId: persona.id,
+          conversationId,
+          rawUserMessage: lastUserMessage,
+          resolvedTargetLanguage,
+          systemPrompt,
+          regenerateFn: async (reinforcedSystemPrompt: string) => {
+            const res = await llm.complete({
+              messages: [
+                { role: 'system', content: reinforcedSystemPrompt },
+                ...request.messages,
+              ],
+              temperature: request.temperature ?? persona.modelPreferences?.temperature,
+              maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+              model: persona.modelPreferences?.model,
+              tenantId: request.tenantId,
+              personaId: persona.id,
+            });
+            return res.content;
+          }
+        }, { tier: 'full' });
+        finalContent = guardResult.response;
+      } else {
+        const validatedContent = await validatorPipeline.validateResponse(llmResponse.content, {
+          tenantId: request.tenantId,
+          personaId: persona.id,
+          conversationId,
+          rawUserMessage: lastUserMessage,
+          resolvedTargetLanguage,
+          systemPrompt: systemPrompt,
+          regenerateFn: async (reinforcedSystemPrompt: string) => {
+            const res = await llm.complete({
+              messages: [
+                { role: 'system', content: reinforcedSystemPrompt },
+                ...request.messages,
+              ],
+              temperature: request.temperature ?? persona.modelPreferences?.temperature,
+              maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+              model: persona.modelPreferences?.model,
+              tenantId: request.tenantId,
+              personaId: persona.id,
+            });
+            return res.content;
+          }
+        });
 
-      // 018 DAR pipeline (post-validation, pre-persistence)
-      const darResult = await darExecute(llm, validatedContent, {
-        tenantId: request.tenantId,
-        personaId: persona.id,
-        conversationId,
-        messageId: undefined,
-        rawUserMessage: lastUserMessage,
-      });
-      const finalContent = darResult.text;
+        const darResult = await darExecute(llm, validatedContent, {
+          tenantId: request.tenantId,
+          personaId: persona.id,
+          conversationId,
+          messageId: undefined,
+          rawUserMessage: lastUserMessage,
+        });
+        finalContent = darResult.text;
+      }
 
       if (request.persist !== false) {
         await this.persistMessages(
@@ -895,29 +923,52 @@ export class ChatService {
           personaId: persona.id,
         });
 
-        // Run validation/remediation (which internally translates/regenerates if needed)
-        const validatedContent = await validatorPipeline.validateResponse(llmResponse.content, {
-          tenantId: request.tenantId,
-          personaId: persona.id,
-          conversationId,
-          rawUserMessage: lastUserMessage,
-          resolvedTargetLanguage,
-          systemPrompt: systemPrompt,
-          regenerateFn: async (reinforcedSystemPrompt: string) => {
-            const res = await llm.complete({
-              messages: [
-                { role: 'system', content: reinforcedSystemPrompt },
-                ...request.messages,
-              ],
-              temperature: request.temperature ?? persona.modelPreferences?.temperature,
-              maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
-              model: persona.modelPreferences?.model,
+        // Run validation/remediation — gated by USE_RESPONSE_GUARD (T015)
+        const validatedContent = responseGuard
+          ? (await responseGuard.run(llmResponse.content, {
               tenantId: request.tenantId,
               personaId: persona.id,
+              conversationId,
+              rawUserMessage: lastUserMessage,
+              resolvedTargetLanguage,
+              systemPrompt,
+              regenerateFn: async (reinforcedSystemPrompt: string) => {
+                const res = await llm.complete({
+                  messages: [
+                    { role: 'system', content: reinforcedSystemPrompt },
+                    ...request.messages,
+                  ],
+                  temperature: request.temperature ?? persona.modelPreferences?.temperature,
+                  maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+                  model: persona.modelPreferences?.model,
+                  tenantId: request.tenantId,
+                  personaId: persona.id,
+                });
+                return res.content;
+              }
+            }, { tier: 'deterministic-only' })).response
+          : await validatorPipeline.validateResponse(llmResponse.content, {
+              tenantId: request.tenantId,
+              personaId: persona.id,
+              conversationId,
+              rawUserMessage: lastUserMessage,
+              resolvedTargetLanguage,
+              systemPrompt: systemPrompt,
+              regenerateFn: async (reinforcedSystemPrompt: string) => {
+                const res = await llm.complete({
+                  messages: [
+                    { role: 'system', content: reinforcedSystemPrompt },
+                    ...request.messages,
+                  ],
+                  temperature: request.temperature ?? persona.modelPreferences?.temperature,
+                  maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens,
+                  model: persona.modelPreferences?.model,
+                  tenantId: request.tenantId,
+                  personaId: persona.id,
+                });
+                return res.content;
+              }
             });
-            return res.content;
-          }
-        });
 
         if (signal?.aborted) {
           return { completed: false, content: '' };
@@ -1082,35 +1133,67 @@ export class ChatService {
         const cfg = langConfig.config as any;
         if (cfg?.enabled !== false && cfg?.allowedLanguages && cfg.allowedLanguages.length > 0) {
           const resolution = await resolveTargetLanguage(cfg, sanitizedUserMessage, llm);
-          finalAgentAnswer = await validatorPipeline.validateResponse(agentResult.answer, {
-            tenantId: tenantId,
-            personaId: persona.id,
-            conversationId,
-            rawUserMessage: lastUserMessage,
-            resolvedTargetLanguage: resolution.target,
-            systemPrompt: persona.systemPrompt,
-            degradeToAsIs: true,
-            regenerateFn: async (reinforcedSystemPrompt: string) => {
-              const rPersona = { ...persona, systemPrompt: reinforcedSystemPrompt };
-              const rResult = await executor.runAgentTurn({
-                tenantId: tenantId,
-                persona: rPersona as any,
-                sessionId: conversationId,
-                userMessage: sanitizedUserMessage,
-                context: {
-                  conversationHistory: request.messages
-                    .filter((m: any) => m.role === 'user' || m.role === 'assistant')
-                    .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-                },
-                budget: {
-                  maxLoopIterations: 20,
-                  maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
-                  maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
-                },
-              });
-              return rResult.answer;
-            }
-          });
+          if (responseGuard) {
+            finalAgentAnswer = (await responseGuard.run(agentResult.answer, {
+              tenantId: tenantId,
+              personaId: persona.id,
+              conversationId,
+              rawUserMessage: lastUserMessage,
+              resolvedTargetLanguage: resolution.target,
+              systemPrompt: persona.systemPrompt,
+              degradeToAsIs: true,
+              regenerateFn: async (reinforcedSystemPrompt: string) => {
+                const rPersona = { ...persona, systemPrompt: reinforcedSystemPrompt };
+                const rResult = await executor.runAgentTurn({
+                  tenantId: tenantId,
+                  persona: rPersona as any,
+                  sessionId: conversationId,
+                  userMessage: sanitizedUserMessage,
+                  context: {
+                    conversationHistory: request.messages
+                      .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+                      .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+                  },
+                  budget: {
+                    maxLoopIterations: 20,
+                    maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
+                    maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
+                  },
+                });
+                return rResult.answer;
+              }
+            }, { tier: 'deterministic-only' })).response;
+          } else {
+            finalAgentAnswer = await validatorPipeline.validateResponse(agentResult.answer, {
+              tenantId: tenantId,
+              personaId: persona.id,
+              conversationId,
+              rawUserMessage: lastUserMessage,
+              resolvedTargetLanguage: resolution.target,
+              systemPrompt: persona.systemPrompt,
+              degradeToAsIs: true,
+              regenerateFn: async (reinforcedSystemPrompt: string) => {
+                const rPersona = { ...persona, systemPrompt: reinforcedSystemPrompt };
+                const rResult = await executor.runAgentTurn({
+                  tenantId: tenantId,
+                  persona: rPersona as any,
+                  sessionId: conversationId,
+                  userMessage: sanitizedUserMessage,
+                  context: {
+                    conversationHistory: request.messages
+                      .filter((m: any) => m.role === 'user' || m.role === 'assistant')
+                      .map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+                  },
+                  budget: {
+                    maxLoopIterations: 20,
+                    maxTokens: request.maxTokens ?? persona.modelPreferences?.max_tokens ?? 4096,
+                    maxExecutionMs: parseInt(process.env.AGENT_MAX_EXECUTION_MS || '20000', 10),
+                  },
+                });
+                return rResult.answer;
+              }
+            });
+          }
         }
       }
     } catch (err) {
