@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { tuningDrafts } from '../../models/index.js';
 import { withTenantContext } from '../../db.js';
 import { NotFoundError } from '@undrecreaitwins/shared';
-import type { TuningDraftStatus, TuningMethod, ConfidenceLevel, ReviewVerdict } from '../../types/tuning.js';
+import type { TuningDraftStatus, TuningMethod, ConfidenceLevel, ReviewVerdict, TuningProposal } from '../../types/tuning.js';
 
 type CreateTuningDraft = {
   personaId: string;
@@ -11,7 +11,7 @@ type CreateTuningDraft = {
   systemPrompt?: string;
   funnelConfig?: Record<string, unknown>;
   validatorToggles?: Record<string, boolean>;
-  signals?: Record<string, unknown>;
+  signals?: TuningProposal[];
   confidence?: ConfidenceLevel;
   error?: string;
 };
@@ -24,7 +24,7 @@ type UpdateTuningDraft = {
   validatorToggles?: Record<string, boolean>;
   diffSections?: Record<string, unknown>;
   previousSnapshot?: Record<string, unknown>;
-  signals?: Record<string, unknown>;
+  signals?: TuningProposal[];
   error?: string;
   reviewVerdict?: ReviewVerdict;
   reviewNotes?: string;
@@ -116,6 +116,7 @@ export class TuningDraftRepository {
       const data = await tx
         .select()
         .from(tuningDrafts)
+        .orderBy(desc(tuningDrafts.createdAt))
         .limit(limit)
         .offset(offset);
       const [countRow] = await tx
@@ -149,10 +150,10 @@ export class TuningDraftRepository {
         .where(eq(tuningDrafts.id, draftId))
         .returning();
 
-      if (!updated && data.error === undefined) {
+      if (!updated) {
         throw new NotFoundError('TuningDraft', draftId);
       }
-      return updated!;
+      return updated;
     });
   }
 
@@ -165,30 +166,12 @@ export class TuningDraftRepository {
           and(
             eq(tuningDrafts.personaId, personaId),
             eq(tuningDrafts.status, 'activated'),
-            sql`${tuningDrafts.activatedAt} IS NOT NULL`,
           ),
         )
         .orderBy(desc(tuningDrafts.activatedAt))
         .limit(1);
 
-      if (!draft) return null;
-
-      const [newer] = await tx
-        .select({ id: tuningDrafts.id })
-        .from(tuningDrafts)
-        .where(
-          and(
-            eq(tuningDrafts.personaId, personaId),
-            eq(tuningDrafts.status, 'activated'),
-            sql`${tuningDrafts.activatedAt} IS NOT NULL`,
-            sql`${tuningDrafts.activatedAt} > ${draft.activatedAt}`,
-          ),
-        )
-        .limit(1);
-
-      if (newer) return null;
-
-      return draft;
+      return draft ?? null;
     });
   }
 

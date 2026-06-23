@@ -38,3 +38,15 @@ CREATE INDEX "idx_tuning_drafts_persona_status" ON "tuning_drafts" USING btree (
 CREATE INDEX "idx_tuning_drafts_tenant_status" ON "tuning_drafts" USING btree ("tenant_id","status");--> statement-breakpoint
 CREATE INDEX "idx_tuning_drafts_created_at" ON "tuning_drafts" USING btree ("created_at" DESC NULLS LAST);--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_tuning_drafts_persona_generating" ON "tuning_drafts" USING btree ("persona_id") WHERE status = 'generating';
+--> statement-breakpoint
+-- NOTE: This migration bundles tuning_drafts + funnel/validator schema changes.
+-- Should have been two separate migrations. Do not repeat this pattern.
+--> statement-breakpoint
+ALTER TABLE "tuning_drafts" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "tuning_drafts" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+CREATE POLICY "tenant_isolation" ON "tuning_drafts"
+  USING (tenant_id = current_setting('app.current_tenant', true))
+  WITH CHECK (tenant_id = current_setting('app.current_tenant', true));
+--> statement-breakpoint
+ALTER TABLE "tuning_drafts" ADD CONSTRAINT "tuning_drafts_persona_id_personas_id_fk"
+  FOREIGN KEY ("persona_id") REFERENCES "personas"("id") ON DELETE cascade;

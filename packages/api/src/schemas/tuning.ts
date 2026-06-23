@@ -29,5 +29,3 @@ export const SandboxPreviewRequest = z.object({
   })).min(1),
 });
 
-export const ProposalAcceptRequest = z.object({
-});
