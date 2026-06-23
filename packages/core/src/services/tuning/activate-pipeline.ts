@@ -121,7 +121,7 @@ export class ActivatePipeline {
             .select({ maxVersion: sql<number>`coalesce(max(${funnelVersions.versionNumber}), 0)` })
             .from(funnelVersions)
             .where(eq(funnelVersions.definitionId, defId));
-          const nextNumber = lastVer?.maxVersion ?? 0 + 1;
+          const nextNumber = (lastVer?.maxVersion ?? 0) + 1;
 
           await tx
             .update(funnelVersions)

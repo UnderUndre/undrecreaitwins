@@ -1,4 +1,4 @@
-import type { Redis } from 'ioredis';
+import { Redis } from 'ioredis';
 
 interface StoreEntry<T> {
   value: T;
@@ -14,8 +14,6 @@ export class RedisHelper {
     const url = process.env.TUNING_REDIS_URL || process.env.REDIS_URL;
     if (url) {
       try {
-        // Dynamic import to allow graceful fallback if ioredis fails to load
-        const Redis = require('ioredis').default as typeof import('ioredis').default;
         this.redis = new Redis(url);
       } catch {
         this.fallbackMode = true;

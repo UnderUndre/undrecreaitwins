@@ -76,7 +76,7 @@ export const tuningRoutes: FastifyPluginAsync = async (fastify) => {
       reply.status(202);
       return { draftId: draft.id, status: 'generating' };
     } catch (err: any) {
-      if (err?.message?.includes('unique') || err?.message?.includes('duplicate')) {
+      if (err?.code === '23505') {
         throw new ConflictError('CONFLICT_DRAFT_ACTIVE');
       }
       throw err;

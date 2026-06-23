@@ -97,10 +97,20 @@ export class InterviewStateMachine {
         personaId,
       });
 
+      let extracted: any;
+      try {
+        extracted = response.content ? JSON.parse(response.content) : {};
+      } catch {
+        extracted = { systemPrompt: response.content };
+      }
+
       const draft = await draftRepo.create(tenantId, {
         personaId,
         method: 'interview',
-        systemPrompt: response.content ? response.content.slice(0, 8000) : undefined,
+        systemPrompt: extracted.systemPrompt?.slice(0, 8000) || undefined,
+        funnelConfig: extracted.funnelStages ? { funnelStages: extracted.funnelStages } : undefined,
+        validatorToggles: extracted.validatorToggles || null,
+        confidence: extracted.confidence || 'medium',
       });
 
       await draftRepo.update(tenantId, draft.id, { status: 'ready' });
