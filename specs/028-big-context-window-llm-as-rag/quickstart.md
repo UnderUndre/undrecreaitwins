@@ -14,7 +14,6 @@
 Create and apply migrations for the new columns:
 
 ```bash
-cd underhelpers/under-ai-helpers/undrecreaitwins
 pnpm db:generate
 pnpm db:migrate
 ```

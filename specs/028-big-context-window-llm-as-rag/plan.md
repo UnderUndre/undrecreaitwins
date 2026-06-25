@@ -69,9 +69,8 @@ packages/core/
 packages/training/
 ├── src/
 │   └── jobs/
-│       ├── document-ingest-worker.ts # Ingest worker updates (fullText extraction, mammoth/pdf-parse)
-│       ├── lazy-embed-worker.ts    # Background lazy indexing worker for fallback-vector; drives embeddingsStatus lifecycle (idle → processing → completed)
-│       └── orphan-chunks-sweep-worker.ts # Scheduled safety-net sweep for document_chunks rows whose parent document was hard-deleted (complements the CASCADE FK)
+│       ├── document-ingest-worker.ts # Ingest worker updates (fullText extraction, mammoth/pdf-parse); resets embeddingsStatus to idle on doc-set change (G4)
+│       └── lazy-embed-worker.ts    # Background lazy indexing worker for fallback-vector; drives embeddingsStatus lifecycle (idle → processing → completed)
 ```
 
 **Structure Decision**: Monorepo updates across core services, schema, and training queues to support direct text extraction, transactional database storage, and runtime context packaging.

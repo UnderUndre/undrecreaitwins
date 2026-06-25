@@ -33,7 +33,7 @@ truncationStrategy: text('truncation_strategy').notNull().default('silent').$typ
 embeddingsStatus: text('embeddings_status').notNull().default('idle').$type<'idle' | 'processing' | 'completed'>()
 ```
 
-> **Note**: `embeddingsStatus` is what the `'fallback-vector'` strategy gates on (FR-006). The `lazy-embed-worker` flips it `idle → processing → completed` around its job lifecycle. A persona with `embeddingsStatus !== 'completed'` MUST degrade to `'silent'` truncation, never fall through to a partial vector index.
+> **Note**: `embeddingsStatus` is what the `'fallback-vector'` strategy gates on (FR-006). The `lazy-embed-worker` flips it `idle → processing → completed` around its job lifecycle. A persona with `embeddingsStatus !== 'completed'` MUST degrade to `'silent'` truncation, never fall through to a partial vector index. **Invalidation**: any document insert / `fullText` update / hard-delete against the persona MUST reset `embeddingsStatus` back to `'idle'` **in the same DB transaction** as the document write — a `'completed'` flag would otherwise lie about index coverage and silently serve stale `fallback-vector` results. The idle-reset applies unconditionally (vector-mode synchronous ingest makes it a no-op there, but unconditional avoids a mode-dependent bug).
 
 ### 3. `documents` Table
 
@@ -66,12 +66,11 @@ ALTER TABLE documents ADD COLUMN priority INTEGER NOT NULL DEFAULT 0;
 
 -- documents → document_chunks already cascades: the Drizzle schema declares
 --   documentId: uuid('document_id').references(() => documents.id, { onDelete: 'cascade' })
--- (models/documents.ts:30-32). NO migration ALTER is needed for CASCADE — adding a
--- DROP CONSTRAINT ... ADD CONSTRAINT ... ON DELETE CASCADE here would be redundant
--- at best, and at worst would create a duplicate FK if Drizzle named the constraint
--- differently than `document_chunks_document_id_fkey`. The orphan-chunks sweep worker
--- (T023) is retained ONLY as a safety net for manual-SQL / partial-fail deletions
--- that bypass the ORM-driven cascade.
+-- (models/documents.ts:30-32), AND the SQL migrations enforce ON DELETE CASCADE at the
+-- PostgreSQL level (drizzle/0000...sql:381, drizzle/0010...sql:122-123). The cascade is
+-- therefore atomic and total — ANY hard-delete of a document (ORM, manual SQL, or direct
+-- DB client) automatically removes its chunks. NO sweep worker, NO migration ALTER is
+-- needed; both would be redundant belt-on-belt.
 
 -- Optimize PostgreSQL storage compression for fullText.
 -- lz4 compression requires PG 14+. The migration MUST guard on server version
