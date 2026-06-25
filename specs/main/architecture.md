@@ -25,13 +25,13 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 |---------|--------|-------|
 | DB | PostgreSQL + **pgvector** | annotations + document_chunks vectors. **Qdrant dropped** — one store |
 | Embeddings + rerank | **BGE-M3** + **BGE-reranker-v2-m3** via a **TEI sidecar** (HTTP, `EMBEDDINGS_URL`) OR **Embedding Adapter** (025, `packages/embedding-adapter`, cloud provider proxy) | multilingual incl. Russian; adapter option for low-RAM environments |
-| Retrieval | **vector (HNSW cosine) + reranker** | hybrid / full-text **deferred** (no tsvector/GIN yet) |
-| Queue / cron | **Redis + BullMQ** | document parse, re-engagement scan |
+| Retrieval | **vector + reranker** OR **big-context** | hybrid/rerank OR full-text direct prompt injection |
+| Queue / cron | **Redis + BullMQ** | document parse, re-engagement scan, lazy embedding job |
 | Channel transport | **Redis Streams** (`ChannelTransport`) | INBOUND/OUTBOUND between adapters ↔ engine |
 | Tenant isolation | **Postgres RLS** on `app.current_tenant` (set by `withTenantContext`) | mandatory |
 | Observability / eval | **Langfuse** (self-host, its own compose) | trace per reply, fire-and-forget, project-per-tenant |
 | LLM gateway | OmniRoute (orchestra) / OpenAI-compatible | `LLM_PROVIDER_URL` |
-| Doc parsing | **officeParser** (TS-native) | PDF/DOCX/TXT |
+| Doc parsing | **officeParser** / **mammoth** / **pdf-parse** | strategy-backed parser at ingest, `fullText` text cache in DB |
 | AI execution (agentic) | self-host **hermes-agent** (MIT) + **Honcho** working-memory | agentic turns (010); engine = orchestrator + guardrail; **supersedes Letta** for memory |
 | Per-assistant LLM provider | **BYOK** custom OpenAI-compatible per assistant / tenant-default (011) | injected into Hermes via a throwaway `HERMES_HOME` profile (config.yaml + `OPENAI_API_KEY`); key encrypted at rest; `base_url` SSRF-pinned (undici dispatcher) |
 
@@ -72,6 +72,7 @@ Channel packages are **standalone workers**: each implements the shared `Channel
 | 025-embedding-adapter | Lightweight TEI-to-cloud proxy (`packages/embedding-adapter`, Fastify). Replaces `tei-embed`/`tei-rerank` Docker containers with cloud API calls (OpenAI/Jina embeddings, Cohere/Jina rerank). Single port 8095, drop-in replacement in compose, <100MB overhead. |
 | 026-tuning | **Engine Tuning** — Adaptive Configuration Pipeline. 4 methods (doc-extraction, template-bootstrap, interview, self-tuner) under `/v1/personas/:personaId/tuning/*` and `/v1/tuning/drafts/*`. New `tuning_drafts` table (drizzle, RLS), InterviewStateMachine (Redis TTL 30min), ConversationAnalyzer (ephemeral proposals, Redis TTL 30min), SandboxDraftMode (ChatService overlay), ActivatePipeline (atomic persona + funnel + validator apply), poll-time reaper (90s stall → failed). |
 | 027-validators-quality-convergence | **Unified Response Guard Pipeline.** Merges 004 validators + 018 DAR pipeline into single tiered `responseGuard.run()` orchestration. System validators become built-in default quality rules (non-removable, BFF-owned `unified_rules` table). Unified run-log emits `QualityEventPush` (`kind='system'|'custom'`) to BFF `quality_events` table. Preserves cost model (deterministic first, LLM only on violation via `terminalOnFail` flag). Replaces separate `validateResponse` + `darExecute` call-sites in chat-service. |
+| 028-big-context-window-llm-as-rag | **Big Context Window LLM RAG.** Bypasses chunking + embedding for assistants on large-window models. Stores raw text in PostgreSQL `documents.full_text` with `lz4` compression. Dynamically counts tokens via OmniRoute / `js-tiktoken`, applies priority-based greedy truncation, and falls back to vector RAG when budget is exceeded. |
 
 ## 6. Cross-repo boundary (runtime ↔ admin)
 
