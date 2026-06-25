@@ -47,19 +47,29 @@ export async function processLazyEmbed(job: Job<LazyEmbedJobData>): Promise<void
           );
       });
 
+      const chunkValues: Array<{
+        tenantId: string;
+        documentId: string;
+        personaId: string;
+        chunkIndex: number;
+        text: string;
+        embedding: number[];
+      }> = [];
       for (let i = 0; i < chunks.length; i++) {
         const chunkText = chunks[i]!;
         const embedding = await embeddingService.embed(chunkText);
-
+        chunkValues.push({
+          tenantId,
+          documentId: doc.id,
+          personaId,
+          chunkIndex: i,
+          text: chunkText,
+          embedding,
+        });
+      }
+      if (chunkValues.length > 0) {
         await withTenantContext(tenantId, async (tx) => {
-          await tx.insert(documentChunks).values({
-            tenantId,
-            documentId: doc.id,
-            personaId,
-            chunkIndex: i,
-            text: chunkText,
-            embedding,
-          });
+          await tx.insert(documentChunks).values(chunkValues);
         });
       }
     }

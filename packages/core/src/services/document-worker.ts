@@ -90,16 +90,18 @@ export class DocumentWorker {
       const buffer = Buffer.from(contentBase64, 'base64');
       const text = await this.extractText(buffer, mimeType);
 
-      // 3. Store fullText + reset embeddingsStatus
-      await db
-        .update(documents)
-        .set({ fullText: text })
-        .where(eq(documents.id, documentId));
+      // 3. Store fullText + reset embeddingsStatus transactionally
+      await db.transaction(async (tx) => {
+        await tx
+          .update(documents)
+          .set({ fullText: text })
+          .where(eq(documents.id, documentId));
 
-      await db
-        .update(personas)
-        .set({ embeddingsStatus: 'idle' })
-        .where(eq(personas.id, personaId));
+        await tx
+          .update(personas)
+          .set({ embeddingsStatus: 'idle' })
+          .where(eq(personas.id, personaId));
+      });
 
       // 4. Determine effective grounding mode
       const [personaRow] = await db

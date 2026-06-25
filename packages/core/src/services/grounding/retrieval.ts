@@ -147,6 +147,7 @@ export async function countTokens(text: string): Promise<number> {
           model: 'claude-sonnet-4-20250514',
           messages: [{ role: 'user', content: text }],
         }),
+        signal: AbortSignal.timeout(5000),
       });
       if (response.ok) {
         const data = await response.json() as { input_tokens: number };
@@ -194,17 +195,18 @@ export async function truncateDocuments(
   const kept: DocumentContext[] = [];
   const dropped: DocumentContext[] = [];
   let keptTokens = 0;
-  let idx = 0;
 
-  for (const doc of documents) {
-    const docTokens = await countTokens(doc.text);
+  const docTokensList = await Promise.all(documents.map(doc => countTokens(doc.text)));
+
+  for (let i = 0; i < documents.length; i++) {
+    const doc = documents[i]!;
+    const docTokens = docTokensList[i]!;
     if (keptTokens + docTokens > totalBudget && kept.length > 0) {
-      dropped.push(doc, ...documents.slice(idx + 1));
+      dropped.push(...documents.slice(i));
       break;
     }
     kept.push(doc);
     keptTokens += docTokens;
-    idx++;
   }
 
   return { kept, dropped, keptTokens, totalBudget };
