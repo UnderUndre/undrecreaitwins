@@ -91,6 +91,20 @@ export const personas = pgTable(
         typingIndicator: false,
         randomVariation: false,
       }),
+
+    // --- Big Context Window fields (028-big-context-window) ---
+
+    /** Grounding mode override: 'vector' (default) or 'big-context'. NULL = use tenant default. */
+    groundingMode: text('grounding_mode').$type<'vector' | 'big-context'>(),
+
+    /** Manual override for max tokens in big-context mode. NULL = auto. */
+    bigContextMaxTokens: integer('big_context_max_tokens'),
+
+    /** Truncation strategy when big-context budget exceeded. */
+    truncationStrategy: text('truncation_strategy').notNull().default('silent').$type<'silent' | 'fallback-vector'>(),
+
+    /** Embeddings generation status for big-context documents. */
+    embeddingsStatus: text('embeddings_status').notNull().default('idle').$type<'idle' | 'processing' | 'completed'>(),
   },
   (table) => ({
     tenantSlugIdx: uniqueIndex('personas_tenant_slug_idx').on(

@@ -6,6 +6,8 @@ export const TRAINING_QUEUE_NAME = 'training';
 export const TRAINING_JOB_NAME = 'process';
 export const DOCUMENT_QUEUE_NAME = 'document-ingestion';
 export const DOCUMENT_JOB_NAME = 'ingest';
+export const LAZY_EMBED_QUEUE_NAME = 'lazy-embed';
+export const LAZY_EMBED_JOB_NAME = 'embed';
 
 export interface TrainingJobData {
   tenantId: string;
@@ -24,8 +26,14 @@ export interface DocumentJobData {
   contentBase64: string;
 }
 
+export interface LazyEmbedJobData {
+  tenantId: string;
+  personaId: string;
+}
+
 let queue: Queue<TrainingJobData> | null = null;
 let documentQueue: Queue<DocumentJobData> | null = null;
+let lazyEmbedQueue: Queue<LazyEmbedJobData> | null = null;
 let connection: Redis | undefined;
 
 function getConnection(): Redis {
@@ -51,10 +59,27 @@ export function getDocumentQueue(): Queue<DocumentJobData> {
   return documentQueue;
 }
 
+export function getLazyEmbedQueue(): Queue<LazyEmbedJobData> {
+  if (lazyEmbedQueue) return lazyEmbedQueue;
+  lazyEmbedQueue = new Queue<LazyEmbedJobData>(LAZY_EMBED_QUEUE_NAME, {
+    connection: getConnection(),
+  });
+  return lazyEmbedQueue;
+}
+
 export async function enqueueTrainingJob(data: TrainingJobData): Promise<void> {
   await getTrainingQueue().add(TRAINING_JOB_NAME, data, {
     jobId: data.jobId,
     attempts: 3,
+    backoff: { type: 'exponential', delay: 5_000 },
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 500 },
+  });
+}
+
+export async function enqueueLazyEmbedJob(data: LazyEmbedJobData): Promise<void> {
+  await getLazyEmbedQueue().add(LAZY_EMBED_JOB_NAME, data, {
+    attempts: 2,
     backoff: { type: 'exponential', delay: 5_000 },
     removeOnComplete: { count: 100 },
     removeOnFail: { count: 500 },
@@ -69,6 +94,10 @@ export async function closeTrainingQueue(): Promise<void> {
   if (documentQueue) {
     await documentQueue.close();
     documentQueue = null;
+  }
+  if (lazyEmbedQueue) {
+    await lazyEmbedQueue.close();
+    lazyEmbedQueue = null;
   }
   if (connection) {
     await connection.quit();

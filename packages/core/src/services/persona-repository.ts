@@ -13,6 +13,9 @@ type NewPersona = {
   traits?: PersonaTraits;
   modelPreferences?: ModelPreferences;
   annotationSimilarityThreshold?: number;
+  groundingMode?: 'vector' | 'big-context';
+  bigContextMaxTokens?: number | null;
+  truncationStrategy?: 'silent' | 'fallback-vector';
 };
 
 type UpdatePersona = {
@@ -23,6 +26,9 @@ type UpdatePersona = {
   modelPreferences?: ModelPreferences;
   annotationSimilarityThreshold?: number;
   expectedVersion?: number;
+  groundingMode?: 'vector' | 'big-context' | null;
+  bigContextMaxTokens?: number | null;
+  truncationStrategy?: 'silent' | 'fallback-vector';
 };
 
 type PersonaRow = typeof personas.$inferSelect;
@@ -41,6 +47,9 @@ export class PersonaRepository {
           traits: data.traits || {},
           modelPreferences: data.modelPreferences || {},
           annotationSimilarityThreshold: data.annotationSimilarityThreshold,
+          groundingMode: data.groundingMode,
+          bigContextMaxTokens: data.bigContextMaxTokens ?? null,
+          truncationStrategy: data.truncationStrategy,
         })
         .returning();
       const persona = rows[0];
@@ -109,6 +118,15 @@ export class PersonaRepository {
       if (data.modelPreferences !== undefined) updateData.modelPreferences = data.modelPreferences;
       if (data.annotationSimilarityThreshold !== undefined) {
         updateData.annotationSimilarityThreshold = data.annotationSimilarityThreshold;
+      }
+      if (data.groundingMode !== undefined) {
+        updateData.groundingMode = data.groundingMode;
+      }
+      if (data.bigContextMaxTokens !== undefined) {
+        updateData.bigContextMaxTokens = data.bigContextMaxTokens;
+      }
+      if (data.truncationStrategy !== undefined) {
+        updateData.truncationStrategy = data.truncationStrategy;
       }
 
       const conditions = [eq(personas.id, id)];

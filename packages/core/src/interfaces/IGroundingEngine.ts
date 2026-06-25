@@ -16,6 +16,16 @@ export interface GroundingContext {
   };
 }
 
+export interface DocumentContext {
+  text: string;
+  score: number;
+  metadata: {
+    documentId: string;
+    priority: number;
+  };
+  filename: string;
+}
+
 export type DocumentStatus = 'pending' | 'parsing' | 'ready' | 'failed';
 
 export interface IngestResult {
@@ -24,11 +34,12 @@ export interface IngestResult {
 }
 
 export interface IGroundingEngine {
-  query(query: string, tenantId: string, twinId: string): Promise<GroundingContext[]>;
+  query(query: string, tenantId: string, twinId: string): Promise<GroundingContext[] | DocumentContext[]>;
   ingest(
     document: Buffer,
     meta: DocumentMeta,
     tenantId: string,
     twinId: string,
   ): Promise<IngestResult>;
+  queryWithMode?(query: string, tenantId: string, twinId: string, mode: 'vector' | 'big-context'): Promise<GroundingContext[] | DocumentContext[]>;
 }
