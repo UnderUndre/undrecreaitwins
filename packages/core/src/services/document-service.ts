@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import { withTenantContext } from '../db.js';
 import { documents } from '../models/documents.js';
+import { personas } from '../models/personas.js';
 import { eq, and } from 'drizzle-orm';
 import { NotFoundError } from '@undrecreaitwins/shared';
 import type { IngestResult } from '../interfaces/IGroundingEngine.js';
@@ -44,6 +45,11 @@ export class DocumentService {
 
       if (!doc) throw new Error('Failed to create document');
 
+      await tx
+        .update(personas)
+        .set({ embeddingsStatus: 'idle' })
+        .where(eq(personas.id, personaId));
+
       await this.queue.add('ingest', {
         documentId: doc.id,
         tenantId,
@@ -60,7 +66,18 @@ export class DocumentService {
   async list(tenantId: string, personaId: string) {
     return withTenantContext(tenantId, async (tx) => {
       return tx
-        .select()
+        .select({
+          id: documents.id,
+          tenantId: documents.tenantId,
+          personaId: documents.personaId,
+          filename: documents.filename,
+          mimeType: documents.mimeType,
+          sizeBytes: documents.sizeBytes,
+          status: documents.status,
+          error: documents.error,
+          priority: documents.priority,
+          createdAt: documents.createdAt,
+        })
         .from(documents)
         .where(and(eq(documents.tenantId, tenantId), eq(documents.personaId, personaId)));
     });
@@ -71,9 +88,31 @@ export class DocumentService {
       const [deleted] = await tx
         .delete(documents)
         .where(eq(documents.id, id))
-        .returning({ id: documents.id });
-      
+        .returning({ id: documents.id, personaId: documents.personaId });
+
       if (!deleted) throw new NotFoundError('Document', id);
+
+      await tx
+        .update(personas)
+        .set({ embeddingsStatus: 'idle' })
+        .where(eq(personas.id, deleted.personaId));
+    });
+  }
+
+  async updatePriority(
+    tenantId: string,
+    documentId: string,
+    priority: number,
+  ): Promise<{ id: string; priority: number }> {
+    return withTenantContext(tenantId, async (tx) => {
+      const [updated] = await tx
+        .update(documents)
+        .set({ priority })
+        .where(eq(documents.id, documentId))
+        .returning({ id: documents.id, priority: documents.priority });
+
+      if (!updated) throw new NotFoundError('Document', documentId);
+      return updated;
     });
   }
 }

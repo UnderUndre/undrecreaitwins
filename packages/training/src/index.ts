@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq';
 import { Redis } from 'ioredis';
-import { TRAINING_QUEUE_NAME, DOCUMENT_QUEUE_NAME } from './jobs/queue.js';
+import { TRAINING_QUEUE_NAME, DOCUMENT_QUEUE_NAME, LAZY_EMBED_QUEUE_NAME } from './jobs/queue.js';
 import { processTrainingJob } from './jobs/training-job.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -28,6 +28,16 @@ const documentWorker = new Worker(
   }
 );
 
+// 3. Lazy Embed Worker (Sandboxed to protect event loop)
+const lazyEmbedWorker = new Worker(
+  LAZY_EMBED_QUEUE_NAME,
+  path.join(__dirname, 'jobs', 'lazy-embed-processor.js'),
+  {
+    connection,
+    concurrency: 2,
+  }
+);
+
 trainingWorker.on('completed', (job) => {
   console.log(`Training job ${job.id} completed`);
 });
@@ -44,10 +54,19 @@ documentWorker.on('failed', (job, err) => {
   console.error(`Document ingest job ${job?.id} failed:`, err);
 });
 
+lazyEmbedWorker.on('completed', (job) => {
+  console.log(`Lazy embed job ${job.id} completed`);
+});
+
+lazyEmbedWorker.on('failed', (job, err) => {
+  console.error(`Lazy embed job ${job?.id} failed:`, err);
+});
+
 process.on('SIGTERM', async () => {
   console.log('Stopping workers...');
   await trainingWorker.close();
   await documentWorker.close();
+  await lazyEmbedWorker.close();
   await connection.quit();
   process.exit(0);
 });

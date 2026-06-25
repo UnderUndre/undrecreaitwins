@@ -16,6 +16,12 @@ export const documents = pgTable(
     status: text('status').notNull().$type<'pending' | 'parsing' | 'ready' | 'failed'>(),
     error: text('error'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+    /** Full extracted text for big-context mode. NULL = not yet extracted. */
+    fullText: text('full_text'),
+
+    /** Processing priority (higher = sooner). Default 0. */
+    priority: integer('priority').notNull().default(0),
   },
   (table) => ({
     tenantPersonaIdx: index('documents_tenant_persona_idx').on(table.tenantId, table.personaId),

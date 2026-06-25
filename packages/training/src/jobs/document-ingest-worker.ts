@@ -1,13 +1,33 @@
 import type { Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { parseOffice } from 'officeparser';
+import { PDFParse } from 'pdf-parse';
+import mammoth from 'mammoth';
 import { withTenantContext } from '@undrecreaitwins/core/db.js';
-import { documents, documentChunks } from '@undrecreaitwins/core/models/index.js';
+import { documents, documentChunks, personas, tenants } from '@undrecreaitwins/core/models/index.js';
 import { embeddingService } from '@undrecreaitwins/core/services/index.js';
 import type { IngestJobData } from '@undrecreaitwins/core/services/document-service.js';
 
+async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
+  if (mimeType === 'application/pdf') {
+    const pdf = new PDFParse({ data: buffer });
+    const result = await pdf.getText();
+    return result.text;
+  }
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    const result = await mammoth.extractRawText({ buffer });
+    return result.value;
+  }
+  return new Promise<string>((resolve, reject) => {
+    parseOffice(buffer, (data: any, err: any) => {
+      if (err) reject(err);
+      else resolve(data);
+    });
+  });
+}
+
 export async function processDocumentIngest(job: Job<IngestJobData>): Promise<void> {
-  const { documentId, tenantId, personaId, contentBase64 } = job.data;
+  const { documentId, tenantId, personaId, contentBase64, mimeType } = job.data;
   const buffer = Buffer.from(contentBase64, 'base64');
 
   try {
@@ -18,41 +38,68 @@ export async function processDocumentIngest(job: Job<IngestJobData>): Promise<vo
         .where(eq(documents.id, documentId));
     });
 
-    // 1. Parse document
-    const text = await new Promise<string>((resolve, reject) => {
-      parseOffice(buffer, (data: any, err: any) => {
-        if (err) reject(err);
-        else resolve(data);
-      });
+    // 1. Parse document based on mimeType
+    const text = await extractText(buffer, mimeType);
+
+    // 2. Store fullText + reset embeddingsStatus
+    await withTenantContext(tenantId, async (tx) => {
+      await tx
+        .update(documents)
+        .set({ fullText: text })
+        .where(eq(documents.id, documentId));
+
+      await tx
+        .update(personas)
+        .set({ embeddingsStatus: 'idle' })
+        .where(eq(personas.id, personaId));
     });
 
-    // 2. Chunk text
-    const chunks = recursiveSplit(text, 512, 50);
+    // 3. Determine effective grounding mode
+    const effectiveMode = await withTenantContext(tenantId, async (tx) => {
+      const [persona] = await tx
+        .select({ groundingMode: personas.groundingMode })
+        .from(personas)
+        .where(eq(personas.id, personaId));
 
-    // 3. Vectorize and store chunks
-    for (let i = 0; i < chunks.length; i++) {
-      const chunkText = chunks[i]!;
-      const embedding = await embeddingService.embed(chunkText);
+      if (persona?.groundingMode) return persona.groundingMode;
 
-      await withTenantContext(tenantId, async (tx) => {
-        try {
-          await tx.insert(documentChunks).values({
-            tenantId,
-            documentId,
-            personaId,
-            chunkIndex: i,
-            text: chunkText,
-            embedding,
-          });
-        } catch (err: any) {
-          // gemini F6: Catch CASCADE delete FK violation
-          if (err.code === '23503') {
-            console.warn(`Document ${documentId} deleted during ingestion, aborting chunk ${i}`);
-            return;
+      const [tenant] = await tx
+        .select({ groundingMode: tenants.groundingMode })
+        .from(tenants)
+        .where(eq(tenants.id, tenantId));
+
+      return tenant?.groundingMode ?? 'vector';
+    });
+
+    if (effectiveMode === 'vector') {
+      // 4. Chunk text
+      const chunks = recursiveSplit(text, 512, 50);
+
+      // 5. Vectorize and store chunks
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkText = chunks[i]!;
+        const embedding = await embeddingService.embed(chunkText);
+
+        await withTenantContext(tenantId, async (tx) => {
+          try {
+            await tx.insert(documentChunks).values({
+              tenantId,
+              documentId,
+              personaId,
+              chunkIndex: i,
+              text: chunkText,
+              embedding,
+            });
+          } catch (err: any) {
+            // gemini F6: Catch CASCADE delete FK violation
+            if (err.code === '23503') {
+              console.warn(`Document ${documentId} deleted during ingestion, aborting chunk ${i}`);
+              return;
+            }
+            throw err;
           }
-          throw err;
-        }
-      });
+        });
+      }
     }
 
     await withTenantContext(tenantId, async (tx) => {

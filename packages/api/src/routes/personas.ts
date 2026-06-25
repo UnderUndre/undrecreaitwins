@@ -14,6 +14,9 @@ const createPersonaSchema = z.object({
   traits: z.record(z.unknown()).optional(),
   model_preferences: z.record(z.unknown()).optional(),
   annotation_similarity_threshold: z.number().min(0).max(1).optional(),
+  grounding_mode: z.enum(['vector', 'big-context']).nullable().optional(),
+  big_context_max_tokens: z.number().int().min(1).nullable().optional(),
+  truncation_strategy: z.enum(['silent', 'fallback-vector']).optional(),
 });
 
 const updatePersonaSchema = z.object({
@@ -24,6 +27,9 @@ const updatePersonaSchema = z.object({
   traits: z.record(z.unknown()).optional(),
   model_preferences: z.record(z.unknown()).optional(),
   annotation_similarity_threshold: z.number().min(0).max(1).optional(),
+  grounding_mode: z.enum(['vector', 'big-context']).nullable().optional(),
+  big_context_max_tokens: z.number().int().min(1).nullable().optional(),
+  truncation_strategy: z.enum(['silent', 'fallback-vector']).optional(),
 });
 
 function toApiPersona(row: Record<string, unknown>) {
@@ -37,6 +43,9 @@ function toApiPersona(row: Record<string, unknown>) {
     model_preferences: (row.modelPreferences as ModelPreferences) || {},
     annotation_similarity_threshold: row.annotationSimilarityThreshold as number,
     has_annotations: row.hasAnnotations as boolean,
+    grounding_mode: row.groundingMode as string | null | undefined,
+    big_context_max_tokens: row.bigContextMaxTokens as number | null | undefined,
+    truncation_strategy: row.truncationStrategy as string,
     created_at: (row.createdAt as Date)?.toISOString(),
     updated_at: (row.updatedAt as Date)?.toISOString(),
     version: row.version !== undefined && row.version !== null
@@ -65,6 +74,9 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
       traits: body.traits as PersonaTraits | undefined,
       modelPreferences: body.model_preferences as ModelPreferences | undefined,
       annotationSimilarityThreshold: body.annotation_similarity_threshold,
+      groundingMode: body.grounding_mode ?? undefined,
+      bigContextMaxTokens: body.big_context_max_tokens ?? undefined,
+      truncationStrategy: body.truncation_strategy,
     });
     reply.status(201);
     return toApiPersona(persona as Record<string, unknown>);
@@ -89,6 +101,9 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
       traits: body.traits as PersonaTraits | undefined,
       modelPreferences: body.model_preferences as ModelPreferences | undefined,
       annotationSimilarityThreshold: body.annotation_similarity_threshold,
+      groundingMode: body.grounding_mode ?? undefined,
+      bigContextMaxTokens: body.big_context_max_tokens ?? undefined,
+      truncationStrategy: body.truncation_strategy,
     });
     reply.status(201);
     return toApiPersona(persona as Record<string, unknown>);
@@ -156,6 +171,9 @@ export const personaRoutes: FastifyPluginAsync = async (fastify) => {
       traits: body.traits as PersonaTraits | undefined,
       modelPreferences: body.model_preferences as ModelPreferences | undefined,
       annotationSimilarityThreshold: body.annotation_similarity_threshold,
+      groundingMode: body.grounding_mode ?? undefined,
+      bigContextMaxTokens: body.big_context_max_tokens ?? undefined,
+      truncationStrategy: body.truncation_strategy,
       expectedVersion,
     });
     return toApiPersona(persona as Record<string, unknown>);

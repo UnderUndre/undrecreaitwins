@@ -8,7 +8,7 @@ export { usageEvents } from './usage-events.js';
 export { apiTokens } from './api-tokens.js';
 export { funnelDefinitions, funnelVersions } from './funnels.js';
 export { funnelStages } from './funnel-stages.js';
-export { funnelFragments, fragmentTypeEnum } from './funnel-fragments.js';
+export { funnelFragments, fragmentTypeEnum, deliveryModeEnum } from './funnel-fragments.js';
 export { funnelSlots } from './funnel-slots.js';
 export { conversationFunnelStates } from './conversation-funnel-states.js';
 export { documents, documentChunks } from './documents.js';

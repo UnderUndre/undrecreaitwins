@@ -20,6 +20,7 @@ import { EmbeddingService } from './embedding-service.js';
 import { LangfuseService } from './langfuse-service.js';
 import { withTenantContext } from '../db.js';
 import { groundingEngine } from './index.js';
+import { warnIfModelWindowInadequate } from './grounding/model-context-registry.js';
 import { conversations, messages, usageEvents, deliveryRecords, llmRetryJobs } from '../models/index.js';
 import { validatorConfigs } from '../models/validators.js';
 import { ServiceUnavailableError, NotFoundError, AppError, REDIS_STREAMS } from '@undrecreaitwins/shared';
@@ -31,6 +32,7 @@ import { ChannelTransport } from './channel-transport.js';
 import { enqueueLLMRetry } from './llm-retry-worker.js';
 import { isRetryableProviderError } from './retry/provider-retry.worker.js';
 import { tryCasFinalDelivery } from './delivery-cas.js';
+import type { GroundingContext, DocumentContext } from '../interfaces/IGroundingEngine.js';
 
 interface ChatRequest {
   tenantId: string;
@@ -385,7 +387,7 @@ export class ChatService {
         ? await this.buildFunnelContext(funnelResult, conversationId)
         : undefined;
 
-      const { prompt: systemPrompt, strictRagRefused, resolvedTargetLanguage } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx);
+      const { prompt: systemPrompt, strictRagRefused, resolvedTargetLanguage, groundingMode, documentCount } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx);
 
       // Strict RAG refusal — skip LLM call, return refusal directly (task 5.1)
       if (strictRagRefused) {
@@ -533,6 +535,8 @@ export class ChatService {
         latencyMs,
         allMessages,
         finalContent,
+        groundingMode,
+        documentCount,
       );
 
       // NFR-6: Emit funnel turn metrics to langfuse
@@ -842,7 +846,7 @@ export class ChatService {
       ? await this.buildFunnelContext(funnelResult, conversationId)
       : undefined;
 
-    const { prompt: systemPrompt, strictRagRefused, resolvedTargetLanguage, guardActive } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx2);
+    const { prompt: systemPrompt, strictRagRefused, resolvedTargetLanguage, guardActive, groundingMode, documentCount } = await this.buildSystemPrompt(request.tenantId, persona, sanitizedUserMessage, funnelCtx2);
 
     // Strict RAG refusal — skip LLM call, stream refusal directly (task 5.1)
     if (strictRagRefused) {
@@ -910,6 +914,7 @@ export class ChatService {
     let finalUsage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
     let modelName = persona.modelPreferences?.model || 'gpt-4o';
     const includeUsage = request.streamOptions?.include_usage === true;
+    const startTime = Date.now();
 
     if (guardActive) {
       // Buffered Delivery (FR-008) — generate fully, validate/remediate, then deliver
@@ -1038,6 +1043,8 @@ export class ChatService {
       }
     }
 
+    const latencyMs = Date.now() - startTime;
+
     if (signal?.aborted) {
       return { completed: false, content: accumulatedContent };
     }
@@ -1051,17 +1058,26 @@ export class ChatService {
       console.error('[ChatService] Failed to record streaming bypass', err);
     });
 
+    // T019: Emit Langfuse trace for streaming reply with latency, grounding mode, doc count
+    const streamUsage = finalUsage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    langfuseService.emitTrace({
+      id: randomUUID(),
+      name: 'chat-reply',
+      userId: request.tenantId,
+      metadata: { personaId: persona.id, conversationId, tenantId: request.tenantId, latencyMs, groundingMode, documentCount },
+      input: allMessages,
+      output: accumulatedContent,
+      model: modelName,
+      usage: streamUsage,
+    });
+
     return {
       completed: true,
       content: accumulatedContent,
       conversationId,
       personaId: persona.id,
       systemPrompt,
-      usage: finalUsage || {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-      },
+      usage: streamUsage,
       metadata: { funnel: funnelResult.metadata }
     };
   }
@@ -1206,11 +1222,40 @@ export class ChatService {
     persona: PersonaRow,
     userQuery: string,
     funnelContext?: { stageName?: string; slots?: Record<string, string>; promptHint?: string }
-  ): Promise<{ prompt: string; strictRagRefused?: boolean; resolvedTargetLanguage?: string; guardActive?: boolean }> {
+  ): Promise<{ prompt: string; strictRagRefused?: boolean; resolvedTargetLanguage?: string; guardActive?: boolean; groundingMode?: string; documentCount?: number }> {
     const parts = [persona.systemPrompt];
     const traits = persona.traits;
     if (traits && Object.keys(traits).length > 0) {
       parts.push(`\nPersonality traits: ${JSON.stringify(traits)}`);
+    }
+
+    // FR-011: Grounding query — big-context mode injects prefix-stable <documents> block
+    // Vector mode stores chunks for later injection at the existing position
+    let vectorChunks: GroundingContext[] | undefined;
+    let groundingMode: string | undefined;
+    let documentCount: number | undefined;
+    const ragMode = persona.ragMode ?? 'static';
+    if (ragMode === 'static' && userQuery) {
+      try {
+        const chunks = await groundingEngine.query(userQuery, tenantId, persona.id);
+
+        const isBigContext = chunks.length > 0 && 'priority' in chunks[0]!.metadata;
+        if (isBigContext) {
+          const docCtx = chunks as DocumentContext[];
+          groundingMode = 'big-context';
+          documentCount = docCtx.length;
+          warnIfModelWindowInadequate(persona.modelPreferences?.model, persona.id, tenantId);
+          const docEntries = docCtx.map((d, i) => {
+            const header = `[Document ${i + 1}: ${d.filename}]`;
+            return `${header}\n${d.text}`;
+          });
+          parts.push('\n<documents>\n' + docEntries.join('\n\n') + '\n</documents>');
+        } else {
+          vectorChunks = chunks as GroundingContext[];
+        }
+      } catch (err) {
+        console.warn({ err }, 'Grounding retrieval failed, proceeding without RAG');
+      }
     }
 
     // Annotation few-shot injection (FR-003, US1)
@@ -1244,31 +1289,29 @@ export class ChatService {
       }
     }
 
-    // RAG grounding injection (017-hybrid-agent-core, task 2.1)
-    // Gate: rag_mode === 'static' (Phase 1 default; 'tool' is Phase 2)
-    const ragMode = persona.ragMode ?? 'static';
-    if (ragMode === 'static' && userQuery) {
-      try {
-        const threshold = persona.ragRelevanceThreshold ?? 0.3;
-        const chunks = await groundingEngine.query(userQuery, tenantId, persona.id);
-
-        const relevant = chunks.filter((c) => c.score >= threshold);
-        if (relevant.length > 0) {
-          parts.push('\nRelevant knowledge from uploaded documents:');
-          for (const chunk of relevant.slice(0, 5)) {
-            parts.push(
-              `[doc:${chunk.metadata.documentId} chunk:${chunk.metadata.chunkIndex} score:${chunk.score.toFixed(3)}]\n${chunk.text}`,
-            );
-          }
-        } else if (persona.strictRag) {
-          // Strict RAG refusal (017-hybrid-agent-core, task 5.1)
-          // Retrieval was attempted AND returned zero relevant chunks → refuse
-          const refusal = persona.strictRagRefusal
-            || 'К сожалению, у меня нет информации по этому вопросу. Пожалуйста, обратитесь к менеджеру.';
-          return { prompt: refusal, strictRagRefused: true };
+    // RAG grounding injection — vector mode only (017-hybrid-agent-core, task 2.1)
+    // Big-context mode already handled as prefix-stable block above (FR-011)
+    if (vectorChunks) {
+      const threshold = persona.ragRelevanceThreshold ?? 0.3;
+      const relevant = vectorChunks.filter((c) => c.score >= threshold);
+      groundingMode = 'vector';
+      if (relevant.length > 0) {
+        const injected = relevant.slice(0, 5);
+        documentCount = injected.length;
+        parts.push('\nRelevant knowledge from uploaded documents:');
+        for (const chunk of injected) {
+          parts.push(
+            `[doc:${chunk.metadata.documentId} chunk:${chunk.metadata.chunkIndex} score:${chunk.score.toFixed(3)}]\n${chunk.text}`,
+          );
         }
-      } catch (err) {
-        console.warn({ err }, 'Grounding retrieval failed, proceeding without RAG');
+      } else if (persona.strictRag) {
+        // Strict RAG refusal (017-hybrid-agent-core, task 5.1)
+        // Retrieval was attempted AND returned zero relevant chunks → refuse
+        const refusal = persona.strictRagRefusal
+          || 'К сожалению, у меня нет информации по этому вопросу. Пожалуйста, обратитесь к менеджеру.';
+        return { prompt: refusal, strictRagRefused: true };
+      } else {
+        documentCount = 0;
       }
     }
 
@@ -1368,7 +1411,7 @@ export class ChatService {
       parts.push(funnelParts.join('\n'));
     }
 
-    return { prompt: parts.join('\n'), resolvedTargetLanguage, guardActive };
+    return { prompt: parts.join('\n'), resolvedTargetLanguage, guardActive, groundingMode, documentCount };
   }
 
   private async findOrCreateConversation(
@@ -1443,13 +1486,15 @@ export class ChatService {
     latencyMs: number,
     messages?: any[],
     output?: string,
+    groundingMode?: string,
+    documentCount?: number,
   ): Promise<void> {
-    // Fire-and-forget Langfuse trace (US4)
+    // Fire-and-forget Langfuse trace (US4) — T019: enriched with latency, grounding mode, doc count
     langfuseService.emitTrace({
       id: randomUUID(),
       name: 'chat-reply',
       userId: tenantId,
-      metadata: { personaId, conversationId, tenantId },
+      metadata: { personaId, conversationId, tenantId, latencyMs, groundingMode, documentCount },
       input: messages,
       output: output,
       model,
