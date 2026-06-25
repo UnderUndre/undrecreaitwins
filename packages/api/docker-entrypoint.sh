@@ -8,6 +8,9 @@ if [ "${SKIP_MIGRATIONS:-}" != "true" ]; then
   echo "[entrypoint] Running database migrations..."
 
   for i in $(seq 1 "$MIGRATE_RETRIES"); do
+    # Pre-create extensions and enum types that drizzle-kit push may order incorrectly
+    node /app/packages/api/docker-db-init.mjs 2>&1
+
     if npx --no-install drizzle-kit push --config=./drizzle.config.ts 2>&1; then
       echo "[entrypoint] Database migrations applied."
       break
