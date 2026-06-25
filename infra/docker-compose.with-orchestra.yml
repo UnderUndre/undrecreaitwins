@@ -16,6 +16,8 @@
 #   - LANGFUSE_*    (optional observability)
 #
 # This file attaches to the orchestra's external network.
+#
+# Migrations run automatically via API container entrypoint.
 # ═══════════════════════════════════════════════════════════════════════════
 
 services:

@@ -42,5 +42,14 @@ COPY --from=builder /app/packages/core ./packages/core
 COPY --from=builder /app/packages/training ./packages/training
 COPY --from=builder /app/packages/api ./packages/api
 
+# Migration config
+COPY drizzle.config.ts ./
+# drizzle-kit push uses schema path from config; drizzle/ folder not needed at runtime
+
+# Entrypoint: runs migrations, then exec CMD
+COPY packages/api/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 EXPOSE 8090
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "packages/api/dist/server.js"]

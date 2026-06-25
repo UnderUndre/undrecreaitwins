@@ -5,7 +5,11 @@
 # Usage:
 #   docker compose -f infra/docker-compose.standalone.yml up -d
 #
-# Migrations (reviewed .sql — run deliberately, NOT on every up):
+# Migrations run automatically on API container startup (drizzle-kit push).
+# Retries up to MIGRATE_RETRIES times (default 10) if DB is not ready yet.
+# Set SKIP_MIGRATIONS=true on the API service to bypass.
+#
+# Manual migration (one-shot, bypasses entrypoint):
 #   docker compose -f infra/docker-compose.standalone.yml --profile migrate run --rm migrate
 #
 # Available profiles: local-tei, local-tei-gpu, local-tei-llm, migrate

@@ -37,7 +37,33 @@ export async function retrieve(
     contextBudgetTokens = 2000
   } = options;
 
-  // 1. Embed query
+  // 1. Embed query (skip if empty — doc-extraction wants all chunks)
+  if (!query || query.trim().length === 0) {
+    const allChunks = await withTenantContext(tenantId, async (tx) => {
+      return tx
+        .select({
+          id: documentChunks.id,
+          text: documentChunks.text,
+          documentId: documentChunks.documentId,
+          chunkIndex: documentChunks.chunkIndex,
+        })
+        .from(documentChunks)
+        .where(sql`${documentChunks.personaId} = ${personaId}`)
+        .limit(vectorTopK);
+    });
+
+    if (allChunks.length === 0) return [];
+
+    return allChunks.map(c => ({
+      text: c.text,
+      score: 1.0,
+      metadata: {
+        documentId: c.documentId,
+        chunkIndex: c.chunkIndex,
+      },
+    }));
+  }
+
   const queryEmbedding = await embeddingService.embed(query);
   const queryEmbeddingSql = JSON.stringify(queryEmbedding);
 
