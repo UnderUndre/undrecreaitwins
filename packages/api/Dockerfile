@@ -48,7 +48,7 @@ COPY drizzle.config.ts ./
 
 # Entrypoint: runs migrations, then exec CMD
 COPY packages/api/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN tr -d '\015' < /app/docker-entrypoint.sh > /app/docker-entrypoint.sh.tmp && mv /app/docker-entrypoint.sh.tmp /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8090
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
