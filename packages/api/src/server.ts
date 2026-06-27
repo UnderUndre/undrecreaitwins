@@ -25,6 +25,7 @@ import { retrievedFeedbackRoutes } from './routes/retrieved-feedback.js';
 import { validatorRoutes } from './routes/validators.js';
 import { tuningRoutes } from './routes/tuning/index.js';
 import { groundingAdminRoutes } from './routes/grounding-admin.js';
+import { structuredQueryRoutes } from './routes/structured-query.js';
 import { authPublicPlugin } from './middleware/auth-public.js';
 import { publicModelsRoute } from './routes/v1/openai/models.js';
 import { publicChatRoute } from './routes/v1/openai/chat.js';
@@ -176,6 +177,7 @@ export async function buildServer() {
   await fastify.register(validatorRoutes);
   await fastify.register(tuningRoutes);
   await fastify.register(groundingAdminRoutes);
+  await fastify.register(structuredQueryRoutes);
 
   await fastify.register(async (publicApi) => {
     await publicApi.register(authPublicPlugin);
