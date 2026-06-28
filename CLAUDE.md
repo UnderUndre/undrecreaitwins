@@ -275,3 +275,62 @@ Files under `.claude/commands/`, `.claude/agents/`, `.claude/skills/*/SKILL.md` 
 - **`/rename` + `/resume`**: Переименуй сессию перед очисткой, чтобы вернуться позже.
 - **Параллельные сессии**: Writer/Reviewer паттерн — один Claude пишет, другой ревьюит.
 - **Memory**: persistent memory lives under `C:\Users\[username]\.claude\projects\...\memory\`. See session-start hook output for index. Use sparingly, avoid ephemeral task state.
+
+---
+
+## Project: `undrecreaitwins` (Engine / OSS Runtime)
+
+This is the **Engine** side of the aitwin.site workspace — headless multi-tenant AI-twin backend. The Product/admin layer lives in `../ai-twins/`. Read these FIRST when coding here:
+
+- **Project spec**: [`specs/main/spec.md`](specs/main/spec.md) — vision, topography, substrate, REST API surface, core services, memory, channels.
+- **Data model**: [`specs/main/data-model.md`](specs/main/data-model.md) — Drizzle tables (canonical: `packages/core/src/models/` · migrations `drizzle/`).
+- **Architecture**: [`specs/main/architecture.md`](specs/main/architecture.md).
+- **Requirements**: [`specs/main/requirements.md`](specs/main/requirements.md) (NFRs).
+- **Feature specs**: `specs/<NNN-slug>/` (current: 001 → 028).
+
+### Topography (pnpm monorepo, Node ≥ 20, strict ESM)
+
+| Package | Role |
+|---------|------|
+| [`packages/core`](packages/core) | Drizzle models + services: Chat, Hermes (executor/adapter/mcp-server/tool-gateway/mcp-broker), Grounding, Validators, DAR (correction-rules), Feedback, Funnel, Tuning, Reengagement, Langfuse. `ChannelTransport`, `withTenantContext`. |
+| [`packages/api`](packages/api) | Fastify REST `/v1/*` + OpenAI-compatible public endpoint. Port `PORT || 8090`. |
+| [`packages/shared`](packages/shared) | Types, errors, `REDIS_STREAMS`, storage-backend. |
+| [`packages/memory`](packages/memory) | Letta client (legacy, circuit-breaker). Superseded by Honcho. |
+| [`packages/training`](packages/training) | BullMQ workers: training-jobs. |
+| [`packages/embedding-adapter`](packages/embedding-adapter) | Optional TEI-to-cloud proxy (025). |
+| [`packages/cli`](packages/cli) | `twin` CLI. |
+| [`packages/channel-*`](packages) (16) | Standalone channel adapter workers. |
+| `drizzle/` | 16 SQL migrations + `rls/001_enable_rls.sql`. |
+
+### Substrate (decided — don't relitigate without an ADR)
+
+PostgreSQL + **pgvector** (HNSW cosine, single store) · **Drizzle** ORM · **BGE-M3** (1024-dim) + **BGE-reranker-v2-m3** via TEI sidecar (`EMBEDDINGS_URL`) · **Redis + BullMQ** · **Redis Streams** for channel transport · **Postgres RLS** on `app.current_tenant` · **Langfuse** self-host · OpenAI-compatible LLM gateway · **BYOK** per persona/tenant (011) · self-host **hermes-agent** + **Honcho** working-memory (010, supersedes Letta).
+
+### Standing orders (in addition to global)
+
+1. **Boundary: Engine = RUNTIME, never ADMIN/UI.** All operator UI is in the Product layer. Engine exposes REST only; never reach into Product tables from here.
+2. **Tenant isolation is RLS-mandatory**: every query goes through `withTenantContext(tenantId, fn)` which sets `app.current_tenant`. Never bypass RLS. Every domain table has `tenantId`.
+3. **Server-to-server auth only**: `TWIN_AUTH_MODE` (`standalone`/`gateway`) + `x-tenant-id`/`x-tenant-claim` + Bearer (static token or `api_tokens` lookup). Public API (`sk-aitw_` prefix) bypasses via `authPublicPlugin`.
+4. **Fail-open policy**: every guard (validators 004, DAR 018, feedback retrieval 019, Honcho/Letta, Hermes execution) MUST degrade gracefully. A broken sub-service yields a safe reply, never a 500 to the customer. Hermes timeout/spawn-fail → thin `LLMClient.complete`.
+5. **Optimistic concurrency**: `version` (bigint on `personas`/`conversation_funnel_states`; int on `validator_configs`/`llm_provider_config`) + `If-Match` on PATCH. Never blind-overwrite.
+6. **Idempotency via unique constraints + atomic status claims** — no check-then-insert. `action_audit(tenantId, idempotencyKey)`, `followup_attempts(idempotencyKey)` (claim via `FOR UPDATE SKIP LOCKED`), `llm_retry_jobs(tenantId, conversationId, channelMessageId)`.
+7. **Write-actions crash-durable**: tool-gateway uses `reserve→execute→finalize` in **3 separate committed txns** (no DB conn held during external call). Replay terminal results on conflict; throw `ConflictError` on in-flight pending.
+8. **CAS for delivery**: `delivery_records.state` atomic UPDATE prevents double-delivery. Cancel soft-fallback before `tryCasFinalDelivery`.
+9. **Secrets at rest**: `channel_instances.credentialsCiphertext`, `mcp_catalog_entry.authCiphertext`, `llm_provider_config.apiKeyCiphertext` — AES, `*Ref`/`*KeyRef` → KMS. Decrypted only at Hermes injection, never logged.
+10. **Vector dim lock**: `feedback_memories.contextEmbedding` and `document_chunks.embedding` MUST stay 1024 (BGE-M3). Changing dim requires a reindex migration.
+11. **PII**: `llm_retry_jobs.messagesPayload` contains user content — treat as PII, purge on `completed`. `action_audit.argsJson` is redacted (token/password/secret/apiKey/key → `REDACTED`, 64KB cap).
+12. **Channels**: standalone adapter workers ↔ core via **Redis Streams** (`INBOUND`/`OUTBOUND`). CL-A7: OUTBOUND payload must not contain `stream`/`partial` flags.
+13. **Migrations are reviewed `.sql`** in `drizzle/` — never auto-apply, never edit a shipped migration, write a new one.
+14. **Feature work** uses SpecKit (`/speckit.full-spec` → `/speckit.full-plan` → `/speckit.implement`). Specs live under `specs/<NNN-slug>/`.
+15. **Cross-repo pair**: when this side of a feature pair changes (003 funnels ↔ Product 002, 004 validators ↔ 008, 018 quality ↔ 019, 019 feedback ↔ 021, 026 tuning ↔ 024, 028/029 ↔ 029), update the matching `contracts/` folder on both sides.
+
+### Quality gate (before "done")
+
+```bash
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test                  # touched packages, esp. packages/core
+```
+
+Do not report "done" until lint + typecheck pass for touched packages. For chat-path / Hermes / validator / DAR changes, run the relevant integration suites — never bypass.
