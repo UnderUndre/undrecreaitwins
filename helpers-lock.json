@@ -6,7 +6,7 @@
     "ref": "latest",
     "commit": "269f3888d5c6b98b69f3ae2e4feb52d1f173f757"
   },
-  "installedAt": "2026-05-23T05:44:44.225Z",
+  "installedAt": "2026-06-28T10:56:21.844Z",
   "targets": [
     "claude",
     "copilot",
@@ -435,8 +435,8 @@
       "kind": "source",
       "class": "core",
       "status": "managed",
-      "sourceCanonicalHash": "sha256:a1c448664e4acbb1523face08af3f35723ff07f9220059961f43214f82599993",
-      "localCanonicalHash": "sha256:a1c448664e4acbb1523face08af3f35723ff07f9220059961f43214f82599993"
+      "sourceCanonicalHash": "sha256:c806fe8fd172632886a3a88e0ab5ef43bab47521d4e893b1bf15aef8ebfd8595",
+      "localCanonicalHash": "sha256:c806fe8fd172632886a3a88e0ab5ef43bab47521d4e893b1bf15aef8ebfd8595"
     },
     {
       "path": ".claude/commands/improve.md",
@@ -2356,8 +2356,8 @@
       "kind": "generated",
       "transformer": "claude-to-copilot-prompt",
       "fromSource": ".claude/commands/hermes-invocation.md",
-      "renderedHash": "sha256:87ec034231d2eb26eda7c7b052da9927abcd2a0c44a8b745f60ad17d4176ae8c",
-      "localRenderedHash": "sha256:87ec034231d2eb26eda7c7b052da9927abcd2a0c44a8b745f60ad17d4176ae8c",
+      "renderedHash": "sha256:8e1f69baa16567bc94ebcb596d27c473d1228d33b2a99cfeb4c2f5a065b9198e",
+      "localRenderedHash": "sha256:8e1f69baa16567bc94ebcb596d27c473d1228d33b2a99cfeb4c2f5a065b9198e",
       "status": "managed"
     },
     {
@@ -3323,8 +3323,8 @@
       "kind": "generated",
       "transformer": "claude-to-gemini-command",
       "fromSource": ".claude/commands/hermes-invocation.md",
-      "renderedHash": "sha256:5484c64ad5b7f440e934f14c7eab26d40b1e4d053dfbbb1d9c319611640e14c1",
-      "localRenderedHash": "sha256:5484c64ad5b7f440e934f14c7eab26d40b1e4d053dfbbb1d9c319611640e14c1",
+      "renderedHash": "sha256:1bb64c76347a8dfbf6ef4159ae2e0e1ebcece600d3d613dd407e60963d185a0d",
+      "localRenderedHash": "sha256:1bb64c76347a8dfbf6ef4159ae2e0e1ebcece600d3d613dd407e60963d185a0d",
       "status": "managed"
     },
     {

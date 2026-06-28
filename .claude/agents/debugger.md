@@ -250,38 +250,4 @@ Use `git bisect` to find regression:
 
 ---
 
-## Project Context (undrecreaitwins engine)
-
-### Debug tooling
-
-| Tool | Usage |
-|------|-------|
-| Logs | pino structured logs — `console.warn/error` in services, `console.error` in catch blocks |
-| Tracing | Langfuse traces (fire-and-forget) — `langfuseService.trace()` |
-| TypeScript | `pnpm --filter @undrecreaitwins/core exec tsc --noEmit` — catches type errors fast |
-| Tests | `pnpm --filter @undrecreaitwins/core exec vitest run src/test/` — reproduction |
-| Process | Node 20 — check `NODE_OPTIONS`, `process.env.*` for misconfig |
-
-### Common failure modes
-
-| Symptom | Likely cause | Debug approach |
-|---------|-------------|----------------|
-| `rootDir` TS6059 error | Relative cross-package import | Change to `@undrecreaitwins/core/...` package export |
-| Tenant data leak | Missing `withTenantContext()` wrapper | Grep for DB queries outside `withTenantContext` |
-| Empty LLM response | BYOK resolution failure | Check `resolveEffectiveConfig()` returns config, `decryptApiKey()` |
-| pgvector search returns 0 | Embedding dimension mismatch | Verify vector is 1024-dim (BGE-M3), `JSON.stringify()` format |
-| Validator doesn't fire | Wrong pipeline ordering | Check `sortedValidators` sort logic in `pipeline.ts:50-57` |
-| DAR pipeline no-op | Missing env vars | Check `TWIN_PRODUCT_API_URL` / `TWIN_PRODUCT_API_KEY` set |
-| Fastify route 404 | Missing route registration | Check `server.ts` `fastify.register()` call |
-
-### Key files for investigation
-
-- `packages/core/src/services/chat-service.ts` — reply path (1200+ LOC, the main orchestrator)
-- `packages/core/src/services/validators/pipeline.ts` — validator pipeline (ordering, config resolution)
-- `packages/core/src/db.ts` — DB connection + `withTenantContext`
-- `packages/core/src/services/llm-client.ts` — LLM calls + BYOK
-- `packages/api/src/server.ts` — route registration + auth hooks
-
----
-
 > **Remember:** Debugging is detective work. Follow the evidence, not your assumptions.
